@@ -7,7 +7,26 @@ on:
   workflow_dispatch:
 
 jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version consistency
+        run: |
+          TAURI_VER=$(grep -oP '"version":\s*"\K[^"]+' src-tauri/tauri.conf.json | head -1)
+          CARGO_VER=$(grep -oP '^version\s*=\s*"\K[^"]+' src-tauri/Cargo.toml)
+          PKG_VER=$(grep -oP '"version":\s*"\K[^"]+' package.json | head -1)
+          echo "tauri.conf.json: $TAURI_VER"
+          echo "Cargo.toml:      $CARGO_VER"
+          echo "package.json:    $PKG_VER"
+          if [ "$TAURI_VER" != "$CARGO_VER" ] || [ "$TAURI_VER" != "$PKG_VER" ]; then
+            echo "::error::Version mismatch! All three files must have the same version."
+            exit 1
+          fi
+          echo "All versions match: $TAURI_VER"
+
   build-windows:
+    needs: check-version
     runs-on: windows-latest
     permissions:
       contents: write
@@ -35,6 +54,7 @@ jobs:
           updaterJsonPreferNsis: true
 
   build-macos:
+    needs: check-version
     runs-on: macos-latest
     permissions:
       contents: write
