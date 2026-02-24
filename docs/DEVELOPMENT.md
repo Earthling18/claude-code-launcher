@@ -153,31 +153,21 @@ winget install Microsoft.VisualStudio.2022.BuildTools
 
 ---
 
-#### 1.2.6 Python (远程桥接模式需要)
+#### 1.2.6 Python (远程桥接模式)
 
-**版本要求**: ≥ 3.10
+**说明**: 远程桥接 (Mobot Bridge) 模式需要 Python 运行时。
 
-**说明**: 仅在使用远程桥接 (Mobot Bridge) 模式时需要。Launcher 会自动创建 venv 并安装依赖。
+- **Windows**: Python 3.11 嵌入式发行版已随应用打包，**无需手动安装**。Launcher 会自动将嵌入式 Python 和预构建 wheels 复制到用户数据目录并离线安装依赖。
+- **macOS**: 需要系统安装 Python ≥ 3.10。
 
-**安装方法**:
-
-**Windows (winget)**:
-```bash
-winget install Python.Python.3.12
-```
-
-**Windows (手动下载)**:
-- 下载地址: https://www.python.org/downloads/
-- 安装时勾选 "Add Python to PATH"
-
-**macOS (Homebrew)**:
+**macOS 安装方法 (Homebrew)**:
 ```bash
 brew install python@3.12
 ```
 
-**验证安装**:
+**验证安装 (macOS)**:
 ```bash
-python --version
+python3 --version
 # Python 3.12.x
 ```
 
@@ -719,6 +709,36 @@ Invalid icon format
 
 ---
 
+#### 问题 3: .exe 文件被 .gitignore 排除 (CRITICAL)
+
+**背景**: `.gitignore` 中有 `*.exe` 规则，导致 `src-tauri/resources/bridge/python-embed/` 下的 `python.exe` 和 `pythonw.exe` 不会被 Git 跟踪。CI 构建时这些文件不存在，用户安装后运行远程桥接会报错：
+
+```
+Embedded Python not found at: ...\resources\bridge\python-embed
+```
+
+**解决方法（已实施的 .bin 重命名方案）**:
+
+1. 在 `resources/bridge/python-embed/` 中，将 `.exe` 重命名为 `.bin`：
+   - `python.exe` → `python.bin`
+   - `pythonw.exe` → `pythonw.bin`
+
+2. `bridge_manager.rs` 的 `ensure_python_env()` 在将文件复制到用户数据目录后，自动将 `.bin` 重命名回 `.exe`。
+
+**添加新的 .exe 资源文件时**: 必须使用相同的重命名方案，否则文件会被 `.gitignore` 排除而不会出现在 CI 构建中。
+
+**验证方法**:
+```bash
+# 检查文件是否被 gitignore 排除
+git check-ignore -v src-tauri/resources/bridge/python-embed/python.exe
+# 如果有输出说明被忽略
+
+# 确认 .bin 文件已被跟踪
+git ls-files src-tauri/resources/bridge/python-embed/python.bin
+```
+
+---
+
 ## 6. 最佳实践
 
 ### 6.1 代码规范
@@ -927,11 +947,20 @@ git merge feature/auto-update
 - `app/` — FastAPI Agent 服务（配置、API 路由、SDK 封装、会话管理）
 - `bridge/` — WebSocket 桥接客户端
 - `defaults/` — 首次运行的默认配置模板
+- `python-embed/` — Python 3.11 嵌入式发行版（Windows 专用）
+- `wheels/` — 预构建 Python 依赖包（离线安装用）
 - `requirements.txt` — Python 依赖
+
+> **重要**: `python-embed/` 中的 `python.exe` 和 `pythonw.exe` 已重命名为 `.bin` 后缀以绕过 `.gitignore` 的 `*.exe` 规则。详见 [5.3 问题 3](#问题-3-exe-文件被-gitignore-排除-critical)。
 
 ### 7.2 运行时数据目录
 
-用户数据在 `%APPDATA%/claude-launcher/agent/`（不在项目中）。首次启动 bridge 时由 `bridge_manager.rs` 从 `defaults/` 复制初始化。
+用户数据在 `%APPDATA%/claude-launcher/agent/`（不在项目中）。首次启动 bridge 时由 `bridge_manager.rs` 初始化：
+
+1. 从 `defaults/` 复制默认配置文件
+2. 从 `python-embed/` 复制嵌入式 Python 到 `agent/python/`
+3. 将 `.bin` 文件重命名回 `.exe`（NSIS 打包绕过方案）
+4. 从 `wheels/` 离线安装 Python 依赖
 
 ### 7.3 环境变量约定
 
@@ -952,7 +981,7 @@ git merge feature/auto-update
 ```bash
 # 手动启动 Agent 服务（在 agent 数据目录下）
 cd %APPDATA%/claude-launcher/agent
-..\venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 5000
+python\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 5000
 
 # 查看日志
 # Launcher 启动后日志在 BridgeStatusPanel 中实时显示
@@ -1201,7 +1230,7 @@ git push origin master --tags
 - ✅ Node.js ≥ 18.0.0
 - ✅ Rust ≥ 1.75.0
 - ✅ C++ Build Tools (Windows)
-- ✅ Python ≥ 3.10（远程桥接模式）
+- ✅ Python ≥ 3.10（远程桥接模式，Windows 已内置嵌入式 Python）
 - ✅ Git
 
 **项目初始化**:

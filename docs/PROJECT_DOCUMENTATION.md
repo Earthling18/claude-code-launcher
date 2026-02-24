@@ -1,6 +1,6 @@
 # Claude Code Launcher Tauri - 完整技术文档
 
-> **项目版本**: 0.2.3
+> **项目版本**: 0.2.4
 > **最后更新**: 2026-02-24
 > **技术栈**: Tauri 2 + React 19 + TypeScript + Rust + Python + Tailwind CSS
 
@@ -55,7 +55,7 @@
   - Windows 10/11 (主要支持)
   - macOS 10.13+ (High Sierra 及以上)
 - **Node.js**: ≥ 18.0.0
-- **Python**: ≥ 3.10（远程桥接模式需要）
+- **Python**: ≥ 3.10（远程桥接模式，Windows 已内置嵌入式 Python 无需安装）
 - **包管理器**: npm (随 Node.js 安装)
 - **系统工具**:
   - Windows: winget (Windows 包管理器)
@@ -176,6 +176,8 @@ D:\claude-code-launcher-tauri\
 │   │   │       └── user_session.py   # 多用户会话管理（SDK 选项构建）
 │   │   ├── bridge/
 │   │   │   └── bridge_clientv2.py    # WebSocket 桥接客户端（支持 --config-json）
+│   │   ├── python-embed/            # Python 3.11 嵌入式发行版（.exe→.bin 绕过 gitignore）
+│   │   ├── wheels/                  # 预构建 Python 依赖包（离线安装）
 │   │   ├── requirements.txt          # Python 依赖
 │   │   └── defaults/                 # 首次运行默认配置模板
 │   │       ├── .env.default          # 环境配置模板
@@ -550,7 +552,7 @@ cd "C:/path/to/project" && export VAR1="value1" && export VAR2="value2" && claud
 
 **Launcher 启动流程**:
 1. `start_bridge()` → 清理残留端口进程
-2. 确保 Python venv 已创建 + 依赖已安装
+2. 确保嵌入式 Python 已部署到用户数据目录 + 依赖已离线安装
 3. 启动 Agent Server（FastAPI on port 5000）
 4. 启动 Bridge Client（WebSocket 连接远程服务器）
 
@@ -568,7 +570,7 @@ agent/
 │   ├── soul.md             # Agent 身份人格（用户可编辑）
 │   └── system_prompt.md    # 系统提示（用户可编辑）
 ├── allowed_tools.txt       # 允许工具列表
-├── venv/                   # Python 虚拟环境（自动创建）
+├── python/                 # 嵌入式 Python 运行时（从 python-embed 复制，.bin→.exe 自动重命名）
 ├── workspace/              # 工作目录
 └── logs/                   # 日志目录
 ```
@@ -611,12 +613,25 @@ BridgeConfigForm 组件提供 "Agent 配置" 折叠区，可直接打开配置�
 | 项目说明 | `CLAUDE.md` | 项目上下文 |
 | 环境配置 | `.env` | 全部环境变量 |
 
-#### 4.5.7 关键修复与兼容
+#### 4.5.7 嵌入式 Python 打包方案
+
+Windows 版本内置 Python 3.11 嵌入式发行版，用户无需安装 Python：
+
+1. `resources/bridge/python-embed/` — 嵌入式 Python 发行版
+2. `resources/bridge/wheels/` — 预构建 `.whl` 依赖包
+3. 首次启动时复制到 `%APPDATA%/claude-launcher/agent/python/` 并离线安装
+
+**`.bin` 重命名方案**: `.gitignore` 中的 `*.exe` 规则会排除 `python.exe`，导致 CI 构建缺失文件。解决方案是将 `.exe` 重命名为 `.bin`（`python.bin`, `pythonw.bin`），`bridge_manager.rs` 在复制到用户目录后自动重命名回 `.exe`。
+
+> **添加新 `.exe` 资源文件时，必须使用相同的重命名方案**。
+
+#### 4.5.8 关键修复与兼容
 
 - **PYTHONUTF8=1**: 解决中文 Windows 系统 GBK 编码错误
 - **端口清理**: 每次启动前 `kill_process_on_port()` 清理残留进程
 - **会话恢复**: 旧 session_id 失效时自动清除并重建连接
 - **资源路径**: Tauri 2 `resource_dir()` 返回安装根目录，resources 在 `resources/bridge/` 子目录
+- **`\\?\` 路径前缀**: Windows 扩展路径前缀需在 `resolve_bridge_dir()` 中剥离以确保 `Path::exists()` 正常工作
 
 ---
 
@@ -1194,7 +1209,7 @@ jobs:
 🚀 **CI/CD 自动化**: GitHub Actions 实现跨平台自动打包发布
 🚀 **跳过权限确认**: 支持 `--dangerously-skip-permissions` 自动化模式
 🚀 **远程桥接**: Python + FastAPI + WebSocket 实现企业级 Agent 服务
-🚀 **自动 venv 管理**: 首次启动自动创建 Python 虚拟环境并安装依赖
+🚀 **嵌入式 Python**: Windows 内置 Python 运行时，离线安装依赖，无需用户预装
 🚀 **代理精确传递**: 代理仅透传给 Claude CLI 子进程，不影响 Agent 服务
 
 ### 10.3 用户体验
@@ -1228,7 +1243,7 @@ jobs:
 - ✅ 配置自动迁移 (V1 → V2)
 - ✅ GitHub Actions CI/CD 自动化构建
 - ✅ 远程桥接模式支持企业级 Agent 功能（MCP、技能、安全钩子）
-- ✅ Python venv 自动管理，首次运行自动初始化
+- ✅ 嵌入式 Python 打包，Windows 无需预装 Python
 - ✅ 优秀的用户体验和界面设计
 
 该项目不仅是一个实用的工具，也是学习 Tauri 跨平台开发的优秀范例。
