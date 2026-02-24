@@ -170,6 +170,10 @@ class UserSession:
         if settings.claude_cli_path:
             options_kwargs["cli_path"] = settings.claude_cli_path
 
+        # Pass proxy env to CLI subprocess only (OAuth mode)
+        if agent_service._cli_proxy_env:
+            options_kwargs["env"] = agent_service._cli_proxy_env
+
         options = ClaudeAgentOptions(**options_kwargs)
 
         # 安全钩子：黑名单拦截敏感路径和危险命令

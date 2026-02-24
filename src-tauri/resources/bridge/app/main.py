@@ -67,7 +67,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Application started on {settings.host}:{settings.port}")
     logger.info(f"Immediate return mode: {settings.immediate_return_mode}")
     logger.info(f"[CONFIG] auth_mode={settings.claude_auth_mode}, model={settings.claude_model or 'EMPTY'}, base_url={settings.claude_api_base or 'EMPTY'}, api_key={'SET' if settings.claude_api_key else 'EMPTY'}")
-    logger.info(f"[PROXY] HTTP_PROXY={os.environ.get('HTTP_PROXY', 'NOT SET')}, HTTPS_PROXY={os.environ.get('HTTPS_PROXY', 'NOT SET')}, NO_PROXY={os.environ.get('NO_PROXY', 'NOT SET')}")
+    logger.info(f"[PROXY] WECOM_HTTP_PROXY={settings.http_proxy or 'EMPTY'} (os HTTP_PROXY deliberately cleared)")
 
     yield
 
