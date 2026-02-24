@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { listen } from '@tauri-apps/api/event';
 import { ProjectListPage } from './pages/ProjectListPage';
+import { ModeSelectPage } from './pages/ModeSelectPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { ProjectEditPage } from './pages/ProjectEditPage';
 import { ProjectCreatePage } from './pages/ProjectCreatePage';
@@ -176,7 +177,7 @@ function AppContent() {
         )}
 
         <Routes>
-          <Route path="/" element={<ProjectListPage />} />
+          <Route path="/" element={<ModeSelectPage />} />
           <Route path="/local" element={<ProjectListPage />} />
           <Route path="/local/project/new" element={<ProjectCreatePage />} />
           <Route path="/local/project/:id" element={<ProjectDetailPage />} />
