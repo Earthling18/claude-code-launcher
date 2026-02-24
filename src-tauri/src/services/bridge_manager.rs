@@ -38,6 +38,9 @@ pub struct BridgeManager;
 impl BridgeManager {
     /// Resolve bridge directory (handles dev mode fallback)
     fn resolve_bridge_dir(resource_dir: &str) -> Result<PathBuf, String> {
+        // Strip Windows \\?\ extended path prefix — it can cause issues with some APIs
+        let resource_dir = resource_dir.strip_prefix(r"\\?\").unwrap_or(resource_dir);
+
         // Tauri 2 resource_dir() returns the install root; resources are under resources/ subdir
         let bridge_dir = Path::new(resource_dir).join("resources").join("bridge");
         let bridge_dir = if !bridge_dir.join("app").exists() {
@@ -499,15 +502,40 @@ impl BridgeManager {
         // Step 1: Copy embedded Python if not present
         if !python_exe.exists() {
             let embed_src = bridge_dir.join("python-embed");
-            if !embed_src.join("python.exe").exists() {
+            log::info!("Looking for embedded Python at: {}", embed_src.display());
+            // .exe files are renamed to .bin in resources to avoid NSIS stripping them.
+            // Check for python.bin (packaged) or python.exe (dev mode).
+            let has_bin = embed_src.join("python.bin").exists();
+            let has_exe = embed_src.join("python.exe").exists();
+            if !has_bin && !has_exe {
+                let dir_exists = embed_src.exists();
+                let dir_contents: Vec<String> = if dir_exists {
+                    std::fs::read_dir(&embed_src)
+                        .map(|entries| entries.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().to_string()).take(10).collect())
+                        .unwrap_or_default()
+                } else {
+                    vec![]
+                };
                 return Err(format!(
-                    "Embedded Python not found at: {}. App resources may be corrupted.",
-                    embed_src.display()
+                    "Embedded Python not found at: {}. dir_exists={}, files={:?}",
+                    embed_src.display(), dir_exists, dir_contents
                 ));
             }
 
             log::info!("Copying embedded Python to: {}", python_dir.display());
             Self::copy_dir_recursive(&embed_src, &python_dir)?;
+
+            // Rename .bin back to .exe after copying (NSIS workaround)
+            let bin_to_exe = [("python.bin", "python.exe"), ("pythonw.bin", "pythonw.exe")];
+            for (bin_name, exe_name) in &bin_to_exe {
+                let bin_path = python_dir.join(bin_name);
+                let exe_path = python_dir.join(exe_name);
+                if bin_path.exists() && !exe_path.exists() {
+                    std::fs::rename(&bin_path, &exe_path)
+                        .map_err(|e| format!("Failed to rename {} -> {}: {}", bin_name, exe_name, e))?;
+                    log::info!("Renamed {} to {}", bin_name, exe_name);
+                }
+            }
 
             // Enable site-packages: uncomment "import site" in ._pth file
             let entries = std::fs::read_dir(&python_dir)

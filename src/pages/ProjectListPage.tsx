@@ -18,7 +18,6 @@ import {
 } from '@dnd-kit/sortable';
 import { projectApi, api } from '../api';
 import { DependencyFrame } from '../components/DependencyFrame';
-import { ModeSwitch } from '../components/ModeSwitch';
 import { ProjectCard } from '../components/ProjectCard';
 import { SortableProjectCard } from '../components/SortableProjectCard';
 import type { Project } from '../types/project';
@@ -239,7 +238,6 @@ export const ProjectListPage: React.FC = () => {
             {/* 标题栏 */}
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-3">
-                <ModeSwitch active="local" />
                 <h2 className="text-base font-bold">项目列表</h2>
               </div>
               <button
