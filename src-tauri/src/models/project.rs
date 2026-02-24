@@ -8,11 +8,39 @@ fn default_mode() -> String {
     "claude".to_string()
 }
 
+fn default_bridge_server_url() -> String {
+    "ws://172.21.11.82:80/bridge".to_string()
+}
+
+fn default_bridge_agent_port() -> u16 {
+    5000
+}
+
+fn default_bridge_agent_timeout() -> u32 {
+    1800
+}
+
+fn default_bridge_reconnect_interval() -> u32 {
+    5
+}
+
+fn default_bridge_heartbeat_interval() -> u32 {
+    30
+}
+
+fn default_bridge_agent_mode() -> String {
+    "claude".to_string()
+}
+
+fn default_bridge_max_turns() -> u32 {
+    3
+}
+
 /// Project-specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectConfig {
     #[serde(default = "default_mode")]
-    pub mode: String,                    // "claude" or "custom"
+    pub mode: String,                    // "claude", "custom", or "remote"
     #[serde(default)]
     pub proxy: String,                   // HTTP/HTTPS proxy for Claude mode
     #[serde(default)]
@@ -23,6 +51,28 @@ pub struct ProjectConfig {
     pub token: String,                   // API token (Base64 encoded in storage)
     #[serde(default = "default_skip_permissions")]
     pub skip_permissions: bool,          // Skip permissions flag
+
+    // Remote bridge fields
+    #[serde(default = "default_bridge_server_url")]
+    pub bridge_server_url: String,       // Bridge server WebSocket URL
+    #[serde(default)]
+    pub bridge_bind_key: String,         // User bind key (sk-xxx, Base64 encoded in storage)
+    #[serde(default)]
+    pub bridge_client_id: String,        // Client ID (empty = use hostname)
+    #[serde(default = "default_bridge_agent_port")]
+    pub bridge_agent_port: u16,          // Agent server port
+    #[serde(default = "default_bridge_agent_timeout")]
+    pub bridge_agent_timeout: u32,       // Agent request timeout (seconds)
+    #[serde(default)]
+    pub bridge_proxy: String,            // HTTP proxy for bridge connections
+    #[serde(default = "default_bridge_reconnect_interval")]
+    pub bridge_reconnect_interval: u32,  // Reconnect interval (seconds)
+    #[serde(default = "default_bridge_heartbeat_interval")]
+    pub bridge_heartbeat_interval: u32,  // Heartbeat interval (seconds)
+    #[serde(default = "default_bridge_agent_mode")]
+    pub bridge_agent_mode: String,       // "claude" or "custom" — agent model mode for remote bridge
+    #[serde(default = "default_bridge_max_turns")]
+    pub bridge_max_turns: u32,           // Max turns for Claude Agent SDK (default 30)
 }
 
 impl Default for ProjectConfig {
@@ -34,6 +84,16 @@ impl Default for ProjectConfig {
             base_url: "http://litellm.uattest.weoa.com".to_string(),
             token: String::new(),
             skip_permissions: true,
+            bridge_server_url: default_bridge_server_url(),
+            bridge_bind_key: String::new(),
+            bridge_client_id: String::new(),
+            bridge_agent_port: 5000,
+            bridge_agent_timeout: 1800,
+            bridge_proxy: String::new(),
+            bridge_reconnect_interval: 5,
+            bridge_heartbeat_interval: 30,
+            bridge_agent_mode: "claude".to_string(),
+            bridge_max_turns: 3,
         }
     }
 }

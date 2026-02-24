@@ -18,6 +18,7 @@ import {
 } from '@dnd-kit/sortable';
 import { projectApi, api } from '../api';
 import { DependencyFrame } from '../components/DependencyFrame';
+import { ModeSwitch } from '../components/ModeSwitch';
 import { ProjectCard } from '../components/ProjectCard';
 import { SortableProjectCard } from '../components/SortableProjectCard';
 import type { Project } from '../types/project';
@@ -117,11 +118,11 @@ export const ProjectListPage: React.FC = () => {
   };
 
   const handleEdit = (id: string) => {
-    navigate(`/project/${id}/edit`);
+    navigate(`/local/project/${id}/edit`);
   };
 
   const handleCreate = () => {
-    navigate('/project/new');
+    navigate('/local/project/new');
   };
 
   const handleDragStart = (event: DragStartEvent) => {
@@ -237,7 +238,10 @@ export const ProjectListPage: React.FC = () => {
           <div className="card-frame">
             {/* 标题栏 */}
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-bold">项目列表</h2>
+              <div className="flex items-center gap-3">
+                <ModeSwitch active="local" />
+                <h2 className="text-base font-bold">项目列表</h2>
+              </div>
               <button
                 onClick={handleCreate}
                 className="px-4 py-2 text-[12px] bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded"

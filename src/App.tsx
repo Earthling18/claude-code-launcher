@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import { listen } from '@tauri-apps/api/event';
+import { ModeSelectPage } from './pages/ModeSelectPage';
 import { ProjectListPage } from './pages/ProjectListPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { ProjectEditPage } from './pages/ProjectEditPage';
 import { ProjectCreatePage } from './pages/ProjectCreatePage';
+import { RemoteBridgePage } from './pages/RemoteBridgePage';
 import { OnboardingOverlay } from './components/OnboardingOverlay';
 import { OnboardingTrigger } from './components/OnboardingTrigger';
 import { UpdateNotification } from './components/UpdateNotification';
@@ -78,9 +80,9 @@ function AppContent() {
   };
 
   const handleStartOnboarding = () => {
-    // Navigate to home page first if not already there
-    if (location.pathname !== '/') {
-      navigate('/');
+    // Navigate to local page first if not already there
+    if (location.pathname !== '/local') {
+      navigate('/local');
     }
     setShowOnboarding(true);
   };
@@ -105,7 +107,7 @@ function AppContent() {
         // 如果没有自定义处理器处理，使用默认行为
         if (!handled) {
           setDroppedPath(path);
-          navigate('/project/new');
+          navigate('/local/project/new');
         }
       }
     });
@@ -175,14 +177,16 @@ function AppContent() {
         )}
 
         <Routes>
-          <Route path="/" element={<ProjectListPage />} />
-          <Route path="/project/new" element={<ProjectCreatePage />} />
-          <Route path="/project/:id" element={<ProjectDetailPage />} />
-          <Route path="/project/:id/edit" element={<ProjectEditPage />} />
+          <Route path="/" element={<ModeSelectPage />} />
+          <Route path="/local" element={<ProjectListPage />} />
+          <Route path="/local/project/new" element={<ProjectCreatePage />} />
+          <Route path="/local/project/:id" element={<ProjectDetailPage />} />
+          <Route path="/local/project/:id/edit" element={<ProjectEditPage />} />
+          <Route path="/remote" element={<RemoteBridgePage />} />
         </Routes>
 
-        {/* Onboarding overlay - only show on home page */}
-        {showOnboarding && location.pathname === '/' && (
+        {/* Onboarding overlay - only show on local page */}
+        {showOnboarding && location.pathname === '/local' && (
           <OnboardingOverlay onComplete={handleOnboardingComplete} />
         )}
 

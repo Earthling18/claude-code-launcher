@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { DependencyStatus, AppConfig } from './types';
-import type { Project, ProjectConfig, ProjectOrderItem, PinnedOrderItem } from './types/project';
+import type { Project, ProjectConfig, ProjectOrderItem, PinnedOrderItem, BridgeStatus } from './types/project';
 
 export const api = {
   // 依赖检测
@@ -104,6 +104,37 @@ export const projectApi = {
   // Toggle project pinned status
   togglePinned: (id: string, isPinned: boolean) =>
     invoke<Project>('toggle_project_pinned', { id, isPinned }),
+};
+
+// Bridge management API
+export const bridgeApi = {
+  start: (id: string) => invoke<void>('start_bridge', { id }),
+  stop: (id: string) => invoke<void>('stop_bridge', { id }),
+  getStatus: (id: string) => invoke<BridgeStatus>('get_bridge_status', { id }),
+  getLogs: (id: string, maxLines?: number) =>
+    invoke<string[]>('get_bridge_logs', { id, maxLines }),
+  restart: (id: string) => invoke<void>('restart_bridge', { id }),
+  checkDeps: () => invoke<void>('check_bridge_deps'),
+  prepareEnv: () => invoke<void>('prepare_bridge_env'),
+};
+
+// Claude login check API
+export const claudeLoginApi = {
+  checkLogin: () => invoke<boolean>('check_claude_login'),
+  launchForLogin: (proxy?: string) => invoke<void>('launch_claude_for_login', { proxy }),
+};
+
+// Remote config API
+export const remoteApi = {
+  loadConfig: () => invoke<ProjectConfig>('load_remote_config'),
+  saveConfig: (config: ProjectConfig) => invoke<void>('save_remote_config', { config }),
+  startBridge: () => invoke<void>('start_remote_bridge'),
+};
+
+// Agent config API
+export const agentConfigApi = {
+  openFile: (name: string) => invoke<void>('open_agent_config_file', { name }),
+  openFolder: (name: string) => invoke<void>('open_agent_config_folder', { name }),
 };
 
 // Dialog API

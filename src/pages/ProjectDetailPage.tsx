@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { projectApi, api } from '../api';
+import { BridgeStatusPanel } from '../components/BridgeStatusPanel';
 import type { Project } from '../types/project';
 
 export const ProjectDetailPage: React.FC = () => {
@@ -91,12 +92,12 @@ export const ProjectDetailPage: React.FC = () => {
 
   const handleEdit = () => {
     if (project) {
-      navigate(`/project/${project.id}/edit`);
+      navigate(`/local/project/${project.id}/edit`);
     }
   };
 
   const handleBack = () => {
-    navigate('/');
+    navigate('/local');
   };
 
   if (loading) {
@@ -121,8 +122,16 @@ export const ProjectDetailPage: React.FC = () => {
     );
   }
 
+  const isRemote = project.config.mode === 'remote';
+
+  const getModeLabel = () => {
+    if (project.config.mode === 'claude') return 'Claude 原版';
+    if (project.config.mode === 'remote') return '远程桥接';
+    return '自定义模型';
+  };
+
   return (
-    <div className="h-screen bg-[#212121] text-[#DCE4EE] overflow-auto">
+    <div className="h-screen bg-[#212121] text-[#DCE4EE] overflow-auto" style={{ overflowAnchor: 'none' }}>
       <div className="max-w-full p-4">
         <div className="px-5 py-3">
           <div className="card-frame">
@@ -151,9 +160,7 @@ export const ProjectDetailPage: React.FC = () => {
 
               <div className="flex items-center gap-2">
                 <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">配置模式:</span>
-                <span className="text-[12px]">
-                  {project.config.mode === 'claude' ? 'Claude 原版' : '自定义模型'}
-                </span>
+                <span className="text-[12px]">{getModeLabel()}</span>
               </div>
 
               {project.config.mode === 'claude' && project.config.proxy && (
@@ -186,12 +193,33 @@ export const ProjectDetailPage: React.FC = () => {
                 </>
               )}
 
-              <div className="flex items-center gap-2">
-                <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">启动模式:</span>
-                <span className="text-[12px]">
-                  {project.config.skip_permissions ? 'dangerously-skip 模式' : '普通模式'}
-                </span>
-              </div>
+              {isRemote && (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">Server URL:</span>
+                    <span className="text-[12px]">{project.config.bridge_server_url}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">Bind Key:</span>
+                    <span className="text-[12px]">
+                      {project.config.bridge_bind_key ? '••••••••' : '(未设置)'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">Agent 端口:</span>
+                    <span className="text-[12px]">{project.config.bridge_agent_port}</span>
+                  </div>
+                </>
+              )}
+
+              {!isRemote && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">启动模式:</span>
+                  <span className="text-[12px]">
+                    {project.config.skip_permissions ? 'dangerously-skip 模式' : '普通模式'}
+                  </span>
+                </div>
+              )}
 
               {project.last_launched_at && (
                 <div className="flex items-center gap-2">
@@ -206,52 +234,77 @@ export const ProjectDetailPage: React.FC = () => {
             {/* 分隔线 */}
             <div className="my-4 h-px bg-gradient-to-r from-transparent via-[#565B5E] to-transparent" />
 
-            {/* 复制命令 */}
-            <div className="flex items-center gap-4 mb-4">
-              <span className="text-[12px] text-[#999999]">复制命令:</span>
-              {platform === 'windows' ? (
-                <>
-                  <button
-                    onClick={handleCopyPowershell}
-                    className="text-[12px] text-[#3b82f6] hover:text-[#2563eb] hover:underline cursor-pointer"
-                  >
-                    PowerShell
-                  </button>
-                  <button
-                    onClick={handleCopyCmd}
-                    className="text-[12px] text-[#3b82f6] hover:text-[#2563eb] hover:underline cursor-pointer"
-                  >
-                    CMD
-                  </button>
-                </>
-              ) : (
-                <button
-                  onClick={handleCopyBash}
-                  className="text-[12px] text-[#3b82f6] hover:text-[#2563eb] hover:underline cursor-pointer"
-                >
-                  Bash / Zsh
-                </button>
-              )}
-              {copySuccess && (
-                <span className="text-[10px] text-[#10b981]">✓ 已复制</span>
-              )}
-            </div>
+            {/* Remote mode: Bridge dashboard */}
+            {isRemote && (
+              <div className="mb-4">
+                <h3 className="text-[13px] font-medium mb-3">桥接仪表板</h3>
+                <BridgeStatusPanel projectId={project.id} />
+              </div>
+            )}
 
-            {/* 操作按钮 */}
-            <div className="flex items-center gap-3">
-              <button
-                onClick={handleLaunch}
-                className="flex-1 h-[42px] bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[14px] font-semibold rounded-lg transition-all duration-200"
-              >
-                启动 Claude Code
-              </button>
-              <button
-                onClick={handleEdit}
-                className="px-6 h-[42px] bg-[#565B5E] hover:bg-[#7A8488] text-white text-[14px] rounded-lg transition-colors"
-              >
-                编辑配置
-              </button>
-            </div>
+            {/* Non-remote mode: Copy command + launch */}
+            {!isRemote && (
+              <>
+                {/* 复制命令 */}
+                <div className="flex items-center gap-4 mb-4">
+                  <span className="text-[12px] text-[#999999]">复制命令:</span>
+                  {platform === 'windows' ? (
+                    <>
+                      <button
+                        onClick={handleCopyPowershell}
+                        className="text-[12px] text-[#3b82f6] hover:text-[#2563eb] hover:underline cursor-pointer"
+                      >
+                        PowerShell
+                      </button>
+                      <button
+                        onClick={handleCopyCmd}
+                        className="text-[12px] text-[#3b82f6] hover:text-[#2563eb] hover:underline cursor-pointer"
+                      >
+                        CMD
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={handleCopyBash}
+                      className="text-[12px] text-[#3b82f6] hover:text-[#2563eb] hover:underline cursor-pointer"
+                    >
+                      Bash / Zsh
+                    </button>
+                  )}
+                  {copySuccess && (
+                    <span className="text-[10px] text-[#10b981]">✓ 已复制</span>
+                  )}
+                </div>
+
+                {/* 操作按钮 */}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleLaunch}
+                    className="flex-1 h-[42px] bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[14px] font-semibold rounded-lg transition-all duration-200"
+                  >
+                    启动 Claude Code
+                  </button>
+                  <button
+                    onClick={handleEdit}
+                    className="px-6 h-[42px] bg-[#565B5E] hover:bg-[#7A8488] text-white text-[14px] rounded-lg transition-colors"
+                  >
+                    编辑配置
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Remote mode: Edit button */}
+            {isRemote && (
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleEdit}
+                  className="px-6 h-[42px] bg-[#565B5E] hover:bg-[#7A8488] text-white text-[14px] rounded-lg transition-colors"
+                >
+                  编辑配置
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

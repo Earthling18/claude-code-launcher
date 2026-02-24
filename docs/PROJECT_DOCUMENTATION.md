@@ -1,7 +1,7 @@
 # Claude Code Launcher Tauri - 完整技术文档
 
-> **项目版本**: 0.1.0
-> **最后更新**: 2026-02-09
+> **项目版本**: 0.1.4
+> **最后更新**: 2026-02-24
 > **技术栈**: Tauri 2 + React 19 + TypeScript + Rust + Tailwind CSS
 
 ---
@@ -931,35 +931,45 @@ on:
   workflow_dispatch:
 
 jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version consistency
+        run: |
+          # 校验 tauri.conf.json / Cargo.toml / package.json 三处版本号一致
+          # 不一致则阻止构建，避免更新死循环
+
   build-windows:
+    needs: check-version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - uses: dtolnay/rust-action@stable
+      - uses: dtolnay/rust-toolchain@stable
       - run: npm ci
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v0.5.25
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Claude Code Launcher ${{ github.ref_name }}'
           releaseDraft: true
+          updaterJsonPreferNsis: true
 
   build-macos:
+    needs: check-version
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - uses: dtolnay/rust-action@stable
+      - uses: dtolnay/rust-toolchain@stable
       - run: npm ci
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v0.5.25
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Claude Code Launcher ${{ github.ref_name }}'
@@ -967,12 +977,17 @@ jobs:
 ```
 
 **触发方式**:
-- 推送以 `v` 开头的标签 (如 `v0.1.0`)
+- 推送以 `v` 开头的标签 (如 `v0.1.4`)
 - 手动触发 (workflow_dispatch)
 
+**构建流程**:
+1. `check-version` — 校验三处版本号一致性（不一致则阻止构建）
+2. `build-windows` / `build-macos` — 并行构建，签名，生成 `latest.json`
+
 **构建产物**:
-- Windows: `.exe` 安装包 (NSIS)
-- macOS: `.app` 应用包和 `.dmg` 磁盘映像
+- Windows: `.exe` 安装包 (NSIS) + `.exe.sig` 签名文件
+- macOS: `.app` 应用包 + `.dmg` 磁盘映像 + `.tar.gz.sig` 签名文件
+- `latest.json`: 自动更新端点文件
 
 ---
 

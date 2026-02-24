@@ -20,7 +20,16 @@
 ### 启动模式
 - **Claude 原版模式**：使用 Anthropic 官方服务，支持配置代理
 - **自定义模型模式**：支持配置自定义 API 端点、模型名称和认证令牌
+- **远程桥接模式 (Mobot)**：通过 Python Bridge 连接远程服务，支持企业级功能
 - **dangerously-skip 模式**：跳过权限确认提示，适合自动化场景
+
+### 远程桥接 (Mobot)
+- **Python Agent Server**：基于 FastAPI + Claude Agent SDK，支持多用户会话、安全钩子、技能系统
+- **Bridge Client**：WebSocket 长连接到远程 Bridge Server，自动重连和心跳
+- **模型配置**：支持原版 Claude (OAuth) 和自定义模型 (API 代理) 两种模式
+- **Agent 配置管理**：可视化管理 soul.md、system_prompt.md、MCP 配置、技能目录等
+- **自动环境初始化**：首次启动自动创建 venv、安装依赖、初始化配置目录
+- **代理隔离**：代理仅传递给 Claude CLI 子进程，不影响 Agent Server 内部通信
 
 ### 新手引导
 - **首次使用引导**：首次打开应用时自动显示分步引导
@@ -34,7 +43,7 @@
 - **自动重启**：安装完成后自动重启到新版本
 
 ### 其他功能
-- **依赖检测**：自动检测 Node.js、Claude CLI、Git Bash 等依赖
+- **依赖检测**：自动检测 Node.js、Python、Claude CLI、Git Bash 等依赖
 - **一键安装**：支持一键安装/更新缺失的依赖
 - **命令复制**：生成并复制 PowerShell/CMD/Bash 启动命令
 - **文件夹拖拽**：拖拽文件夹到窗口快速创建项目
@@ -42,7 +51,7 @@
 ## 技术栈
 
 - **前端**：React 19 + TypeScript + Tailwind CSS
-- **后端**：Rust + Tauri 2
+- **后端**：Rust + Tauri 2 + Python (Bridge)
 - **拖拽库**：@dnd-kit
 - **剪贴板**：@tauri-apps/plugin-clipboard-manager (macOS 必需)
 - **自动更新**：@tauri-apps/plugin-updater + GitHub Releases
@@ -52,6 +61,7 @@
 ### 环境要求
 - Node.js 18+
 - Rust 1.70+
+- Python 3.10+（远程桥接模式）
 - pnpm 或 npm
 
 ### 安装依赖
@@ -76,10 +86,29 @@ npm run tauri:build
 
 ## 配置文件
 
-配置文件存储在系统配置目录：
+### 应用配置
 - Windows: `%APPDATA%\ClaudeCodeLauncher\config.json`
 - macOS: `~/Library/Application Support/ClaudeCodeLauncher/config.json`
 - Linux: `~/.config/ClaudeCodeLauncher/config.json`
+
+### Agent 数据目录（远程桥接模式）
+- Windows: `%APPDATA%\claude-launcher\agent\`
+- macOS/Linux: `~/.config/claude-launcher/agent/`
+
+```
+agent/
+├── .env                    # 主配置（认证模式、模型、代理等）
+├── .mcp.json               # MCP 服务器配置
+├── CLAUDE.md               # 项目说明（SDK 自动加载）
+├── allowed_tools.txt       # 额外允许的工具列表
+├── app/
+│   ├── soul.md             # 身份人格
+│   └── system_prompt.md    # 系统提示
+├── .claude/skills/         # 技能目录
+├── venv/                   # Python 虚拟环境（自动创建）
+├── workspace/              # 工作目录
+└── logs/                   # 日志目录
+```
 
 ## 平台支持
 
@@ -100,11 +129,22 @@ macOS GUI 应用不继承 shell 的 PATH 环境变量，因此：
 
 ## 发版流程
 
-1. 修改 `src-tauri/tauri.conf.json` 和 `package.json` 中的 `version`
+1. **同步修改三处版本号**（必须一致，CI 会校验）：
+   - `src-tauri/tauri.conf.json` — Tauri 配置 & updater latest.json 的版本来源
+   - `src-tauri/Cargo.toml` — Rust 编译嵌入 exe 的版本号
+   - `package.json` — 前端包版本
 2. 提交并打 tag：`git tag v版本号 && git push origin master --tags`
 3. GitHub Actions 自动构建、签名、生成更新文件，创建 Draft Release
 4. 在 [Releases 页面](https://github.com/Earthling18/claude-code-launcher/releases) 点击 Publish 发布
 5. 已安装的旧版应用下次启动时自动收到更新通知
+
+> **注意**：三处版本号不一致会导致更新死循环（exe 嵌入版本来自 Cargo.toml，updater 比对版本来自 tauri.conf.json）。CI 的 `check-version` job 会在构建前自动校验，不一致则阻止构建。
+
+### 自动更新机制
+
+- **更新端点**：GitHub Releases 的 `latest.json`
+- **Windows 安装模式**：`basicUi`（显示安装界面，支持自定义安装路径原地更新）
+- **签名验证**：使用 minisign 公钥校验安装包完整性
 
 ## 许可证
 

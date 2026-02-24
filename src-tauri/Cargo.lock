@@ -515,10 +515,12 @@ dependencies = [
 
 [[package]]
 name = "claude-code-launcher-tauri"
-version = "0.1.0"
+version = "0.1.4"
 dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
+ "log",
+ "once_cell",
  "regex",
  "reqwest 0.12.24",
  "serde",

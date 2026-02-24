@@ -71,7 +71,7 @@ export const ProjectEditPage: React.FC = () => {
         project.is_default ? undefined : isPinned
       );
       alert('项目配置已更新');
-      navigate('/');
+      navigate('/local');
     } catch (err: any) {
       alert(`保存失败: ${err}`);
     } finally {
@@ -80,7 +80,7 @@ export const ProjectEditPage: React.FC = () => {
   };
 
   const handleCancel = () => {
-    navigate('/');
+    navigate('/local');
   };
 
   const handleDeleteClick = () => {
@@ -93,7 +93,7 @@ export const ProjectEditPage: React.FC = () => {
     try {
       await projectApi.delete(project.id);
       setShowDeleteConfirm(false);
-      navigate('/');
+      navigate('/local');
     } catch (err: any) {
       setShowDeleteConfirm(false);
       alert(`删除失败: ${err}`);

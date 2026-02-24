@@ -900,7 +900,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version consistency
+        run: |
+          TAURI_VER=$(grep -oP '"version":\s*"\K[^"]+' src-tauri/tauri.conf.json | head -1)
+          CARGO_VER=$(grep -oP '^version\s*=\s*"\K[^"]+' src-tauri/Cargo.toml)
+          PKG_VER=$(grep -oP '"version":\s*"\K[^"]+' package.json | head -1)
+          if [ "$TAURI_VER" != "$CARGO_VER" ] || [ "$TAURI_VER" != "$PKG_VER" ]; then
+            echo "::error::Version mismatch!"
+            exit 1
+          fi
+
   build-windows:
+    needs: check-version
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -909,19 +924,23 @@ jobs:
         with:
           node-version: '20'
       - name: Setup Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
       - name: Install dependencies
         run: npm ci
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v0.5.25
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Claude Code Launcher ${{ github.ref_name }}'
           releaseDraft: true
+          updaterJsonPreferNsis: true
 
   build-macos:
+    needs: check-version
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -930,18 +949,22 @@ jobs:
         with:
           node-version: '20'
       - name: Setup Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
       - name: Install dependencies
         run: npm ci
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v0.5.25
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'Claude Code Launcher ${{ github.ref_name }}'
           releaseDraft: true
 ```
+
+> **重要**: `check-version` job 会在构建前校验 `tauri.conf.json`、`Cargo.toml`、`package.json` 三处版本号是否一致。不一致会直接阻止构建，避免因版本号不同步导致自动更新死循环。
 
 ### 7.2 触发构建
 
@@ -981,27 +1004,15 @@ git push origin v0.2.0
 
 ### 8.1 版本管理
 
-**更新版本号**:
+**三处版本号必须同步修改**（CI 会自动校验一致性）：
 
-1. **package.json**:
-```json
-{
-  "version": "0.2.0"
-}
-```
+| 文件 | 作用 |
+|------|------|
+| `package.json` | 前端包版本 |
+| `src-tauri/Cargo.toml` | Rust 编译嵌入 exe 的版本号（Windows updater 用此比对） |
+| `src-tauri/tauri.conf.json` | Tauri 配置，`latest.json` 的版本来源 |
 
-2. **src-tauri/Cargo.toml**:
-```toml
-[package]
-version = "0.2.0"
-```
-
-3. **src-tauri/tauri.conf.json**:
-```json
-{
-  "version": "0.2.0"
-}
-```
+> **警告**: `Cargo.toml` 与 `tauri.conf.json` 版本不一致会导致自动更新死循环——exe 报告的版本（来自 Cargo.toml）始终低于 `latest.json`（来自 tauri.conf.json），用户每次启动都会被提示更新。
 
 **版本号规范** (语义化版本):
 - **主版本**: 不兼容的 API 变更
@@ -1062,21 +1073,19 @@ ls -lh
 git add .
 git commit -m "release: v0.2.0"
 
-# 2. 创建标签
+# 2. 创建标签并推送（推送标签会自动触发 CI 构建）
 git tag v0.2.0
-
-# 3. 推送到远程
-git push origin main
-git push origin v0.2.0
+git push origin master --tags
 ```
 
-**创建 Release**:
-1. 访问 GitHub Releases
-2. 点击 "Draft a new release"
-3. 选择标签 `v0.2.0`
-4. 填写 Release Notes
-5. 上传安装包
-6. 发布
+**发布流程**:
+1. 推送标签后，GitHub Actions 自动构建 + 签名 + 创建 Draft Release
+2. 构建完成后访问 [Releases 页面](https://github.com/Earthling18/claude-code-launcher/releases)
+3. 点击 Draft Release 的编辑按钮，确认 Release Notes
+4. 点击 **Publish release** 发布
+5. 已安装的旧版应用下次启动时自动收到更新通知
+
+> **注意**: Windows 自动更新使用 `basicUi` 安装模式，更新时会显示 NSIS 安装界面，支持自定义安装路径原地覆盖更新。
 
 ---
 

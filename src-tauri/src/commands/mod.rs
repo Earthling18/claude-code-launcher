@@ -1,6 +1,8 @@
 use crate::services::*;
+use crate::services::bridge_manager::BridgeStatus;
 use crate::models::{Project, ProjectConfig, CreateProjectInput, UpdateProjectInput, ProjectOrderItem, PinnedOrderItem};
 use std::collections::HashMap;
+use tauri::Manager;
 
 #[tauri::command]
 pub async fn check_nodejs() -> Result<dependency_checker::DependencyStatus, String> {
@@ -291,4 +293,168 @@ pub fn get_onboarding_status() -> Result<bool, String> {
 #[tauri::command]
 pub fn set_onboarding_completed() -> Result<(), String> {
     ConfigStorage::set_onboarding_completed()
+}
+
+// ============ Bridge Management Commands ============
+
+#[tauri::command]
+pub fn start_bridge(id: String, app_handle: tauri::AppHandle) -> Result<(), String> {
+    let config = if id == "__remote__" {
+        ConfigStorage::load_remote_config()?
+    } else {
+        let project = ConfigStorage::get_project(&id)?;
+        if project.config.mode != "remote" {
+            return Err("Project is not in remote bridge mode".to_string());
+        }
+        project.config
+    };
+
+    // Get resource dir
+    let resource_dir = app_handle
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
+    let resource_dir_str = resource_dir.to_string_lossy().to_string();
+
+    BridgeManager::start_bridge(&id, &config, &resource_dir_str)
+}
+
+#[tauri::command]
+pub fn stop_bridge(id: String) -> Result<(), String> {
+    BridgeManager::stop_bridge(&id)
+}
+
+#[tauri::command]
+pub fn get_bridge_status(id: String) -> BridgeStatus {
+    BridgeManager::get_status(&id)
+}
+
+#[tauri::command]
+pub fn get_bridge_logs(id: String, max_lines: Option<usize>) -> Vec<String> {
+    BridgeManager::get_logs(&id, max_lines.unwrap_or(200))
+}
+
+#[tauri::command]
+pub fn restart_bridge(id: String, app_handle: tauri::AppHandle) -> Result<(), String> {
+    BridgeManager::stop_bridge(&id)?;
+
+    let config = if id == "__remote__" {
+        ConfigStorage::load_remote_config()?
+    } else {
+        let project = ConfigStorage::get_project(&id)?;
+        if project.config.mode != "remote" {
+            return Err("Project is not in remote bridge mode".to_string());
+        }
+        project.config
+    };
+
+    let resource_dir = app_handle
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
+    let resource_dir_str = resource_dir.to_string_lossy().to_string();
+
+    BridgeManager::start_bridge(&id, &config, &resource_dir_str)
+}
+
+#[tauri::command]
+pub fn check_bridge_deps() -> Result<(), String> {
+    BridgeManager::check_deps()
+}
+
+#[tauri::command]
+pub fn prepare_bridge_env(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let resource_dir = app_handle
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
+    let resource_dir_str = resource_dir.to_string_lossy().to_string();
+
+    BridgeManager::prepare_env(&resource_dir_str)?;
+    Ok(())
+}
+
+// ============ Agent Config Commands ============
+
+#[tauri::command]
+pub fn open_agent_config_file(name: String) -> Result<(), String> {
+    let agent_dir = BridgeManager::get_agent_data_dir();
+    let path = match name.as_str() {
+        "env" => agent_dir.join(".env"),
+        "mcp" => agent_dir.join(".mcp.json"),
+        "soul" => agent_dir.join("app").join("soul.md"),
+        "system_prompt" => agent_dir.join("app").join("system_prompt.md"),
+        "allowed_tools" => agent_dir.join("allowed_tools.txt"),
+        "claude_md" => agent_dir.join("CLAUDE.md"),
+        _ => return Err(format!("Unknown config: {}", name)),
+    };
+    BridgeManager::open_path_in_system(&path)
+}
+
+#[tauri::command]
+pub fn open_agent_config_folder(name: String) -> Result<(), String> {
+    let agent_dir = BridgeManager::get_agent_data_dir();
+    let path = match name.as_str() {
+        "skills" => agent_dir.join(".claude").join("skills"),
+        "workspace" => agent_dir.join("workspace"),
+        "logs" => agent_dir.join("logs"),
+        "root" => agent_dir,
+        _ => return Err(format!("Unknown folder: {}", name)),
+    };
+    BridgeManager::open_path_in_system(&path)
+}
+
+// ============ Claude Login Check Commands ============
+
+#[tauri::command]
+pub fn check_claude_login() -> bool {
+    if let Some(home) = dirs::home_dir() {
+        let claude_dir = home.join(".claude");
+        claude_dir.exists() && claude_dir.is_dir()
+    } else {
+        false
+    }
+}
+
+#[tauri::command]
+pub fn launch_claude_for_login(proxy: Option<String>) -> Result<(), String> {
+    let mut config: HashMap<String, String> = HashMap::new();
+    if let Some(p) = proxy {
+        if !p.is_empty() {
+            config.insert("HTTP_PROXY".to_string(), p.clone());
+            config.insert("HTTPS_PROXY".to_string(), p);
+        }
+    }
+    let home_dir = dirs::home_dir()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| "~".to_string());
+    Launcher::launch_with_config_and_dir(config, Some(home_dir))
+}
+
+// ============ Remote Config Commands ============
+
+#[tauri::command]
+pub fn load_remote_config() -> Result<ProjectConfig, String> {
+    ConfigStorage::load_remote_config()
+}
+
+#[tauri::command]
+pub fn save_remote_config(config: ProjectConfig) -> Result<(), String> {
+    ConfigStorage::save_remote_config(&config)
+}
+
+#[tauri::command]
+pub fn start_remote_bridge(app_handle: tauri::AppHandle) -> Result<(), String> {
+    let config = ConfigStorage::load_remote_config()?;
+    if config.bridge_bind_key.is_empty() {
+        return Err("请先配置 Bind Key".to_string());
+    }
+
+    let resource_dir = app_handle
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
+    let resource_dir_str = resource_dir.to_string_lossy().to_string();
+
+    BridgeManager::start_bridge("__remote__", &config, &resource_dir_str)
 }

@@ -4,6 +4,10 @@ mod models;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Clear CLAUDECODE env var so child processes (claude CLI, bridge agents)
+    // don't think they're running inside a nested Claude Code session.
+    std::env::remove_var("CLAUDECODE");
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -13,6 +17,12 @@ pub fn run() {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
             Ok(())
+        })
+        .on_window_event(|_window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                // Stop all bridge processes when app window is destroyed
+                services::BridgeManager::stop_all();
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::check_nodejs,
@@ -56,6 +66,24 @@ pub fn run() {
             // Onboarding commands
             commands::get_onboarding_status,
             commands::set_onboarding_completed,
+            // Bridge management commands
+            commands::start_bridge,
+            commands::stop_bridge,
+            commands::get_bridge_status,
+            commands::get_bridge_logs,
+            commands::restart_bridge,
+            commands::check_bridge_deps,
+            commands::prepare_bridge_env,
+            // Agent config commands
+            commands::open_agent_config_file,
+            commands::open_agent_config_folder,
+            // Claude login check commands
+            commands::check_claude_login,
+            commands::launch_claude_for_login,
+            // Remote config commands
+            commands::load_remote_config,
+            commands::save_remote_config,
+            commands::start_remote_bridge,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

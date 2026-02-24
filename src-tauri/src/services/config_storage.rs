@@ -40,6 +40,8 @@ pub struct AppConfigV2 {
     pub projects: Vec<Project>,
     #[serde(default)]
     pub has_seen_onboarding: bool,
+    #[serde(default)]
+    pub remote_config: Option<ProjectConfig>,
 }
 
 impl Default for AppConfigV2 {
@@ -48,6 +50,7 @@ impl Default for AppConfigV2 {
             version: 2,
             projects: vec![Project::default_project()],
             has_seen_onboarding: false,
+            remote_config: None,
         }
     }
 }
@@ -88,6 +91,7 @@ impl ConfigStorage {
             base_url: v1_config.base_url,
             token: v1_config.token, // Already decoded at this point
             skip_permissions: v1_config.skip_permissions,
+            ..Default::default()
         };
 
         let default_project = Project::new(
@@ -101,6 +105,7 @@ impl ConfigStorage {
             version: 2,
             projects: vec![default_project],
             has_seen_onboarding: false,
+            remote_config: None,
         }
     }
 
@@ -108,6 +113,9 @@ impl ConfigStorage {
     fn encode_project_token(project: &mut Project) {
         if !project.config.token.is_empty() {
             project.config.token = general_purpose::STANDARD.encode(&project.config.token);
+        }
+        if !project.config.bridge_bind_key.is_empty() {
+            project.config.bridge_bind_key = general_purpose::STANDARD.encode(&project.config.bridge_bind_key);
         }
     }
 
@@ -117,6 +125,13 @@ impl ConfigStorage {
             if let Ok(decoded) = general_purpose::STANDARD.decode(&project.config.token) {
                 if let Ok(token_str) = String::from_utf8(decoded) {
                     project.config.token = token_str;
+                }
+            }
+        }
+        if !project.config.bridge_bind_key.is_empty() {
+            if let Ok(decoded) = general_purpose::STANDARD.decode(&project.config.bridge_bind_key) {
+                if let Ok(key_str) = String::from_utf8(decoded) {
+                    project.config.bridge_bind_key = key_str;
                 }
             }
         }
@@ -145,6 +160,24 @@ impl ConfigStorage {
             // Decode tokens
             for project in &mut config.projects {
                 Self::decode_project_token(project);
+            }
+
+            // Decode remote_config tokens
+            if let Some(ref mut remote) = config.remote_config {
+                if !remote.bridge_bind_key.is_empty() {
+                    if let Ok(decoded) = general_purpose::STANDARD.decode(&remote.bridge_bind_key) {
+                        if let Ok(key_str) = String::from_utf8(decoded) {
+                            remote.bridge_bind_key = key_str;
+                        }
+                    }
+                }
+                if !remote.token.is_empty() {
+                    if let Ok(decoded) = general_purpose::STANDARD.decode(&remote.token) {
+                        if let Ok(token_str) = String::from_utf8(decoded) {
+                            remote.token = token_str;
+                        }
+                    }
+                }
             }
 
             Ok(config)
@@ -179,6 +212,16 @@ impl ConfigStorage {
         let mut config_to_save = config.clone();
         for project in &mut config_to_save.projects {
             Self::encode_project_token(project);
+        }
+
+        // Encode remote_config secrets
+        if let Some(ref mut remote) = config_to_save.remote_config {
+            if !remote.bridge_bind_key.is_empty() {
+                remote.bridge_bind_key = general_purpose::STANDARD.encode(&remote.bridge_bind_key);
+            }
+            if !remote.token.is_empty() {
+                remote.token = general_purpose::STANDARD.encode(&remote.token);
+            }
         }
 
         let json_string = serde_json::to_string_pretty(&config_to_save)
@@ -380,6 +423,49 @@ impl ConfigStorage {
         Self::save_config_v2(&config)
     }
 
+    // ============ Remote Config ============
+
+    /// Load remote config (returns default if not set)
+    pub fn load_remote_config() -> Result<ProjectConfig, String> {
+        let config = Self::load_config_v2()?;
+        let mut remote = config.remote_config.unwrap_or_else(|| {
+            let mut default_cfg = ProjectConfig::default();
+            default_cfg.mode = "remote".to_string();
+            default_cfg
+        });
+        // Ensure mode is always "remote"
+        remote.mode = "remote".to_string();
+        Ok(remote)
+    }
+
+    /// Save remote config
+    pub fn save_remote_config(remote: &ProjectConfig) -> Result<(), String> {
+        let mut config = Self::load_config_v2()?;
+        let mut to_save = remote.clone();
+        to_save.mode = "remote".to_string();
+        // Encode secrets for storage
+        if !to_save.bridge_bind_key.is_empty() {
+            to_save.bridge_bind_key = general_purpose::STANDARD.encode(&to_save.bridge_bind_key);
+        }
+        if !to_save.token.is_empty() {
+            to_save.token = general_purpose::STANDARD.encode(&to_save.token);
+        }
+        config.remote_config = Some(to_save);
+        // save_config_v2 will re-encode project tokens, but remote_config is already encoded
+        // We need to save raw here to avoid double-encoding
+        let config_path = Self::get_config_path()?;
+        // Create a copy with encoded project tokens
+        let mut config_to_save = config.clone();
+        for project in &mut config_to_save.projects {
+            Self::encode_project_token(project);
+        }
+        let json_string = serde_json::to_string_pretty(&config_to_save)
+            .map_err(|e| format!("无法序列化配置: {}", e))?;
+        fs::write(&config_path, json_string)
+            .map_err(|e| format!("无法写入配置文件: {}", e))?;
+        Ok(())
+    }
+
     // ============ Legacy v1 API for backwards compatibility ============
 
     pub fn save_config(config: &AppConfig) -> Result<(), String> {
@@ -395,6 +481,7 @@ impl ConfigStorage {
                 base_url: config.base_url.clone(),
                 token: config.token.clone(),
                 skip_permissions: config.skip_permissions,
+                ..Default::default()
             };
             default_project.updated_at = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

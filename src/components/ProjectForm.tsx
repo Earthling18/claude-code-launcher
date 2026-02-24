@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { DirectoryPicker } from './DirectoryPicker';
+import { BridgeConfigForm } from './BridgeConfigForm';
 import type { ProjectConfig } from '../types/project';
 
 interface ProjectFormProps {
@@ -27,7 +28,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
 }) => {
   const [name, setName] = useState(initialName);
   const [workingDirectory, setWorkingDirectory] = useState(initialWorkingDirectory);
-  const [mode, setMode] = useState<'claude' | 'custom'>(initialConfig?.mode || 'claude');
+  const [mode, setMode] = useState<'claude' | 'custom' | 'remote'>(initialConfig?.mode || 'claude');
   const [isPinned, setIsPinned] = useState(initialIsPinned);
 
   // Update workingDirectory when initialWorkingDirectory changes (for async loading or drag-drop)
@@ -46,6 +47,16 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       if (initialConfig.base_url) setBaseUrl(initialConfig.base_url);
       if (initialConfig.token) setToken(initialConfig.token);
       if (initialConfig.skip_permissions !== undefined) setSkipPermissions(initialConfig.skip_permissions);
+      // Bridge fields
+      if (initialConfig.bridge_server_url) setBridgeServerUrl(initialConfig.bridge_server_url);
+      if (initialConfig.bridge_bind_key) setBridgeBindKey(initialConfig.bridge_bind_key);
+      if (initialConfig.bridge_client_id) setBridgeClientId(initialConfig.bridge_client_id);
+      if (initialConfig.bridge_agent_port) setBridgeAgentPort(initialConfig.bridge_agent_port);
+      if (initialConfig.bridge_agent_timeout) setBridgeAgentTimeout(initialConfig.bridge_agent_timeout);
+      if (initialConfig.bridge_reconnect_interval) setBridgeReconnectInterval(initialConfig.bridge_reconnect_interval);
+      if (initialConfig.bridge_heartbeat_interval) setBridgeHeartbeatInterval(initialConfig.bridge_heartbeat_interval);
+      if (initialConfig.bridge_agent_mode) setBridgeAgentMode(initialConfig.bridge_agent_mode);
+      if (initialConfig.bridge_max_turns) setBridgeMaxTurns(initialConfig.bridge_max_turns);
     }
   }, [initialConfig]);
 
@@ -53,6 +64,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
   useEffect(() => {
     setIsPinned(initialIsPinned);
   }, [initialIsPinned]);
+
   const [proxy, setProxy] = useState(initialConfig?.proxy || '');
   const [model, setModel] = useState(initialConfig?.model || '');
   const [baseUrl, setBaseUrl] = useState(initialConfig?.base_url || 'http://litellm.uattest.weoa.com');
@@ -60,6 +72,17 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
   const [skipPermissions, setSkipPermissions] = useState(initialConfig?.skip_permissions ?? false);
   const [showToken, setShowToken] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // Bridge config state
+  const [bridgeServerUrl, setBridgeServerUrl] = useState(initialConfig?.bridge_server_url || 'ws://172.21.11.82:80/bridge');
+  const [bridgeBindKey, setBridgeBindKey] = useState(initialConfig?.bridge_bind_key || '');
+  const [bridgeClientId, setBridgeClientId] = useState(initialConfig?.bridge_client_id || '');
+  const [bridgeAgentPort, setBridgeAgentPort] = useState(initialConfig?.bridge_agent_port || 5000);
+  const [bridgeAgentTimeout, setBridgeAgentTimeout] = useState(initialConfig?.bridge_agent_timeout || 1800);
+  const [bridgeReconnectInterval, setBridgeReconnectInterval] = useState(initialConfig?.bridge_reconnect_interval || 5);
+  const [bridgeHeartbeatInterval, setBridgeHeartbeatInterval] = useState(initialConfig?.bridge_heartbeat_interval || 30);
+  const [bridgeAgentMode, setBridgeAgentMode] = useState<'claude' | 'custom'>(initialConfig?.bridge_agent_mode || 'claude');
+  const [bridgeMaxTurns, setBridgeMaxTurns] = useState(initialConfig?.bridge_max_turns || 3);
 
   const validate = (): boolean => {
     const newErrors: Record<string, string> = {};
@@ -80,6 +103,15 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       newErrors.baseUrl = 'Base URL 必须以 http:// 或 https:// 开头';
     }
 
+    if (mode === 'remote') {
+      if (!bridgeBindKey.trim()) {
+        newErrors.bridgeBindKey = '请输入 Bind Key';
+      }
+      if (!bridgeServerUrl.trim()) {
+        newErrors.bridgeServerUrl = '请输入 Bridge Server URL';
+      }
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -98,6 +130,16 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       base_url: baseUrl,
       token,
       skip_permissions: skipPermissions,
+      bridge_server_url: bridgeServerUrl,
+      bridge_bind_key: bridgeBindKey,
+      bridge_client_id: bridgeClientId,
+      bridge_agent_port: bridgeAgentPort,
+      bridge_agent_timeout: bridgeAgentTimeout,
+      bridge_proxy: '',
+      bridge_reconnect_interval: bridgeReconnectInterval,
+      bridge_heartbeat_interval: bridgeHeartbeatInterval,
+      bridge_agent_mode: bridgeAgentMode,
+      bridge_max_turns: bridgeMaxTurns,
     };
 
     onSubmit(name.trim(), workingDirectory.trim(), config, isPinned);
@@ -168,6 +210,17 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
               className="w-4 h-4"
             />
             <span className="text-[12px]">自定义模型</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="mode"
+              value="remote"
+              checked={mode === 'remote'}
+              onChange={() => setMode('remote')}
+              className="w-4 h-4"
+            />
+            <span className="text-[12px]">远程桥接</span>
           </label>
         </div>
       </div>
@@ -241,35 +294,68 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
         </div>
       )}
 
-      {/* 启动模式 */}
-      <div>
-        <label className="block text-[12px] mb-2">启动模式</label>
-        <div className="flex items-center gap-4">
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="radio"
-              name="launchMode"
-              checked={!skipPermissions}
-              onChange={() => setSkipPermissions(false)}
-              className="w-4 h-4"
-            />
-            <span className="text-[12px]">普通模式</span>
-          </label>
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="radio"
-              name="launchMode"
-              checked={skipPermissions}
-              onChange={() => setSkipPermissions(true)}
-              className="w-4 h-4"
-            />
-            <span className="text-[12px]">dangerously-skip 模式</span>
-          </label>
+      {/* 远程桥接模式 */}
+      {mode === 'remote' && (
+        <BridgeConfigForm
+          bridgeServerUrl={bridgeServerUrl}
+          bridgeBindKey={bridgeBindKey}
+          bridgeAgentPort={bridgeAgentPort}
+          bridgeAgentTimeout={bridgeAgentTimeout}
+          bridgeReconnectInterval={bridgeReconnectInterval}
+          bridgeHeartbeatInterval={bridgeHeartbeatInterval}
+          bridgeAgentMode={bridgeAgentMode}
+          bridgeMaxTurns={bridgeMaxTurns}
+          modelProxy={proxy}
+          modelName={model}
+          modelBaseUrl={baseUrl}
+          modelToken={token}
+          onServerUrlChange={setBridgeServerUrl}
+          onBindKeyChange={setBridgeBindKey}
+          onAgentPortChange={setBridgeAgentPort}
+          onAgentTimeoutChange={setBridgeAgentTimeout}
+          onReconnectIntervalChange={setBridgeReconnectInterval}
+          onHeartbeatIntervalChange={setBridgeHeartbeatInterval}
+          onAgentModeChange={setBridgeAgentMode}
+          onMaxTurnsChange={setBridgeMaxTurns}
+          onModelProxyChange={setProxy}
+          onModelNameChange={setModel}
+          onModelBaseUrlChange={setBaseUrl}
+          onModelTokenChange={setToken}
+          errors={errors}
+        />
+      )}
+
+      {/* 启动模式 - only for claude/custom modes */}
+      {mode !== 'remote' && (
+        <div>
+          <label className="block text-[12px] mb-2">启动模式</label>
+          <div className="flex items-center gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="launchMode"
+                checked={!skipPermissions}
+                onChange={() => setSkipPermissions(false)}
+                className="w-4 h-4"
+              />
+              <span className="text-[12px]">普通模式</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="radio"
+                name="launchMode"
+                checked={skipPermissions}
+                onChange={() => setSkipPermissions(true)}
+                className="w-4 h-4"
+              />
+              <span className="text-[12px]">dangerously-skip 模式</span>
+            </label>
+          </div>
+          <p className="text-[10px] text-[#999999] mt-1">
+            dangerously-skip 模式会跳过权限确认提示，适合自动化场景
+          </p>
         </div>
-        <p className="text-[10px] text-[#999999] mt-1">
-          dangerously-skip 模式会跳过权限确认提示，适合自动化场景
-        </p>
-      </div>
+      )}
 
       {/* 置顶设置 - 仅非默认项目显示 */}
       {!isDefault && (

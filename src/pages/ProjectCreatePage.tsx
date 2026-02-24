@@ -65,7 +65,7 @@ export const ProjectCreatePage: React.FC = () => {
       if (isPinned) {
         await projectApi.togglePinned(project.id, true);
       }
-      navigate('/');
+      navigate('/local');
     } catch (err: any) {
       alert(`创建失败: ${err}`);
     } finally {
@@ -74,7 +74,7 @@ export const ProjectCreatePage: React.FC = () => {
   };
 
   const handleCancel = () => {
-    navigate('/');
+    navigate('/local');
   };
 
   return (
