@@ -244,6 +244,23 @@ class UserSession:
                 logger.error(f"[SESSION] User {self.user_id}: SDK connection failed: {e}")
                 self._is_connected = False
                 self._client = None
+
+                # If resume failed, clear stale session_id and retry fresh
+                if self._claude_session_id:
+                    logger.warning(f"[SESSION] User {self.user_id}: Clearing stale session_id and retrying fresh")
+                    self._claude_session_id = None
+                    try:
+                        options = self._build_sdk_options()
+                        self._client = ClaudeSDKClient(options=options)
+                        await self._client.__aenter__()
+                        self._is_connected = True
+                        logger.info(f"[SESSION] User {self.user_id}: SDK connection established (fresh)")
+                        return True
+                    except Exception as e2:
+                        logger.error(f"[SESSION] User {self.user_id}: Fresh connection also failed: {e2}")
+                        self._is_connected = False
+                        self._client = None
+
                 return False
 
     async def _close_connection(self):

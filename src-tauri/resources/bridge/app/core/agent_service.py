@@ -435,6 +435,28 @@ class ClaudeAgentService:
             logger.info(f"[SDK] Total messages: {msg_count}")
 
         except Exception as e:
+            # If resume failed, clear stale session_id and retry fresh
+            if session.claude_session_id:
+                logger.warning(f"[SDK] Resume failed, clearing stale session_id and retrying fresh: {e}")
+                session.claude_session_id = None
+                await session_manager.update_claude_session(session.user_id, None)
+                options.resume = None
+                try:
+                    msg_count = 0
+                    async for message in query(prompt=prompt, options=options):
+                        msg_count += 1
+                        if hasattr(message, "session_id") and message.session_id:
+                            if session.claude_session_id != message.session_id:
+                                await session_manager.update_claude_session(
+                                    session.user_id, message.session_id
+                                )
+                                session.claude_session_id = message.session_id
+                        yield message
+                    logger.info(f"[SDK] Retry succeeded, total messages: {msg_count}")
+                    return
+                except Exception as e2:
+                    logger.error(f"[SDK] Fresh retry also failed: {e2}")
+                    raise e2
             logger.error(f"Error in chat: {e}")
             raise
 

@@ -121,6 +121,9 @@ impl BridgeManager {
         // Release lock briefly to avoid holding it during process spawn
         drop(bridges);
 
+        // Kill any leftover process on the target port (from a previous crash or unclean shutdown)
+        Self::kill_process_on_port(port);
+
         // 3. Start Agent Server (Python FastAPI via uvicorn)
         let mut agent_cmd = Command::new(&python_exe);
 
@@ -135,7 +138,8 @@ impl BridgeManager {
             .arg(port.to_string())
             .current_dir(&agent_dir)
             .env("PYTHONUNBUFFERED", "1")
-            .env("PYTHONIOENCODING", "utf-8")  // Force UTF-8 output (Windows defaults to GBK)
+            .env("PYTHONIOENCODING", "utf-8")
+            .env("PYTHONUTF8", "1")  // Force UTF-8 everywhere (prevents GBK decode errors on Chinese Windows)
             .env("WECOM_PORT", port.to_string())
             .env("WECOM_HOST", "127.0.0.1");
 
@@ -206,7 +210,8 @@ impl BridgeManager {
             .arg(client_config.to_string())
             .current_dir(&agent_dir)
             .env("PYTHONUNBUFFERED", "1")
-            .env("PYTHONIOENCODING", "utf-8")  // Force UTF-8 output (Windows defaults to GBK)
+            .env("PYTHONIOENCODING", "utf-8")
+            .env("PYTHONUTF8", "1")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
@@ -394,6 +399,48 @@ impl BridgeManager {
 
     // ==================== Private helpers ====================
 
+    /// Kill any leftover process listening on the given port (cleanup from unclean shutdown)
+    fn kill_process_on_port(port: u16) {
+        #[cfg(windows)]
+        {
+            // Use netstat to find PID, then taskkill
+            let output = Command::new("cmd")
+                .args(["/C", &format!("netstat -ano | findstr \"LISTENING\" | findstr \":{port} \"")])
+                .output();
+            if let Ok(o) = output {
+                let stdout = String::from_utf8_lossy(&o.stdout);
+                for line in stdout.lines() {
+                    // netstat format: "  TCP  127.0.0.1:5000  0.0.0.0:0  LISTENING  12345"
+                    if let Some(pid_str) = line.split_whitespace().last() {
+                        if let Ok(pid) = pid_str.parse::<u32>() {
+                            if pid > 0 {
+                                let _ = Command::new("taskkill")
+                                    .args(["/F", "/T", "/PID", &pid.to_string()])
+                                    .output();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let output = Command::new("sh")
+                .args(["-c", &format!("lsof -ti :{port}")])
+                .output();
+            if let Ok(o) = output {
+                let stdout = String::from_utf8_lossy(&o.stdout);
+                for pid_str in stdout.lines() {
+                    if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                        if pid > 0 {
+                            let _ = Command::new("kill").args(["-9", &pid.to_string()]).output();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     fn kill_group(group: &mut BridgeProcessGroup) {
         let _ = Self::kill_child(&mut group.bridge_client);
         let _ = Self::kill_child(&mut group.agent_server);
@@ -508,7 +555,8 @@ impl BridgeManager {
         );
 
         let mut pip_cmd = Command::new(python_exe.to_string_lossy().to_string());
-        pip_cmd.args(["-c", &bootstrap_script]);
+        pip_cmd.args(["-c", &bootstrap_script])
+            .env("PYTHONUTF8", "1");
 
         #[cfg(windows)]
         {
