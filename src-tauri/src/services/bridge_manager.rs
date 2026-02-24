@@ -38,15 +38,23 @@ pub struct BridgeManager;
 impl BridgeManager {
     /// Resolve bridge directory (handles dev mode fallback)
     fn resolve_bridge_dir(resource_dir: &str) -> Result<PathBuf, String> {
-        let bridge_dir = Path::new(resource_dir).join("bridge");
+        // Tauri 2 resource_dir() returns the install root; resources are under resources/ subdir
+        let bridge_dir = Path::new(resource_dir).join("resources").join("bridge");
         let bridge_dir = if !bridge_dir.join("app").exists() {
-            let dev_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("resources")
-                .join("bridge");
-            if dev_dir.join("app").exists() {
-                dev_dir
+            // Fallback: try without resources/ prefix (dev mode or different layout)
+            let alt = Path::new(resource_dir).join("bridge");
+            if alt.join("app").exists() {
+                alt
             } else {
-                bridge_dir
+                // Dev mode: use CARGO_MANIFEST_DIR
+                let dev_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("resources")
+                    .join("bridge");
+                if dev_dir.join("app").exists() {
+                    dev_dir
+                } else {
+                    bridge_dir
+                }
             }
         } else {
             bridge_dir
