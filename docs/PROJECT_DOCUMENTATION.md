@@ -1,8 +1,8 @@
 # Claude Code Launcher Tauri - 完整技术文档
 
-> **项目版本**: 0.1.4
+> **项目版本**: 0.2.3
 > **最后更新**: 2026-02-24
-> **技术栈**: Tauri 2 + React 19 + TypeScript + Rust + Tailwind CSS
+> **技术栈**: Tauri 2 + React 19 + TypeScript + Rust + Python + Tailwind CSS
 
 ---
 
@@ -39,6 +39,7 @@
 - 🖥️ **跨平台支持**: 支持 Windows 和 macOS 系统
 - ⚡ **跳过权限确认**: 支持 `--dangerously-skip-permissions` 模式
 - 📝 **启动日志**: 完整的启动日志记录便于调试
+- 🌐 **远程桥接模式**: 通过 WebSocket 连接远程服务器，支持企业级 Agent 功能（MCP、技能系统、安全钩子等）
 
 ### 1.3 应用场景
 
@@ -46,6 +47,7 @@
 2. **开发者**: 使用自定义模型替代官方 Claude API
 3. **新手用户**: 简化依赖安装和配置流程
 4. **高级用户**: 快速生成和管理环境变量配置
+5. **远程协作**: 通过远程桥接模式，将 Claude Agent 接入企业微信等即时通讯平台
 
 ### 1.4 系统要求
 
@@ -53,6 +55,7 @@
   - Windows 10/11 (主要支持)
   - macOS 10.13+ (High Sierra 及以上)
 - **Node.js**: ≥ 18.0.0
+- **Python**: ≥ 3.10（远程桥接模式需要）
 - **包管理器**: npm (随 Node.js 安装)
 - **系统工具**:
   - Windows: winget (Windows 包管理器)
@@ -87,7 +90,19 @@
 | Reqwest | 0.12 | HTTP 客户端 |
 | winreg | 0.52 | Windows 注册表操作 |
 
-### 2.3 构建工具
+### 2.3 远程桥接 (Python)
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Python | 3.10+ | 桥接服务运行时 |
+| FastAPI | 0.109+ | Agent HTTP API 服务 |
+| uvicorn | 0.27 | ASGI 服务器 |
+| claude-agent-sdk | 0.1.25+ | Claude SDK 交互 |
+| pydantic-settings | 2.1+ | 配置管理 |
+| websockets | 12.0+ | WebSocket 桥接客户端 |
+| apscheduler | 3.10+ | 定时任务 |
+
+### 2.4 构建工具
 
 - **前端**: Vite + TypeScript Compiler
 - **后端**: Cargo (Rust 构建系统)
@@ -118,19 +133,25 @@ D:\claude-code-launcher-tauri\
 │   ├── 📁 pages/
 │   │   ├── ProjectListPage.tsx      # 项目列表页（支持拖拽排序）
 │   │   ├── ProjectCreatePage.tsx    # 新建项目页
-│   │   └── ProjectEditPage.tsx      # 编辑项目页
+│   │   ├── ProjectEditPage.tsx      # 编辑项目页
+│   │   ├── ProjectDetailPage.tsx    # 项目详情页
+│   │   ├── ModeSelectPage.tsx       # 模式选择页（本地/远程桥接）
+│   │   └── RemoteBridgePage.tsx     # 远程桥接管理页
 │   └── 📁 components/
 │       ├── DependencyFrame.tsx      # 依赖检测面板
 │       ├── ProjectCard.tsx          # 项目卡片组件
 │       ├── ProjectForm.tsx          # 项目表单（含置顶开关）
 │       ├── SortableProjectCard.tsx  # 可拖拽项目卡片
 │       ├── DirectoryPicker.tsx      # 目录选择器
-│       └── ConfirmDialog.tsx        # 确认对话框
+│       ├── ConfirmDialog.tsx        # 确认对话框
+│       ├── ModeSwitch.tsx           # 本地/远程模式切换组件
+│       ├── BridgeConfigForm.tsx     # 远程桥接配置表单（含 Agent 配置区）
+│       └── BridgeStatusPanel.tsx    # 桥接状态面板（启动/停止/日志）
 │
 ├── 📁 src-tauri/                    # 后端源码 (Rust)
 │   ├── 📁 src/
 │   │   ├── main.rs                  # Rust 入口 (主函数)
-│   │   ├── lib.rs                   # Tauri 应用构建 (34 个 Commands)
+│   │   ├── lib.rs                   # Tauri 应用构建
 │   │   ├── 📁 commands/             # Tauri Commands 层
 │   │   │   └── mod.rs               # 所有 Commands 定义
 │   │   ├── 📁 models/               # 数据模型
@@ -143,7 +164,26 @@ D:\claude-code-launcher-tauri\
 │   │       ├── launcher.rs              # 启动器服务 (EncodedCommand, 日志)
 │   │       ├── settings_manager.rs      # Claude 设置管理
 │   │       ├── config_storage.rs        # 应用配置存储 (V2 多项目支持)
-│   │       └── environment.rs           # 环境变量管理
+│   │       ├── environment.rs           # 环境变量管理
+│   │       └── bridge_manager.rs        # 远程桥接进程管理（Python venv、启停、日志）
+│   │
+│   ├── 📁 resources/bridge/         # Python 桥接代码（随应用打包）
+│   │   ├── app/                     # FastAPI Agent 服务
+│   │   │   ├── config.py            # pydantic-settings 配置（env_prefix="WECOM_"）
+│   │   │   ├── main.py              # FastAPI 入口
+│   │   │   └── core/
+│   │   │       ├── agent_service.py  # Claude SDK 封装（proxy env 传递）
+│   │   │       └── user_session.py   # 多用户会话管理（SDK 选项构建）
+│   │   ├── bridge/
+│   │   │   └── bridge_clientv2.py    # WebSocket 桥接客户端（支持 --config-json）
+│   │   ├── requirements.txt          # Python 依赖
+│   │   └── defaults/                 # 首次运行默认配置模板
+│   │       ├── .env.default          # 环境配置模板
+│   │       ├── .mcp.json             # MCP 服务器配置
+│   │       ├── soul.md               # Agent 身份人格
+│   │       ├── system_prompt.md      # 系统提示
+│   │       ├── allowed_tools.txt     # 允许工具列表
+│   │       └── CLAUDE.md             # 项目说明
 │   │
 │   ├── Cargo.toml                   # Rust 依赖配置
 │   ├── tauri.conf.json              # Tauri 应用配置
@@ -179,6 +219,7 @@ D:\claude-code-launcher-tauri\
 |------|------|
 | `src/` | React 前端代码，处理 UI 和用户交互 |
 | `src-tauri/src/` | Rust 后端代码，处理系统调用和业务逻辑 |
+| `src-tauri/resources/bridge/` | Python 桥接服务代码，随应用打包分发 |
 | `src-tauri/capabilities/` | Tauri 权限配置，控制前端 API 访问 |
 | `dist/` | Vite 构建的前端静态文件 |
 | `src-tauri/target/` | Cargo 编译的 Rust 二进制文件 |
@@ -261,9 +302,9 @@ brew install git
 
 ### 4.2 配置管理
 
-#### 4.2.1 两种工作模式
+#### 4.2.1 三种工作模式
 
-**模式 1: Claude 原版模式**
+**模式 1: Claude 原版模式**（本地启动）
 ```typescript
 // 配置代理访问 Claude 官方服务
 {
@@ -272,7 +313,7 @@ brew install git
 }
 ```
 
-**模式 2: 自定义模型模式**
+**模式 2: 自定义模型模式**（本地启动）
 ```typescript
 // 使用自定义模型 API
 {
@@ -283,6 +324,10 @@ brew install git
 ```
 
 > **注意**: Model Name 为纯文本输入框，支持留空（留空时不设置 `ANTHROPIC_MODEL`，Claude Code 使用默认模型）。
+
+**模式 3: 远程桥接模式**（Mobot Bridge）
+
+通过 Python 后端运行完整的 Agent 服务，并通过 WebSocket 连接远程服务器，支持企业级功能。详见 [4.5 远程桥接模式](#45-远程桥接模式mobot-bridge)。
 
 #### 4.2.2 配置验证
 
@@ -468,6 +513,111 @@ cd "C:/path/to/project" && export VAR1="value1" && export VAR2="value2" && claud
 - 使用默认编辑器打开 `~/.claude/settings.json`
 - 方便用户手动修改配置
 
+### 4.5 远程桥接模式（Mobot Bridge）
+
+#### 4.5.1 概述
+
+远程桥接模式将 Claude Agent 能力通过 WebSocket 暴露给远程服务器（如企业微信机器人平台），支持完整的 Agent 功能：
+
+- **多用户会话管理**: 每个用户独立的 Claude SDK 会话
+- **MCP 工具集成**: 通过 `.mcp.json` 配置外部工具服务器
+- **技能系统**: `.claude/skills/` 目录下的可扩展技能
+- **安全钩子**: `allowed_tools.txt` 控制可用工具
+- **定时任务**: APScheduler 支持定时触发
+- **身份人格**: `soul.md` + `system_prompt.md` 自定义 Agent 行为
+
+#### 4.5.2 架构
+
+```
+┌─────────────────┐     WebSocket      ┌──────────────────┐
+│  Remote Server   │ ◄───────────────► │  Bridge Client    │
+│  (企微/钉钉等)   │                    │  (bridge_clientv2)│
+└─────────────────┘                    └────────┬─────────┘
+                                                │ HTTP
+                                                ▼
+                                       ┌──────────────────┐
+                                       │  Agent Server     │
+                                       │  (FastAPI/uvicorn)│
+                                       │  port 5000        │
+                                       └────────┬─────────┘
+                                                │ Claude SDK
+                                                ▼
+                                       ┌──────────────────┐
+                                       │  Claude CLI       │
+                                       │  (subprocess)     │
+                                       └──────────────────┘
+```
+
+**Launcher 启动流程**:
+1. `start_bridge()` → 清理残留端口进程
+2. 确保 Python venv 已创建 + 依赖已安装
+3. 启动 Agent Server（FastAPI on port 5000）
+4. 启动 Bridge Client（WebSocket 连接远程服务器）
+
+#### 4.5.3 Agent 数据目录
+
+首次启动时自动创建于 `%APPDATA%/claude-launcher/agent/`（Windows）或 `~/.config/claude-launcher/agent/`（macOS）：
+
+```
+agent/
+├── .env                    # 主配置（auth_mode, model, proxy 等）
+├── .mcp.json               # MCP 服务器配置
+├── CLAUDE.md               # 项目级说明（SDK 自动加载）
+├── .claude/skills/         # 技能目录
+├── app/
+│   ├── soul.md             # Agent 身份人格（用户可编辑）
+│   └── system_prompt.md    # 系统提示（用户可编辑）
+├── allowed_tools.txt       # 允许工具列表
+├── venv/                   # Python 虚拟环境（自动创建）
+├── workspace/              # 工作目录
+└── logs/                   # 日志目录
+```
+
+#### 4.5.4 Bridge Agent 模式
+
+远程桥接支持两种 Claude 认证方式：
+
+| 模式 | 环境变量 | 说明 |
+|------|----------|------|
+| **Claude 原版** (OAuth) | `WECOM_CLAUDE_AUTH_MODE=oauth` | 使用 Claude OAuth 登录，可选配置 `WECOM_HTTP_PROXY` |
+| **自定义模型** (API Proxy) | `WECOM_CLAUDE_AUTH_MODE=proxy` | 配置 `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY` |
+
+#### 4.5.5 代理传递链
+
+代理仅在 Claude 原版 (OAuth) 模式下使用，且仅传递给 Claude CLI 子进程：
+
+```
+UI config.proxy
+  → Rust bridge_manager.rs 设置 WECOM_HTTP_PROXY 环境变量
+    → Python config.py settings.http_proxy
+      → agent_service._cli_proxy_env dict
+        → ClaudeAgentOptions.env  (user_session.py + agent_service.py)
+          → Claude CLI subprocess (HTTP_PROXY / HTTPS_PROXY)
+```
+
+> **重要**: 代理不会影响 Agent Server 本身的网络请求，仅透传给 Claude CLI 子进程。
+
+#### 4.5.6 UI Agent 配置区
+
+BridgeConfigForm 组件提供 "Agent 配置" 折叠区，可直接打开配置文件编辑：
+
+| 配置项 | 文件 | 说明 |
+|--------|------|------|
+| 身份人格 | `app/soul.md` | 定义 Agent 的角色和性格 |
+| 系统提示 | `app/system_prompt.md` | SDK 系统提示词 |
+| MCP 配置 | `.mcp.json` | 外部工具服务器 |
+| 技能目录 | `.claude/skills/` | 扩展技能文件夹 |
+| 允许工具 | `allowed_tools.txt` | 安全工具白名单 |
+| 项目说明 | `CLAUDE.md` | 项目上下文 |
+| 环境配置 | `.env` | 全部环境变量 |
+
+#### 4.5.7 关键修复与兼容
+
+- **PYTHONUTF8=1**: 解决中文 Windows 系统 GBK 编码错误
+- **端口清理**: 每次启动前 `kill_process_on_port()` 清理残留进程
+- **会话恢复**: 旧 session_id 失效时自动清除并重建连接
+- **资源路径**: Tauri 2 `resource_dir()` 返回安装根目录，resources 在 `resources/bridge/` 子目录
+
 ---
 
 ## 5. 架构设计
@@ -507,6 +657,12 @@ cd "C:/path/to/project" && export VAR1="value1" && export VAR2="value2" && claud
 │  │ _manager.rs     │  │  _storage.rs │  │   .rs    │  │
 │  └─────────────────┘  └──────────────┘  └──────────┘  │
 │                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ bridge_manager.rs (远程桥接进程管理)              │   │
+│  │  - find_python / ensure_venv / init_agent_dir   │   │
+│  │  - start_bridge / stop_bridge / get_logs        │   │
+│  └─────────────────────────────────────────────────┘   │
+│                                                         │
 ├─────────────────────────────────────────────────────────┤
 │                   System Integration                    │
 │                                                         │
@@ -514,6 +670,11 @@ cd "C:/path/to/project" && export VAR1="value1" && export VAR2="value2" && claud
 │  │ Windows  │  │  winget  │  │   npm    │  │ File  │ │
 │  │ Registry │  │          │  │          │  │System │ │
 │  └──────────┘  └──────────┘  └──────────┘  └───────┘ │
+│                                                         │
+│  ┌─────────────────────────────────────────────────┐   │
+│  │ Python Bridge (远程桥接模式)                      │   │
+│  │  Agent Server (FastAPI) ←→ Bridge Client (WS)   │   │
+│  └─────────────────────────────────────────────────┘   │
 │                                                         │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -562,7 +723,8 @@ main.rs
       │   ├── launcher.rs
       │   ├── settings_manager.rs
       │   ├── config_storage.rs
-      │   └── environment.rs
+      │   ├── environment.rs
+      │   └── bridge_manager.rs
       └── tauri::Builder
 ```
 
@@ -1031,6 +1193,9 @@ jobs:
 🚀 **跨平台支持**: Windows 和 macOS 条件编译，平台特定实现
 🚀 **CI/CD 自动化**: GitHub Actions 实现跨平台自动打包发布
 🚀 **跳过权限确认**: 支持 `--dangerously-skip-permissions` 自动化模式
+🚀 **远程桥接**: Python + FastAPI + WebSocket 实现企业级 Agent 服务
+🚀 **自动 venv 管理**: 首次启动自动创建 Python 虚拟环境并安装依赖
+🚀 **代理精确传递**: 代理仅透传给 Claude CLI 子进程，不影响 Agent 服务
 
 ### 10.3 用户体验
 
@@ -1062,6 +1227,8 @@ jobs:
 - ✅ 完整的日志记录系统便于调试
 - ✅ 配置自动迁移 (V1 → V2)
 - ✅ GitHub Actions CI/CD 自动化构建
+- ✅ 远程桥接模式支持企业级 Agent 功能（MCP、技能、安全钩子）
+- ✅ Python venv 自动管理，首次运行自动初始化
 - ✅ 优秀的用户体验和界面设计
 
 该项目不仅是一个实用的工具，也是学习 Tauri 跨平台开发的优秀范例。

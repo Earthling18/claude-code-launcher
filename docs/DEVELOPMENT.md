@@ -1,7 +1,7 @@
 # 开发指南
 
 > **从零开始的完整开发指南**
-> **最后更新**: 2026-02-03
+> **最后更新**: 2026-02-24
 > **支持平台**: Windows 10/11, macOS 10.13+
 
 ---
@@ -14,9 +14,10 @@
 - [4. 调试技巧](#4-调试技巧)
 - [5. 常见问题](#5-常见问题)
 - [6. 最佳实践](#6-最佳实践)
-- [7. CI/CD 自动化构建](#7-cicd-自动化构建)
-- [8. 发布流程](#8-发布流程)
-- [9. 总结](#9-总结)
+- [7. 远程桥接开发](#7-远程桥接开发)
+- [8. CI/CD 自动化构建](#8-cicd-自动化构建)
+- [9. 发布流程](#9-发布流程)
+- [10. 总结](#10-总结)
 
 ---
 
@@ -152,7 +153,39 @@ winget install Microsoft.VisualStudio.2022.BuildTools
 
 ---
 
-#### 1.2.4 Git
+#### 1.2.6 Python (远程桥接模式需要)
+
+**版本要求**: ≥ 3.10
+
+**说明**: 仅在使用远程桥接 (Mobot Bridge) 模式时需要。Launcher 会自动创建 venv 并安装依赖。
+
+**安装方法**:
+
+**Windows (winget)**:
+```bash
+winget install Python.Python.3.12
+```
+
+**Windows (手动下载)**:
+- 下载地址: https://www.python.org/downloads/
+- 安装时勾选 "Add Python to PATH"
+
+**macOS (Homebrew)**:
+```bash
+brew install python@3.12
+```
+
+**验证安装**:
+```bash
+python --version
+# Python 3.12.x
+```
+
+> **注意**: 在中文 Windows 系统上，Launcher 会自动设置 `PYTHONUTF8=1` 环境变量避免 GBK 编码问题。
+
+---
+
+#### 1.2.7 Git
 
 **安装方法**:
 
@@ -884,9 +917,59 @@ git merge feature/auto-update
 
 ---
 
-## 7. CI/CD 自动化构建
+## 7. 远程桥接开发
 
-### 7.1 GitHub Actions 工作流
+### 7.1 Python 桥接代码
+
+桥接代码位于 `src-tauri/resources/bridge/`，随应用打包分发。修改后需重新构建。
+
+**目录结构**:
+- `app/` — FastAPI Agent 服务（配置、API 路由、SDK 封装、会话管理）
+- `bridge/` — WebSocket 桥接客户端
+- `defaults/` — 首次运行的默认配置模板
+- `requirements.txt` — Python 依赖
+
+### 7.2 运行时数据目录
+
+用户数据在 `%APPDATA%/claude-launcher/agent/`（不在项目中）。首次启动 bridge 时由 `bridge_manager.rs` 从 `defaults/` 复制初始化。
+
+### 7.3 环境变量约定
+
+所有 Python 配置使用 `WECOM_` 前缀（pydantic-settings `env_prefix`）：
+
+| 环境变量 | 说明 |
+|----------|------|
+| `WECOM_CLAUDE_AUTH_MODE` | `oauth` 或 `proxy` |
+| `WECOM_HTTP_PROXY` | 代理地址（仅 oauth 模式传给 CLI） |
+| `WECOM_CLAUDE_API_BASE` | 自定义 API 地址 |
+| `WECOM_CLAUDE_API_KEY` | 自定义 API Key |
+| `WECOM_CLAUDE_MODEL` | 自定义模型名 |
+| `WECOM_PORT` | Agent 服务端口（默认 5000） |
+| `WECOM_AGENT_MAX_TURNS` | SDK 最大轮数 |
+
+### 7.4 调试桥接
+
+```bash
+# 手动启动 Agent 服务（在 agent 数据目录下）
+cd %APPDATA%/claude-launcher/agent
+..\venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 5000
+
+# 查看日志
+# Launcher 启动后日志在 BridgeStatusPanel 中实时显示
+```
+
+### 7.5 注意事项
+
+- **PYTHONUTF8=1**: 必须在所有 Python 进程上设置（中文 Windows）
+- **端口冲突**: `kill_process_on_port()` 在每次启动前清理
+- **代理隔离**: `_cli_proxy_env` 仅传给 `ClaudeAgentOptions.env`，不设置在 Agent 进程级别
+- **会话恢复**: SDK resume 失败时自动清除 session_id 并重试
+
+---
+
+## 8. CI/CD 自动化构建
+
+### 8.1 GitHub Actions 工作流
 
 **工作流文件**: `.github/workflows/build.yml`
 
@@ -966,7 +1049,7 @@ jobs:
 
 > **重要**: `check-version` job 会在构建前校验 `tauri.conf.json`、`Cargo.toml`、`package.json` 三处版本号是否一致。不一致会直接阻止构建，避免因版本号不同步导致自动更新死循环。
 
-### 7.2 触发构建
+### 8.2 触发构建
 
 **方式 1: 推送标签**
 ```bash
@@ -979,14 +1062,14 @@ git push origin v0.2.0
 2. 选择 "Build and Release" 工作流
 3. 点击 "Run workflow"
 
-### 7.3 构建产物
+### 8.3 构建产物
 
 | 平台 | 产物 |
 |------|------|
 | Windows | `.exe` 安装包 (NSIS) |
 | macOS | `.app` 应用包 + `.dmg` 磁盘映像 |
 
-### 7.4 重要限制
+### 8.4 重要限制
 
 **跨平台打包限制**:
 - ⚠️ Windows 无法直接打包 macOS 应用
@@ -1000,9 +1083,9 @@ git push origin v0.2.0
 
 ---
 
-## 8. 发布流程
+## 9. 发布流程
 
-### 8.1 版本管理
+### 9.1 版本管理
 
 **三处版本号必须同步修改**（CI 会自动校验一致性）：
 
@@ -1021,7 +1104,7 @@ git push origin v0.2.0
 
 ---
 
-### 8.2 构建发布版本
+### 9.2 构建发布版本
 
 ```bash
 # 1. 清理旧构建
@@ -1046,7 +1129,7 @@ ls -lh
 
 ---
 
-### 8.3 测试发布版本
+### 9.3 测试发布版本
 
 **Windows 安装测试**:
 1. 运行 `claude-code-launcher-tauri_0.2.0_x64-setup.exe`
@@ -1066,7 +1149,7 @@ ls -lh
 
 ---
 
-### 8.4 发布到 GitHub
+### 9.4 发布到 GitHub
 
 ```bash
 # 1. 提交代码
@@ -1089,7 +1172,7 @@ git push origin master --tags
 
 ---
 
-### 8.5 更新文档
+### 9.5 更新文档
 
 **更新 CHANGELOG.md**:
 ```markdown
@@ -1110,14 +1193,15 @@ git push origin master --tags
 
 ---
 
-## 9. 总结
+## 10. 总结
 
-### 9.1 开发检查清单
+### 10.1 开发检查清单
 
 **环境准备**:
 - ✅ Node.js ≥ 18.0.0
 - ✅ Rust ≥ 1.75.0
 - ✅ C++ Build Tools (Windows)
+- ✅ Python ≥ 3.10（远程桥接模式）
 - ✅ Git
 
 **项目初始化**:
@@ -1138,7 +1222,7 @@ git push origin master --tags
 
 ---
 
-### 9.2 相关资源
+### 10.2 相关资源
 
 **官方文档**:
 - [Tauri 官方文档](https://v2.tauri.app/)
