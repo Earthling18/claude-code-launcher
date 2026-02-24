@@ -63,15 +63,21 @@ def reload_api_keys() -> int:
 
 
 async def verify_api_key(
-    authorization: str = Header(..., description="Bearer API Key"),
+    authorization: Optional[str] = Header(None, description="Bearer API Key"),
 ) -> ApiKeyInfo:
     """
     FastAPI Depends 依赖：验证 Authorization Header。
 
+    当没有配置 api_keys.json 时（桌面 Launcher 场景），跳过认证。
+
     Raises:
-        HTTPException 401: 无效或禁用的 API Key
+        HTTPException 401: 配置了 API Key 但提供的 key 无效或禁用
     """
-    if not authorization.startswith("Bearer "):
+    # 没有配置任何 API Key 时，跳过认证（桌面本地调用场景）
+    if not _key_store:
+        return ApiKeyInfo(key="", name="local", enabled=True)
+
+    if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid Authorization header format")
 
     token = authorization[7:].strip()
