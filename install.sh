@@ -13,15 +13,23 @@ echo ""
 
 # 检测架构
 ARCH=$(uname -m)
-if [ "$ARCH" = "arm64" ]; then
-    DMG_NAME="Claude.Code.Launcher_0.2.4_aarch64.dmg"
-else
+if [ "$ARCH" != "arm64" ]; then
     echo -e "${RED}错误：此脚本仅支持 macOS ARM64 (Apple Silicon)${NC}"
     echo "如果你使用的是 Intel Mac，请手动下载安装"
     exit 1
 fi
 
-DMG_URL="https://github.com/Earthling18/claude-code-launcher/releases/latest/download/${DMG_NAME}"
+# 获取最新版本号
+echo -e "${YELLOW}获取最新版本...${NC}"
+LATEST_VERSION=$(curl -sL https://api.github.com/repos/Earthling18/claude-code-launcher/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
+if [ -z "$LATEST_VERSION" ]; then
+    echo -e "${RED}错误：无法获取最新版本${NC}"
+    exit 1
+fi
+echo "最新版本: v${LATEST_VERSION}"
+
+DMG_NAME="Claude.Code.Launcher_${LATEST_VERSION}_aarch64.dmg"
+DMG_URL="https://github.com/Earthling18/claude-code-launcher/releases/download/v${LATEST_VERSION}/${DMG_NAME}"
 DMG_PATH="/tmp/claude-code-launcher.dmg"
 VOLUME_NAME="Claude Code Launcher"
 APP_NAME="Claude Code Launcher.app"
