@@ -475,21 +475,46 @@ impl BridgeManager {
         Ok(())
     }
 
-    /// Quick check if embedded Python + deps are ready
+    /// Quick check if Python environment + deps are ready
     fn check_python_env(agent_dir: &Path) -> Result<String, String> {
-        let python_dir = agent_dir.join("python");
-        let python_exe = python_dir.join("python.exe");
+        let venv_dir = agent_dir.join("venv");
 
-        if !python_exe.exists() || !python_dir.join(".deps_installed").exists() {
+        #[cfg(windows)]
+        let python_exe = agent_dir.join("python").join("python.exe");
+        #[cfg(not(windows))]
+        let python_exe = venv_dir.join("bin").join("python");
+
+        let marker = {
+            #[cfg(windows)]
+            { agent_dir.join("python").join(".deps_installed") }
+            #[cfg(not(windows))]
+            { venv_dir.join(".deps_installed") }
+        };
+
+        if !python_exe.exists() || !marker.exists() {
             return Err("Python environment not ready. Please wait for environment preparation to complete.".to_string());
         }
 
         Ok(python_exe.to_string_lossy().to_string())
     }
 
-    /// Setup embedded Python and install wheels offline.
-    /// No system Python needed, no internet needed. Runs in seconds.
+    /// Setup Python environment and install dependencies.
+    /// Windows: embedded Python + offline wheels (no system Python needed)
+    /// macOS/Linux: system Python + venv + pip install from network
     fn ensure_python_env(agent_dir: &Path, bridge_dir: &Path) -> Result<String, String> {
+        #[cfg(windows)]
+        {
+            Self::ensure_python_env_windows(agent_dir, bridge_dir)
+        }
+        #[cfg(not(windows))]
+        {
+            Self::ensure_python_env_unix(agent_dir, bridge_dir)
+        }
+    }
+
+    /// Windows: Setup embedded Python and install wheels offline.
+    #[cfg(windows)]
+    fn ensure_python_env_windows(agent_dir: &Path, bridge_dir: &Path) -> Result<String, String> {
         let python_dir = agent_dir.join("python");
         let python_exe = python_dir.join("python.exe");
         let marker = python_dir.join(".deps_installed");
@@ -586,7 +611,6 @@ impl BridgeManager {
         pip_cmd.args(["-c", &bootstrap_script])
             .env("PYTHONUTF8", "1");
 
-        #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
             pip_cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
@@ -609,6 +633,163 @@ impl BridgeManager {
         log::info!("Python environment ready (embedded + offline wheels)");
 
         Ok(python_exe.to_string_lossy().to_string())
+    }
+
+    /// macOS/Linux: Setup venv using system Python and install deps via pip.
+    #[cfg(not(windows))]
+    fn ensure_python_env_unix(agent_dir: &Path, bridge_dir: &Path) -> Result<String, String> {
+        let venv_dir = agent_dir.join("venv");
+        let python_exe = venv_dir.join("bin").join("python");
+        let pip_exe = venv_dir.join("bin").join("pip");
+        let marker = venv_dir.join(".deps_installed");
+
+        // Skip if already fully set up
+        if python_exe.exists() && marker.exists() {
+            return Ok(python_exe.to_string_lossy().to_string());
+        }
+
+        // Step 1: Find system Python
+        let system_python = Self::find_system_python()?;
+        log::info!("Using system Python: {}", system_python);
+
+        // Step 2: Create venv if not exists
+        if !python_exe.exists() {
+            log::info!("Creating virtual environment at: {}", venv_dir.display());
+            let output = Command::new(&system_python)
+                .args(["-m", "venv", &venv_dir.to_string_lossy()])
+                .output()
+                .map_err(|_| "创建 Python 虚拟环境失败，请确保已安装 Python 3.10+".to_string())?;
+
+            if !output.status.success() {
+                return Err("创建 Python 虚拟环境失败，请确保已安装 Python 3.10+\n\n安装命令：brew install python@3.12".to_string());
+            }
+        }
+
+        // Step 3: Upgrade pip first (old pip may have SSL issues)
+        log::info!("Upgrading pip...");
+        let _ = Command::new(python_exe.to_string_lossy().to_string())
+            .args(["-m", "pip", "install", "--upgrade", "pip"])
+            .output();
+
+        // Step 4: Install dependencies via pip
+        let req_file = bridge_dir.join("requirements.txt");
+        if !req_file.exists() {
+            return Err("依赖配置文件丢失，请重新安装应用".to_string());
+        }
+
+        log::info!("Installing Python packages via pip...");
+        let output = Command::new(pip_exe.to_string_lossy().to_string())
+            .args(["install", "-r", &req_file.to_string_lossy()])
+            .output()
+            .map_err(|_| "安装 Python 依赖失败，请检查网络连接".to_string())?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // Clean up so next attempt starts fresh
+            let _ = std::fs::remove_dir_all(&venv_dir);
+
+            // Provide user-friendly error messages
+            if stderr.contains("SSL") || stderr.contains("connection") {
+                return Err("安装依赖失败：网络连接异常\n\n请检查网络或配置代理后重试".to_string());
+            } else if stderr.contains("No matching distribution") || stderr.contains("Could not find") {
+                return Err("安装依赖失败：Python 版本过低\n\n请安装 Python 3.10+：brew install python@3.12".to_string());
+            } else {
+                return Err(format!("安装依赖失败：{}\n\n如问题持续，请尝试删除环境后重试",
+                    stderr.lines().take(3).collect::<Vec<_>>().join("\n")));
+            }
+        }
+
+        // Write marker
+        let _ = std::fs::write(&marker, "ok");
+        log::info!("Python environment ready (venv + pip)");
+
+        Ok(python_exe.to_string_lossy().to_string())
+    }
+
+    /// Find system Python (python3 >= 3.10) on macOS/Linux
+    #[cfg(not(windows))]
+    fn find_system_python() -> Result<String, String> {
+        // Try common Python paths - prioritize newer installations over system Python
+        let candidates = [
+            "/usr/local/bin/python3",      // Homebrew on Intel Mac
+            "/opt/homebrew/bin/python3",   // Homebrew on Apple Silicon
+            "/opt/local/bin/python3",      // MacPorts
+            "/usr/bin/python3",            // System Python (often old)
+        ];
+
+        for path in &candidates {
+            if let Some(python) = Self::check_python_version(path, 10) {
+                return Ok(python);
+            }
+        }
+
+        // Try `which python3`
+        let output = Command::new("which")
+            .arg("python3")
+            .output();
+
+        if let Ok(o) = output {
+            if o.status.success() {
+                let path = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if let Some(python) = Self::check_python_version(&path, 10) {
+                    return Ok(python);
+                }
+            }
+        }
+
+        Err("未找到 Python 3.10+\n\n请先安装 Python：\nmacOS: brew install python@3.12\nUbuntu: sudo apt install python3.12".to_string())
+    }
+
+    /// Check if Python at given path exists and meets minimum minor version requirement
+    #[cfg(not(windows))]
+    fn check_python_version(path: &str, min_minor: u32) -> Option<String> {
+        if !std::path::Path::new(path).exists() {
+            return None;
+        }
+
+        // Run python --version to check version
+        let output = Command::new(path)
+            .args(["--version"])
+            .output()
+            .ok()?;
+
+        if !output.status.success() {
+            return None;
+        }
+
+        // Parse "Python 3.X.Y"
+        let version_str = String::from_utf8_lossy(&output.stdout);
+        let version_str = version_str.trim();
+
+        // Also check stderr (some Python versions print to stderr)
+        let stderr_str = String::from_utf8_lossy(&output.stderr);
+        let version_line = if version_str.starts_with("Python") {
+            version_str
+        } else if stderr_str.trim().starts_with("Python") {
+            stderr_str.trim()
+        } else {
+            return None;
+        };
+
+        // Extract minor version from "Python 3.X.Y"
+        let parts: Vec<&str> = version_line.split_whitespace().collect();
+        if parts.len() < 2 {
+            return None;
+        }
+
+        let version_parts: Vec<&str> = parts[1].split('.').collect();
+        if version_parts.len() < 2 {
+            return None;
+        }
+
+        let minor: u32 = version_parts[1].parse().ok()?;
+        if minor >= min_minor {
+            log::info!("Found Python {} at {}", parts[1], path);
+            Some(path.to_string())
+        } else {
+            log::info!("Skipping {} (version {} < 3.{})", path, parts[1], min_minor);
+            None
+        }
     }
 
     /// Find a wheel file by package name prefix in the wheels directory
