@@ -60,15 +60,23 @@
 
 ### macOS (Apple Silicon)
 
-一键安装：
+**前置要求**：远程桥接模式需要 Python 3.10+，可通过 Homebrew 安装：
+```bash
+brew install python@3.12
+```
 
+**一键安装应用**：
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Earthling18/claude-code-launcher/master/install.sh | bash
 ```
 
+> 注：首次下载的 DMG 可能提示"已损坏"，这是 macOS 对未签名应用的限制。安装脚本会自动处理此问题。
+
 ### Windows
 
-从 [Releases](https://github.com/Earthling18/claude-code-launcher/releases) 下载 `.exe` 安装包。
+从 [Releases](https://github.com/Earthling18/claude-code-launcher/releases) 下载 `.exe` 安装包，双击安装即可。
+
+Windows 版本内置 Python 环境，无需额外安装依赖。
 
 ## 开发
 
@@ -107,7 +115,8 @@ npm run tauri:build
 
 ### Agent 数据目录（远程桥接模式）
 - Windows: `%APPDATA%\claude-launcher\agent\`
-- macOS/Linux: `~/.config/claude-launcher/agent/`
+- macOS: `~/Library/Application Support/claude-launcher/agent/`
+- Linux: `~/.config/claude-launcher/agent/`
 
 ```
 agent/
@@ -119,7 +128,8 @@ agent/
 │   ├── soul.md             # 身份人格
 │   └── system_prompt.md    # 系统提示
 ├── .claude/skills/         # 技能目录
-├── venv/                   # Python 虚拟环境（自动创建）
+├── python/                 # Windows: 内置 Python 环境
+├── venv/                   # macOS/Linux: Python 虚拟环境（自动创建）
 ├── workspace/              # 工作目录
 └── logs/                   # 日志目录
 ```
@@ -133,6 +143,7 @@ agent/
 | 复制命令 | ✅ | ✅ (Tauri 剪贴板 API) |
 | 安装/更新 | ✅ winget | ✅ brew/npm |
 | 自动更新 | ✅ NSIS | ✅ DMG |
+| 远程桥接 Python | ✅ 内置 | ✅ 系统 Python 3.10+ |
 
 ### macOS 特殊处理
 
@@ -140,6 +151,7 @@ macOS GUI 应用不继承 shell 的 PATH 环境变量，因此：
 - **依赖检测**：自动扫描常见安装路径（Homebrew、nvm、pnpm、Volta 等）
 - **启动功能**：通过 Terminal.app 启动，Terminal 会加载完整 PATH
 - **剪贴板**：使用 Tauri 剪贴板插件，而非浏览器 API
+- **远程桥接模式**：使用系统 Python 3.10+ 创建虚拟环境，首次启动自动安装依赖
 
 ## 发版流程
 
