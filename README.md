@@ -56,6 +56,20 @@
 - **剪贴板**：@tauri-apps/plugin-clipboard-manager (macOS 必需)
 - **自动更新**：@tauri-apps/plugin-updater + GitHub Releases
 
+## 安装
+
+### macOS (Apple Silicon)
+
+一键安装：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Earthling18/claude-code-launcher/master/install.sh | bash
+```
+
+### Windows
+
+从 [Releases](https://github.com/Earthling18/claude-code-launcher/releases) 下载 `.exe` 安装包。
+
 ## 开发
 
 ### 环境要求
