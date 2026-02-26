@@ -7,6 +7,7 @@ interface BridgeStatusPanelProps {
   agentMode?: 'claude' | 'custom';
   modelProxy?: string;
   onStatusChange?: (status: BridgeStatus) => void;
+  onBeforeStart?: () => Promise<void>;
 }
 
 export const BridgeStatusPanel: React.FC<BridgeStatusPanelProps> = ({
@@ -14,6 +15,7 @@ export const BridgeStatusPanel: React.FC<BridgeStatusPanelProps> = ({
   agentMode = 'claude',
   modelProxy = '',
   onStatusChange,
+  onBeforeStart,
 }) => {
   const [status, setStatus] = useState<BridgeStatus>({
     running: false,
@@ -96,6 +98,11 @@ export const BridgeStatusPanel: React.FC<BridgeStatusPanelProps> = ({
 
     setLoading(true);
     try {
+      // Step 0: Save config before starting (if callback provided)
+      if (onBeforeStart) {
+        await onBeforeStart();
+      }
+
       // Step 1: Prepare Python environment (venv + pip install, may take minutes on first run)
       setPreparing(true);
       try {

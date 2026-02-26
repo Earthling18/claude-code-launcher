@@ -26,7 +26,7 @@ Claude Code桌面启动器完整源码，Tauri 2应用，支持多项目管理�
   - App.tsx — 应用入口
 - src-tauri/ — Rust后端
   - Cargo.toml — Rust依赖配置
-  - tauri.conf.json — Tauri配置（v0.2.4）
+  - tauri.conf.json — Tauri配置（v0.2.5）
   - resources/ — 资源文件
   - icons/ — 应用图标
 - .github/ — CI/CD配置
@@ -36,6 +36,9 @@ Claude Code桌面启动器完整源码，Tauri 2应用，支持多项目管理�
 - 项目CRUD + 拖拽排序 + 置顶
 - 4种启动模式：原生/自定义/远程Bridge/Mobot
 - 远程Bridge：Python FastAPI + Claude Agent SDK，WebSocket长连接
+- 远程Bridge自动获取Key：通过管理后台API自动创建/获取用户Bind Key，基于OS用户名识别
+- 远程Bridge连接提示：显示可复制的 /变身 命令 + 艾灵企微二维码
+- 启动桥接时自动保存配置
 - 依赖检测 + 一键安装
 - 自动更新（GitHub Releases）
 - 新手引导

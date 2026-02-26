@@ -1,7 +1,7 @@
 # 后端开发指南
 
 > **技术栈**: Rust + Tauri 2 + Tokio + Windows/macOS API
-> **最后更新**: 2026-02-03
+> **最后更新**: 2026-02-26
 
 ---
 
@@ -1327,6 +1327,44 @@ pub fn save_app_config(config: config_storage::AppConfig) -> Result<(), String> 
 pub fn load_app_config() -> Result<config_storage::AppConfig, String> {
     config_storage::load_config()
 }
+
+// ============ 桥接管理 Commands ============
+
+#[tauri::command]
+pub fn get_hostname() -> String {
+    // 优先读取 ~/.agent-bridge/client_id，回退到 COMPUTERNAME/HOSTNAME
+    if let Some(home) = dirs::home_dir() {
+        let id_file = home.join(".agent-bridge").join("client_id");
+        if let Ok(id) = std::fs::read_to_string(&id_file) {
+            let id = id.trim().to_string();
+            if !id.is_empty() { return id; }
+        }
+    }
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+#[tauri::command]
+pub fn get_username() -> String {
+    // 获取系统用户名并转小写
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "unknown".to_string())
+        .to_lowercase()
+}
+
+#[tauri::command]
+pub async fn bridge_get_or_create_key(username: String) -> Result<String, String> {
+    // 使用 .no_proxy() 绕过系统代理
+    let client = reqwest::Client::builder().no_proxy().build()
+        .map_err(|e| format!("HTTP 客户端初始化失败: {}", e))?;
+    // 1. POST /api/login 获取 admin_token Cookie
+    // 2. GET /api/admin/users/{username} 查询已有用户
+    // 3. 如果 404，POST /api/admin/users 创建新用户
+    // 4. 返回 api_key
+    // ...
+}
 ```
 
 ### 4.2 注册 Commands (lib.rs)
@@ -1354,6 +1392,10 @@ pub fn run() {
             commands::open_settings_file,
             commands::save_app_config,
             commands::load_app_config,
+            // Bridge admin API commands
+            commands::get_hostname,
+            commands::get_username,
+            commands::bridge_get_or_create_key,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

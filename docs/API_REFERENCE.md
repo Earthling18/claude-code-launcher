@@ -1,8 +1,8 @@
 # API 参考文档
 
 > **Tauri Commands API 完整参考**
-> **最后更新**: 2026-02-03
-> **API 数量**: 34 个 Tauri Commands
+> **最后更新**: 2026-02-26
+> **API 数量**: 37 个 Tauri Commands
 
 ---
 
@@ -15,16 +15,17 @@
 - [5. 设置管理 API](#5-设置管理-api)
 - [6. 应用配置 API](#6-应用配置-api)
 - [7. 项目管理 API](#7-项目管理-api)
-- [8. 数据类型](#8-数据类型)
-- [9. 错误处理](#9-错误处理)
-- [10. 使用示例](#10-使用示例)
-- [11. 总结](#11-总结)
+- [8. 桥接管理 API](#8-桥接管理-api)
+- [9. 数据类型](#9-数据类型)
+- [10. 错误处理](#10-错误处理)
+- [11. 使用示例](#11-使用示例)
+- [12. 总结](#12-总结)
 
 ---
 
 ## 1. API 概览
 
-### 1.1 所有可用 Commands (34 个)
+### 1.1 所有可用 Commands (37 个)
 
 | 分类 | Command 名称 | 说明 |
 |------|--------------|------|
@@ -62,6 +63,9 @@
 | | `generate_project_powershell_command` | 生成项目的 PowerShell 命令 |
 | | `generate_project_cmd_command` | 生成项目的 CMD 命令 |
 | | `generate_project_bash_command` | 生成项目的 Bash 命令 |
+| **桥接管理** | `get_hostname` | 获取本机主机名（Bridge client_id） |
+| | `get_username` | 获取当前系统用户名（小写） |
+| | `bridge_get_or_create_key` | 通过 Admin API 创建/获取用户 API Key |
 
 ### 1.2 调用方式
 
@@ -1388,7 +1392,91 @@ const homeDir = await invoke<string>('get_home_directory');
 
 ---
 
-## 8. 数据类型
+## 8. 桥接管理 API
+
+### 8.1 get_hostname
+
+**说明**: 获取本机主机名，用作 Bridge client_id。优先读取 `~/.agent-bridge/client_id` 文件，如不存在则回退到系统环境变量。
+
+**前端调用**:
+```typescript
+const hostname = await invoke<string>('get_hostname');
+```
+
+**参数**: 无
+
+**返回值**: `Promise<string>`
+
+**返回示例**: `"shawnlin-NB1"`
+
+**检测逻辑**:
+1. 尝试读取 `~/.agent-bridge/client_id` 文件内容
+2. 如果文件不存在或为空，回退到 `COMPUTERNAME` 环境变量 (Windows)
+3. 再回退到 `HOSTNAME` 环境变量 (macOS/Linux)
+4. 最终回退到 `"unknown"`
+
+**使用场景**:
+- 生成 `/变身 bridge:<hostname>:<key>` 连接口令
+
+---
+
+### 8.2 get_username
+
+**说明**: 获取当前系统用户名（自动转为小写），用于在 Bridge Admin API 中创建/查询用户。
+
+**前端调用**:
+```typescript
+const username = await invoke<string>('get_username');
+```
+
+**参数**: 无
+
+**返回值**: `Promise<string>`
+
+**返回示例**: `"shawnlin"`
+
+**检测逻辑**:
+1. 读取 `USERNAME` 环境变量 (Windows)
+2. 回退到 `USER` 环境变量 (macOS/Linux)
+3. 最终回退到 `"unknown"`
+4. 结果统一转为小写
+
+---
+
+### 8.3 bridge_get_or_create_key
+
+**说明**: 通过 Bridge Admin API 自动创建用户或获取已有用户的 API Key。使用 `.no_proxy()` 绕过系统代理。
+
+**前端调用**:
+```typescript
+const key = await invoke<string>('bridge_get_or_create_key', { username: 'shawnlin' });
+```
+
+**参数**:
+
+| 参数名 | 类型 | 必需 | 说明 |
+|--------|------|------|------|
+| `username` | `string` | 是 | 用户名（小写英文） |
+
+**返回值**: `Promise<string>` — 用户的 API Key
+
+**操作流程**:
+1. 使用 `reqwest::Client::builder().no_proxy()` 构建 HTTP 客户端（绕过系统代理）
+2. POST `/api/login` 登录获取 `admin_token` Cookie
+3. GET `/api/admin/users/{username}` 尝试查询已有用户
+4. 如果用户存在，直接返回 `api_key`
+5. 如果用户不存在（404），POST `/api/admin/users` 创建新用户并返回 `api_key`
+
+**错误情况**:
+- 无法连接 Admin API（外网环境）
+- 登录失败
+- 创建用户失败
+
+**错误提示**: 前端统一显示"获取失败，请联系管理员"
+
+---
+
+## 9. 数据类型
 
 ### 8.1 DependencyStatus
 
@@ -1538,9 +1626,9 @@ interface ProjectConfig {
 
 ---
 
-## 9. 错误处理
+## 10. 错误处理
 
-### 9.1 错误类型
+### 10.1 错误类型
 
 所有 API 调用都返回 `Promise`，失败时会 reject 一个字符串错误消息。
 
@@ -1553,7 +1641,7 @@ Promise.resolve(result)
 Promise.reject("错误消息")
 ```
 
-### 9.2 常见错误
+### 10.2 常见错误
 
 | 错误消息 | 原因 | 解决方法 |
 |----------|------|----------|
@@ -1564,7 +1652,7 @@ Promise.reject("错误消息")
 | "设置文件不存在" | 从未保存过配置 | 先保存配置 |
 | "启动失败: ..." | 系统调用失败 | 查看详细错误信息 |
 
-### 9.3 错误处理模式
+### 10.3 错误处理模式
 
 **模式 1: try-catch**
 ```typescript
@@ -1596,9 +1684,9 @@ const config = await invoke<AppConfig>('load_app_config')
 
 ---
 
-## 10. 使用示例
+## 11. 使用示例
 
-### 10.1 完整的依赖检测流程
+### 11.1 完整的依赖检测流程
 
 ```typescript
 async function checkAndInstallDependencies() {
@@ -1665,7 +1753,7 @@ async function checkAndInstallDependencies() {
 
 ---
 
-### 10.2 启动 Claude Code 的完整流程
+### 11.2 启动 Claude Code 的完整流程
 
 ```typescript
 async function launchClaudeCode() {
@@ -1714,7 +1802,7 @@ async function launchClaudeCode() {
 
 ---
 
-### 10.3 配置管理的完整流程
+### 11.3 配置管理的完整流程
 
 ```typescript
 // 启动时加载配置
@@ -1786,7 +1874,7 @@ async function saveToClaudeSettings() {
 
 ---
 
-### 10.4 生成和复制命令
+### 11.4 生成和复制命令
 
 ```typescript
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -1850,9 +1938,9 @@ async function detectPlatformAndCopy() {
 
 ---
 
-## 11. 总结
+## 12. 总结
 
-### 11.1 API 设计特点
+### 12.1 API 设计特点
 
 - ✅ **命名清晰**: 函数名直接表达功能
 - ✅ **类型安全**: 完整的 TypeScript 类型定义
@@ -1861,7 +1949,7 @@ async function detectPlatformAndCopy() {
 - ✅ **职责单一**: 每个 API 只做一件事
 - ✅ **跨平台**: 支持 Windows 和 macOS
 
-### 11.2 API 统计
+### 12.2 API 统计
 
 | 分类 | 数量 |
 |------|------|
@@ -1872,9 +1960,10 @@ async function detectPlatformAndCopy() {
 | 设置管理 | 3 |
 | 应用配置 | 2 |
 | 项目管理 | 10 |
-| **总计** | **34** |
+| 桥接管理 | 3 |
+| **总计** | **37** |
 
-### 11.3 使用建议
+### 12.3 使用建议
 
 1. **依赖检测**: 应用启动时自动检测，检测失败时刷新 PATH 后重试
 2. **安装/更新**: 在新窗口执行，不阻塞主界面
@@ -1883,7 +1972,7 @@ async function detectPlatformAndCopy() {
 5. **设置管理**: 保存前确认用户意图
 6. **配置存储**: 窗口关闭时自动保存
 
-### 11.4 相关文档
+### 12.4 相关文档
 
 - [项目总览](./PROJECT_DOCUMENTATION.md)
 - [前端开发指南](./FRONTEND_GUIDE.md)

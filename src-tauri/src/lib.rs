@@ -80,6 +80,10 @@ pub fn run() {
             // Claude login check commands
             commands::check_claude_login,
             commands::launch_claude_for_login,
+            // Bridge admin API commands
+            commands::get_hostname,
+            commands::get_username,
+            commands::bridge_get_or_create_key,
             // Remote config commands
             commands::load_remote_config,
             commands::save_remote_config,

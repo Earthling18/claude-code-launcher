@@ -116,6 +116,9 @@ export const bridgeApi = {
   restart: (id: string) => invoke<void>('restart_bridge', { id }),
   checkDeps: () => invoke<void>('check_bridge_deps'),
   prepareEnv: () => invoke<void>('prepare_bridge_env'),
+  getHostname: () => invoke<string>('get_hostname'),
+  getUsername: () => invoke<string>('get_username'),
+  getOrCreateKey: (username: string) => invoke<string>('bridge_get_or_create_key', { username }),
 };
 
 // Claude login check API

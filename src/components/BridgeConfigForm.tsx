@@ -27,6 +27,8 @@ interface BridgeConfigFormProps {
   onModelBaseUrlChange: (v: string) => void;
   onModelTokenChange: (v: string) => void;
   errors?: Record<string, string>;
+  onFetchKey?: () => void;
+  fetchingKey?: boolean;
 }
 
 export const BridgeConfigForm: React.FC<BridgeConfigFormProps> = ({
@@ -55,6 +57,8 @@ export const BridgeConfigForm: React.FC<BridgeConfigFormProps> = ({
   onModelBaseUrlChange,
   onModelTokenChange,
   errors = {},
+  onFetchKey,
+  fetchingKey = false,
 }) => {
   const [showBindKey, setShowBindKey] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -73,9 +77,19 @@ export const BridgeConfigForm: React.FC<BridgeConfigFormProps> = ({
             type={showBindKey ? 'text' : 'password'}
             value={bridgeBindKey}
             onChange={(e) => onBindKeyChange(e.target.value)}
-            placeholder="请联系管理员获取 Bind Key"
+            placeholder="点击获取按钮自动获取 Key"
             className="flex-1 px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px]"
           />
+          {onFetchKey && (
+            <button
+              type="button"
+              onClick={onFetchKey}
+              disabled={fetchingKey}
+              className="px-3 py-2 text-[12px] bg-[#10b981] hover:bg-[#059669] disabled:opacity-50 text-white rounded transition-colors whitespace-nowrap"
+            >
+              {fetchingKey ? '获取中...' : '获取'}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowBindKey(!showBindKey)}
@@ -88,7 +102,7 @@ export const BridgeConfigForm: React.FC<BridgeConfigFormProps> = ({
           <p className="text-[10px] text-red-500 mt-1">{errors.bridgeBindKey}</p>
         )}
         <p className="text-[10px] text-[#999999] mt-1">
-          请联系管理员获取，格式如 sk-xxxxxxxx
+          点击获取按钮自动创建/获取 Key
         </p>
       </div>
 

@@ -7,6 +7,7 @@ use std::io::{BufRead, BufReader, Read as IoRead};
 
 use once_cell::sync::Lazy;
 
+use crate::commands::bridge_admin_config;
 use crate::models::ProjectConfig;
 
 const MAX_LOG_LINES: usize = 200;
@@ -154,6 +155,13 @@ impl BridgeManager {
         agent_cmd.env("https_proxy", "");
         agent_cmd.env("ALL_PROXY", "");
         agent_cmd.env("all_proxy", "");
+
+        // Inject service configs from compiled bridge_admin.json (not in source code)
+        let svc_cfg = bridge_admin_config();
+        agent_cmd.env("WECOM_SENDMSG_API_URL", &svc_cfg.sendmsg_api_url);
+        agent_cmd.env("WECOM_SENDMSG_AUTH_KEY", &svc_cfg.sendmsg_auth_key);
+        agent_cmd.env("WECOM_SENDMSG_DEP_USER_ID", &svc_cfg.sendmsg_dep_user_id);
+        agent_cmd.env("WECOM_COS_API_BASE", &svc_cfg.cos_api_base);
 
         // Auth mode and model config via environment variables.
         if config.bridge_agent_mode == "claude" {

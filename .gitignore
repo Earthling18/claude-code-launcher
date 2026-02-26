@@ -34,6 +34,9 @@ Thumbs.db
 __pycache__/
 *.pyc
 
+# Sensitive config (contains credentials, injected at build time)
+src-tauri/resources/bridge/bridge_admin.json
+
 # Build artifacts
 *.exe
 *.dmg

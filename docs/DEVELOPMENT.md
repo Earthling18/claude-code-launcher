@@ -1,7 +1,7 @@
 # 开发指南
 
 > **从零开始的完整开发指南**
-> **最后更新**: 2026-02-24
+> **最后更新**: 2026-02-26
 > **支持平台**: Windows 10/11, macOS 10.13+
 
 ---
@@ -962,7 +962,23 @@ git merge feature/auto-update
 3. 将 `.bin` 文件重命名回 `.exe`（NSIS 打包绕过方案）
 4. 从 `wheels/` 离线安装 Python 依赖
 
-### 7.3 环境变量约定
+### 7.3 Bridge Admin API
+
+Launcher 通过 Rust 后端直接调用 Bridge Admin API 实现一键获取 Bind Key：
+
+| API | 方法 | 说明 |
+|-----|------|------|
+| `/api/login` | POST | 登录获取 admin_token Cookie |
+| `/api/admin/users/{user_id}` | GET | 查询用户及其 api_key |
+| `/api/admin/users` | POST | 创建新用户并返回 api_key |
+
+**Rust 实现要点**:
+- Admin URL/凭据: 从 `bridge_admin.json` 读取（编译时嵌入，gitignored）
+- 认证: Cookie-based `admin_token`
+- **必须使用 `.no_proxy()`**: 系统可能配置了外部 HTTP 代理，会导致内网 API 请求失败
+- 用户 ID 和名称均使用系统用户名的小写形式
+
+### 7.4 环境变量约定
 
 所有 Python 配置使用 `WECOM_` 前缀（pydantic-settings `env_prefix`）：
 
@@ -976,7 +992,7 @@ git merge feature/auto-update
 | `WECOM_PORT` | Agent 服务端口（默认 5000） |
 | `WECOM_AGENT_MAX_TURNS` | SDK 最大轮数 |
 
-### 7.4 调试桥接
+### 7.5 调试桥接
 
 ```bash
 # 手动启动 Agent 服务（在 agent 数据目录下）
@@ -987,12 +1003,13 @@ python\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 5000
 # Launcher 启动后日志在 BridgeStatusPanel 中实时显示
 ```
 
-### 7.5 注意事项
+### 7.6 注意事项
 
 - **PYTHONUTF8=1**: 必须在所有 Python 进程上设置（中文 Windows）
 - **端口冲突**: `kill_process_on_port()` 在每次启动前清理
 - **代理隔离**: `_cli_proxy_env` 仅传给 `ClaudeAgentOptions.env`，不设置在 Agent 进程级别
 - **会话恢复**: SDK resume 失败时自动清除 session_id 并重试
+- **Admin API 代理绕过**: `bridge_get_or_create_key` 必须使用 `.no_proxy()` 构建 HTTP 客户端，否则系统代理会拦截内网请求
 
 ---
 

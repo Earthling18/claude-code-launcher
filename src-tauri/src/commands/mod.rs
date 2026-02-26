@@ -431,6 +431,140 @@ pub fn launch_claude_for_login(proxy: Option<String>) -> Result<(), String> {
     Launcher::launch_with_config_and_dir(config, Some(home_dir))
 }
 
+// ============ Bridge Admin API Commands ============
+
+#[derive(serde::Deserialize)]
+pub struct BridgeAdminConfig {
+    pub url: String,
+    pub user: String,
+    pub pass: String,
+    pub sendmsg_api_url: String,
+    pub sendmsg_auth_key: String,
+    pub sendmsg_dep_user_id: String,
+    pub cos_api_base: String,
+}
+
+pub fn bridge_admin_config() -> BridgeAdminConfig {
+    serde_json::from_str(include_str!("../../resources/bridge/bridge_admin.json"))
+        .expect("Invalid bridge_admin.json")
+}
+
+#[tauri::command]
+pub fn get_hostname() -> String {
+    // Try reading persisted client_id first (matches Python bridge client behavior)
+    if let Some(home) = dirs::home_dir() {
+        let id_file = home.join(".agent-bridge").join("client_id");
+        if let Ok(id) = std::fs::read_to_string(&id_file) {
+            let id = id.trim().to_string();
+            if !id.is_empty() {
+                return id;
+            }
+        }
+    }
+    // Fallback to COMPUTERNAME (Windows) or HOSTNAME
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "unknown".to_string())
+}
+
+#[tauri::command]
+pub fn get_username() -> String {
+    std::env::var("USERNAME")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "unknown".to_string())
+        .to_lowercase()
+}
+
+#[tauri::command]
+pub async fn bridge_get_or_create_key(username: String) -> Result<String, String> {
+    let cfg = bridge_admin_config();
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .build()
+        .map_err(|e| format!("HTTP 客户端初始化失败: {}", e))?;
+
+    // 1. Login to get admin token
+    let login_res = client
+        .post(format!("{}/api/login", cfg.url))
+        .json(&serde_json::json!({
+            "username": cfg.user,
+            "password": cfg.pass
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("连接管理后台失败: {}", e))?;
+
+    if !login_res.status().is_success() {
+        return Err("管理后台登录失败".to_string());
+    }
+
+    // Extract admin_token from Set-Cookie header
+    let token = login_res
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .find_map(|v| {
+            let s = v.to_str().ok()?;
+            for part in s.split(';') {
+                let part = part.trim();
+                if let Some(val) = part.strip_prefix("admin_token=") {
+                    return Some(val.to_string());
+                }
+            }
+            None
+        })
+        .ok_or_else(|| "登录成功但未获取到认证令牌".to_string())?;
+
+    let cookie_header = format!("admin_token={}", token);
+
+    // 2. Try to get existing user
+    let get_res = client
+        .get(format!("{}/api/admin/users/{}", cfg.url, username))
+        .header("Cookie", &cookie_header)
+        .send()
+        .await
+        .map_err(|e| format!("查询用户失败: {}", e))?;
+
+    if get_res.status().is_success() {
+        let data: serde_json::Value = get_res
+            .json()
+            .await
+            .map_err(|e| format!("解析响应失败: {}", e))?;
+        if let Some(key) = data["user"]["api_key"].as_str() {
+            if !key.is_empty() {
+                return Ok(key.to_string());
+            }
+        }
+    }
+
+    // 3. Create new user
+    let create_res = client
+        .post(format!("{}/api/admin/users", cfg.url))
+        .header("Cookie", &cookie_header)
+        .json(&serde_json::json!({
+            "user_id": username,
+            "name": username,
+            "max_clients": 5
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("创建用户失败: {}", e))?;
+
+    if !create_res.status().is_success() {
+        let body = create_res.text().await.unwrap_or_default();
+        return Err(format!("创建用户失败: {}", body));
+    }
+
+    let data: serde_json::Value = create_res
+        .json()
+        .await
+        .map_err(|e| format!("解析响应失败: {}", e))?;
+    data["user"]["api_key"]
+        .as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| "创建成功但未获取到 API Key".to_string())
+}
+
 // ============ Remote Config Commands ============
 
 #[tauri::command]

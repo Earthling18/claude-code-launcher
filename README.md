@@ -27,9 +27,13 @@
 - **Python Agent Server**：基于 FastAPI + Claude Agent SDK，支持多用户会话、安全钩子、技能系统
 - **Bridge Client**：WebSocket 长连接到远程 Bridge Server，自动重连和心跳
 - **模型配置**：支持原版 Claude (OAuth) 和自定义模型 (API 代理) 两种模式
-- **Agent 配置管理**：可视化管理 soul.md、system_prompt.md、MCP 配置、技能目录等
+- **Agent 配置管理**：可视化管理 soul.md、system_prompt.md、MCP 配置等
 - **自动环境初始化**：首次启动自动创建 venv、安装依赖、初始化配置目录
 - **代理隔离**：代理仅传递给 Claude CLI 子进程，不影响 Agent Server 内部通信
+- **一键获取 Bind Key**：自动识别系统用户名，通过 Bridge Admin API 创建/获取 API Key
+- **连接口令生成**：自动检测主机名，生成可复制的 `/变身 bridge:<hostname>:<key>` 连接口令
+- **启动时自动保存**：点击启动桥接时自动保存当前配置，防止遗漏
+- **无需本地依赖**：远程模式不依赖 Node.js/Git/Claude CLI，开箱即用
 
 ### 新手引导
 - **首次使用引导**：首次打开应用时自动显示分步引导

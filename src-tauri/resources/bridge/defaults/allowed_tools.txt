@@ -1,4 +1,0 @@
-# 额外允许的工具列表（每行一个工具名）
-# 默认已包含: Bash, Read, Write, Edit, Glob, Grep, Skill, WebSearch, WebFetch
-# 在此添加额外需要的工具，例如 MCP 工具等
-# NotebookEdit

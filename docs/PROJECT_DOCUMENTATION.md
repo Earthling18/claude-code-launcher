@@ -1,7 +1,7 @@
 # Claude Code Launcher Tauri - 完整技术文档
 
 > **项目版本**: 0.2.4
-> **最后更新**: 2026-02-24
+> **最后更新**: 2026-02-26
 > **技术栈**: Tauri 2 + React 19 + TypeScript + Rust + Python + Tailwind CSS
 
 ---
@@ -613,6 +613,32 @@ BridgeConfigForm 组件提供 "Agent 配置" 折叠区，可直接打开配置�
 | 项目说明 | `CLAUDE.md` | 项目上下文 |
 | 环境配置 | `.env` | 全部环境变量 |
 
+#### 4.5.6.1 一键获取 Bind Key
+
+BridgeConfigForm 组件的 Bind Key 输入框旁提供"获取"按钮，点击后自动：
+
+1. 调用 `get_username` 获取系统用户名（小写）
+2. 调用 `bridge_get_or_create_key` 通过 Bridge Admin API 创建/查询用户
+3. 自动填充获取到的 API Key 并保存配置
+
+**Admin API 调用链**:
+- 登录: POST `{bridge_admin_url}/api/login`（凭据从 bridge_admin.json 读取）
+- 查询用户: GET `/api/admin/users/{username}`
+- 创建用户: POST `/api/admin/users`（user_id 和 name 均使用小写用户名）
+- HTTP 客户端使用 `.no_proxy()` 绕过系统代理
+
+#### 4.5.6.2 连接口令与二维码
+
+RemoteBridgePage 底部"连接方式"区域提供：
+
+- **连接口令**: 自动拼接 `/变身 bridge:<hostname>:<key>`，支持一键复制
+- **提示文案**: "在企微中添加艾灵（测试号），发送以下口令即可连接，输入 /重置 可解绑"
+- **二维码**: 可展开查看艾灵（测试号）企微二维码
+
+#### 4.5.6.3 启动时自动保存
+
+BridgeStatusPanel 组件支持 `onBeforeStart` 回调，在 RemoteBridgePage 中传入保存配置函数，确保点击"启动桥接"时自动保存当前配置。
+
 #### 4.5.7 嵌入式 Python 打包方案
 
 Windows 版本内置 Python 3.11 嵌入式发行版，用户无需安装 Python：
@@ -632,6 +658,7 @@ Windows 版本内置 Python 3.11 嵌入式发行版，用户无需安装 Python�
 - **会话恢复**: 旧 session_id 失效时自动清除并重建连接
 - **资源路径**: Tauri 2 `resource_dir()` 返回安装根目录，resources 在 `resources/bridge/` 子目录
 - **`\\?\` 路径前缀**: Windows 扩展路径前缀需在 `resolve_bridge_dir()` 中剥离以确保 `Path::exists()` 正常工作
+- **代理绕过**: `bridge_get_or_create_key` 使用 `reqwest::Client::builder().no_proxy()` 绕过系统 HTTP 代理，避免内网 Admin API 请求被外部代理拦截
 
 ---
 

@@ -31,8 +31,8 @@ class Settings(BaseSettings):
     # 技能配置（由 Claude Agent SDK 自动管理）
     skills_dir: str = "./skills"  # 技能目录路径（仅用于兼容）
 
-    # COS 配置（使用 user-token 鉴权）
-    cos_api_base: str = "http://172.21.193.224:31003/plugin-b2dj-digit-cosfile-mcp"  # COS API 地址
+    # COS 配置（使用 user-token 鉴权，由 Launcher 启动时注入）
+    cos_api_base: str = ""  # COS API 地址
 
     # 配置文件路径
     soul_file: str = "./app/soul.md"  # 身份人格文件
@@ -54,10 +54,10 @@ class Settings(BaseSettings):
     file_output_mode: str = "prompt"  # 输出模式: "prompt"（格式约定）| "mcp"（MCP工具）| "all"（全部返回）
     file_cache_timeout_seconds: float = 300.0  # 文件缓存超时（秒）
 
-    # sendMsg 主动推送配置
-    sendmsg_api_url: str = "http://172.21.193.224:31003/plugin-b2aa-sendmsg/mcp"  # sendMsg MCP 服务地址
-    sendmsg_auth_key: str = "13f64987826f0779ae3568a8d1c3f377"  # 授权 key
-    sendmsg_dep_user_id: str = "alin"  # 数字员工 ID
+    # sendMsg 主动推送配置（由 Launcher 启动时注入）
+    sendmsg_api_url: str = ""  # sendMsg MCP 服务地址
+    sendmsg_auth_key: str = ""  # 授权 key
+    sendmsg_dep_user_id: str = ""  # 数字员工 ID
 
     # 异步超时配置
     async_timeout_seconds: float = 0  # 0=禁用异步，>0=超时后切异步推送

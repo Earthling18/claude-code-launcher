@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { remoteApi } from '../api';
+import { remoteApi, bridgeApi } from '../api';
 import { BridgeConfigForm } from '../components/BridgeConfigForm';
 import { BridgeStatusPanel } from '../components/BridgeStatusPanel';
-import { DependencyFrame } from '../components/DependencyFrame';
 import { ModeSwitch } from '../components/ModeSwitch';
 import { DEFAULT_PROJECT_CONFIG } from '../types/project';
 import type { ProjectConfig } from '../types/project';
+import ailingQrcode from '../assets/ailing-qrcode.png';
 
 const REMOTE_PROJECT_ID = '__remote__';
 
@@ -18,9 +18,14 @@ export const RemoteBridgePage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [fetchingKey, setFetchingKey] = useState(false);
+  const [hostname, setHostname] = useState('');
+  const [showQrCode, setShowQrCode] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     loadConfig();
+    bridgeApi.getHostname().then(setHostname).catch(() => {});
   }, []);
 
   const loadConfig = async () => {
@@ -59,6 +64,43 @@ export const RemoteBridgePage: React.FC = () => {
     }
   };
 
+  const handleFetchKey = async () => {
+    setFetchingKey(true);
+    setErrors((e) => {
+      const { bridgeBindKey, ...rest } = e;
+      return rest;
+    });
+    try {
+      const username = await bridgeApi.getUsername();
+      const key = await bridgeApi.getOrCreateKey(username);
+      const newConfig = { ...config, bridge_bind_key: key };
+      setConfig(newConfig);
+      // Auto-save after getting key
+      await remoteApi.saveConfig(newConfig);
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 2000);
+    } catch {
+      setErrors({ bridgeBindKey: '获取失败，请联系管理员' });
+    } finally {
+      setFetchingKey(false);
+    }
+  };
+
+  const bridgeCommand = hostname && config.bridge_bind_key
+    ? `/变身 bridge:${hostname}:${config.bridge_bind_key}`
+    : '';
+
+  const handleCopyCommand = async () => {
+    if (!bridgeCommand) return;
+    try {
+      await navigator.clipboard.writeText(bridgeCommand);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback: select text
+    }
+  };
+
   if (loading) {
     return (
       <div className="h-screen bg-[#212121] text-[#DCE4EE] flex items-center justify-center">
@@ -70,9 +112,6 @@ export const RemoteBridgePage: React.FC = () => {
   return (
     <div className="h-screen bg-[#212121] text-[#DCE4EE] overflow-auto">
       <div className="max-w-full p-4">
-        {/* 依赖检测面板 */}
-        <DependencyFrame />
-
         <div className="px-5 py-3">
           <div className="card-frame">
             {/* Header */}
@@ -114,6 +153,8 @@ export const RemoteBridgePage: React.FC = () => {
                 onModelBaseUrlChange={(v) => setConfig((c) => ({ ...c, base_url: v }))}
                 onModelTokenChange={(v) => setConfig((c) => ({ ...c, token: v }))}
                 errors={errors}
+                onFetchKey={handleFetchKey}
+                fetchingKey={fetchingKey}
               />
 
               <div className="mt-4 flex items-center gap-3">
@@ -140,7 +181,65 @@ export const RemoteBridgePage: React.FC = () => {
                 projectId={REMOTE_PROJECT_ID}
                 agentMode={config.bridge_agent_mode}
                 modelProxy={config.proxy}
+                onBeforeStart={async () => {
+                  await remoteApi.saveConfig(config);
+                }}
               />
+            </div>
+
+            {/* Divider */}
+            <div className="my-4 h-px bg-gradient-to-r from-transparent via-[#565B5E] to-transparent" />
+
+            {/* Connection Tips */}
+            <div>
+              <h3 className="text-[13px] font-medium mb-3">连接方式</h3>
+              <div className="bg-[#2a2a2a] border border-[#3a3a3a] rounded-lg p-3 space-y-3">
+                <p className="text-[11px] text-[#999999]">
+                  在企微中添加艾灵（测试号），发送以下口令即可连接，输入 /重置 可解绑
+                </p>
+
+                {bridgeCommand ? (
+                  <div className="flex items-center gap-2 bg-[#1a1a1a] rounded px-3 py-2">
+                    <code className="text-[12px] text-[#10b981] flex-1 select-all break-all">
+                      {bridgeCommand}
+                    </code>
+                    <button
+                      type="button"
+                      onClick={handleCopyCommand}
+                      className="px-2 py-1 text-[10px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded shrink-0 transition-colors"
+                    >
+                      {copied ? '已复制' : '复制'}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-[#666666] bg-[#1a1a1a] rounded px-3 py-2">
+                    请先获取 Bind Key 并保存配置
+                  </p>
+                )}
+
+                {/* QR Code */}
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowQrCode(!showQrCode)}
+                    className="flex items-center gap-1 text-[12px] text-[#999999] hover:text-white transition-colors"
+                  >
+                    <span className={`transition-transform ${showQrCode ? 'rotate-90' : ''}`}>
+                      ▸
+                    </span>
+                    点击查看二维码，艾灵(测试号)
+                  </button>
+                  {showQrCode && (
+                    <div className="mt-2 flex justify-center">
+                      <img
+                        src={ailingQrcode}
+                        alt="艾灵企微二维码"
+                        className="w-36 h-36 rounded"
+                      />
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
