@@ -300,6 +300,7 @@ brew install git
 - 📝 友好的中文提示信息
 - ⚠️ 错误时提供备选方案（如打开下载页面）
 - ♻️ 安装后自动刷新 PATH 环境变量
+- 🔧 npm shim 自动修复：检测到 `claude.cmd` 丢失但包已安装时，静默执行 `npm install -g` 重建 shim
 - 🖥️ 跨平台支持：Windows 使用 winget，macOS 使用 Homebrew
 
 ### 4.2 配置管理
@@ -457,6 +458,7 @@ $env:ANTHROPIC_MODEL='qwen3-coder-480b-a35b'; $env:ANTHROPIC_BASE_URL='http://li
 - 使用 `-NoExit` 参数保持窗口打开
 - 支持指定工作目录启动
 - 自动刷新 PATH 确保新安装的依赖可被发现
+- npm shim 自动修复（claude.cmd 丢失时静默重建）
 - 完整的日志记录便于调试
 
 #### 4.3.2 命令生成
@@ -790,11 +792,18 @@ sequenceDiagram
     else 配置有效
         Frontend->>Frontend: getConfig()
         Frontend->>Backend: launch_claude_code(config)
-        Backend->>System: 检查 claude 命令
+        Backend->>System: 检查 claude 命令 (where.exe)
         alt claude 不存在
-            Backend-->>Frontend: Err("Claude Code 未安装")
-            Frontend-->>User: 显示错误
-        else claude 存在
+            Backend->>System: npm list -g 检查包是否已安装
+            alt 包已安装但 shim 丢失
+                Backend->>System: npm install -g 自动修复 shim
+                Backend->>System: 重新验证 claude 命令
+            else 包未安装
+                Backend-->>Frontend: Err("Claude Code 未安装")
+                Frontend-->>User: 显示错误
+            end
+        end
+        Note over Backend,System: claude 可用
             Backend->>System: 创建 PowerShell 脚本
             Backend->>System: 启动新控制台窗口
             System-->>Backend: 启动成功

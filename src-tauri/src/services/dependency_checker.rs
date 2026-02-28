@@ -189,13 +189,69 @@ impl DependencyChecker {
                     error: Some("无法解析版本号".to_string()),
                 }
             }
-            _ => DependencyStatus {
-                installed: false,
-                version: None,
-                meets_requirement: false,
-                latest_version: None,
-                update_available: false,
-                error: Some("Claude Code not found".to_string()),
+            _ => {
+                // claude --version failed. On Windows, check if the npm package is installed
+                // but the shim files (claude.cmd) are missing, and auto-repair if so.
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
+                    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+                    let npm_check = Command::new("cmd")
+                        .args(&["/c", "npm", "list", "-g", "@anthropic-ai/claude-code", "--depth=0"])
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .output();
+
+                    let package_installed = npm_check
+                        .as_ref()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
+
+                    if package_installed {
+                        // Package exists but shim is broken/missing — reinstall to recreate shims
+                        eprintln!("[check_claude] package installed but shim missing, repairing...");
+                        let _ = Command::new("cmd")
+                            .args(&["/c", "npm", "install", "-g", "@anthropic-ai/claude-code"])
+                            .creation_flags(CREATE_NO_WINDOW)
+                            .output();
+
+                        Self::refresh_system_path();
+
+                        // Retry version check after repair
+                        let retry = Command::new("cmd")
+                            .args(&["/c", "claude", "--version"])
+                            .creation_flags(CREATE_NO_WINDOW)
+                            .output();
+
+                        if let Ok(out) = retry {
+                            if out.status.success() {
+                                let stdout = String::from_utf8_lossy(&out.stdout);
+                                if let Ok(re) = Regex::new(r"(\d+\.\d+\.\d+)") {
+                                    if let Some(caps) = re.captures(&stdout) {
+                                        let version = caps.get(1).map(|m| m.as_str().to_string());
+                                        return DependencyStatus {
+                                            installed: true,
+                                            version,
+                                            meets_requirement: true,
+                                            latest_version: None,
+                                            update_available: false,
+                                            error: None,
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                DependencyStatus {
+                    installed: false,
+                    version: None,
+                    meets_requirement: false,
+                    latest_version: None,
+                    update_available: false,
+                    error: Some("Claude Code not found".to_string()),
+                }
             },
         }
     }

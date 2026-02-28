@@ -211,6 +211,45 @@ impl Launcher {
             if !npm_check.status.success() {
                 return Err("Claude Code未安装或未在PATH中。请先安装Claude Code。".to_string());
             }
+
+            // Package is installed via npm but shim files (claude.cmd) are missing.
+            // This can happen after node/npm upgrades or npm global rebuilds.
+            // Auto-repair by re-installing to recreate the shim files.
+            Self::log_line("claude not in PATH but npm package exists, attempting shim repair...");
+            let repair = Command::new("cmd.exe")
+                .args(&["/c", "npm", "install", "-g", "@anthropic-ai/claude-code"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output();
+
+            match &repair {
+                Ok(out) => Self::log_line(&format!(
+                    "shim repair exit={:?} stdout={}B stderr={}B",
+                    out.status.code(),
+                    out.stdout.len(),
+                    out.stderr.len()
+                )),
+                Err(e) => Self::log_line(&format!("shim repair failed to run: {}", e)),
+            }
+
+            // Refresh PATH again after repair
+            super::dependency_checker::DependencyChecker::refresh_system_path();
+
+            // Verify claude is now findable
+            let recheck = Command::new("powershell.exe")
+                .args(&["-Command", "where.exe claude 2>$null"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .output();
+
+            let repaired = recheck
+                .as_ref()
+                .map(|o| o.status.success() && !o.stdout.is_empty())
+                .unwrap_or(false);
+
+            Self::log_line(&format!("shim repair result: {}", if repaired { "OK" } else { "FAILED" }));
+
+            if !repaired {
+                return Err("Claude Code的命令文件丢失，自动修复失败。请手动运行: npm install -g @anthropic-ai/claude-code".to_string());
+            }
         }
 
         // Determine the working directory

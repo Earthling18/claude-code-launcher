@@ -303,14 +303,35 @@ pub fn check_claude() -> DependencyStatus {
             // 已安装但无法解析版本
             DependencyStatus { installed: true, ..Default::default() }
         }
-        _ => DependencyStatus {
-            installed: false,
-            error: Some("Claude Code not found".to_string()),
-            ..Default::default()
+        _ => {
+            // Windows: 包已安装但 shim 文件丢失时自动修复
+            // npm shim (claude.cmd/claude.ps1) 可能在 Node.js/npm 升级后丢失
+            #[cfg(windows)]
+            {
+                let npm_check = Command::new("cmd")
+                    .args(&["/c", "npm", "list", "-g", "@anthropic-ai/claude-code", "--depth=0"])
+                    .output();
+                if npm_check.map(|o| o.status.success()).unwrap_or(false) {
+                    // 重新安装以重建 shim 文件
+                    let _ = Command::new("cmd")
+                        .args(&["/c", "npm", "install", "-g", "@anthropic-ai/claude-code"])
+                        .output();
+                    Self::refresh_system_path();
+                    // 修复后重试检测...
+                }
+            }
+
+            DependencyStatus {
+                installed: false,
+                error: Some("Claude Code not found".to_string()),
+                ..Default::default()
+            }
         },
     }
 }
 ```
+
+> **Shim 自动修复**: Windows 上 npm 全局包的 shim 文件（`claude.cmd`、`claude.ps1`）可能在 Node.js/npm 升级后丢失。当检测到 `claude --version` 失败但 `npm list -g` 显示包已安装时，会自动执行 `npm install -g @anthropic-ai/claude-code` 重建 shim 文件，然后重试检测。启动器（`launcher.rs`）中也有相同的修复逻辑。
 
 #### 3.1.5 Git Bash 检测 (Windows)
 
@@ -769,7 +790,12 @@ fn is_claude_available() -> bool {
         .output()
     {
         if output.status.success() {
-            return true;
+            // 包已安装但 shim 丢失 — 自动修复
+            let _ = Command::new("cmd")
+                .args(&["/c", "npm", "install", "-g", "@anthropic-ai/claude-code"])
+                .output();
+            // 修复后验证 claude 是否可用
+            return /* recheck where.exe claude */;
         }
     }
 

@@ -39,7 +39,7 @@ Claude Code桌面启动器完整源码，Tauri 2应用，支持多项目管理�
 - 远程Bridge自动获取Key：通过管理后台API自动创建/获取用户Bind Key，基于OS用户名识别
 - 远程Bridge连接提示：显示可复制的 /变身 命令 + 艾灵企微二维码
 - 启动桥接时自动保存配置
-- 依赖检测 + 一键安装
+- 依赖检测 + 一键安装 + npm shim自动修复（启动/检测时若shim丢失则静默重建）
 - 自动更新（GitHub Releases）
 - 新手引导
 - WebView2 Runtime自动安装（embedBootstrapper，安装时自动引导用户安装WebView2）
