@@ -573,9 +573,21 @@ if command -v git &> /dev/null; then
     exit 0
 fi
 
-# 2. Try Homebrew if available
+# 2. Try xcode-select (system native way)
+echo "正在通过 Xcode Command Line Tools 安装 Git..."
+xcode-select --install 2>/dev/null
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "已弹出 Xcode Command Line Tools 安装窗口，请完成安装后重新检测。"
+    read -p "按回车键关闭此窗口..."
+    exit 0
+fi
+
+# 3. Try Homebrew if available
+echo "Xcode Command Line Tools 安装失败，尝试 Homebrew..."
 if command -v brew &> /dev/null; then
-    echo "使用 Homebrew 安装 Git..."
+    export HOMEBREW_NO_AUTO_UPDATE=1
+    export HOMEBREW_NO_ENV_HINTS=1
     brew install git
     if [ $? -eq 0 ]; then
         echo ""
@@ -589,7 +601,7 @@ if command -v brew &> /dev/null; then
     exit 0
 fi
 
-# 3. No Homebrew — install Homebrew first, then git
+# 4. No Homebrew — install Homebrew first, then git
 echo "未检测到 Homebrew，将先安装 Homebrew..."
 echo ""
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
@@ -629,14 +641,33 @@ read -p "按回车键关闭此窗口..."
 echo "正在更新 Git..."
 echo ""
 
+# Check if git is installed via brew
 if command -v brew &> /dev/null; then
-    brew upgrade git
+    export HOMEBREW_NO_AUTO_UPDATE=1
+    export HOMEBREW_NO_ENV_HINTS=1
+    if brew list git &> /dev/null; then
+        brew upgrade git 2>/dev/null || echo "Git 已是最新版本"
+        echo ""
+        echo "✓ 更新完成!"
+        git --version
+        read -p "按回车键关闭此窗口..."
+        exit 0
+    fi
+fi
+
+# Git installed via Xcode Command Line Tools — try softwareupdate
+echo "当前 Git 由 Xcode Command Line Tools 提供，正在尝试系统更新..."
+softwareupdate -l 2>&1 | grep -i "command line"
+if [ $? -eq 0 ]; then
+    echo "发现可用更新，正在安装..."
+    softwareupdate -i "$(softwareupdate -l 2>&1 | grep -i 'command line' | grep -oE '\*.*' | sed 's/^\* Label: //')" --agree-to-license 2>/dev/null
     echo ""
     echo "✓ 更新完成!"
     git --version
 else
-    echo "未检测到 Homebrew，正在打开 Git 下载页面..."
-    open "https://git-scm.com/download/mac"
+    echo "当前已是最新版本"
+    echo ""
+    git --version
 fi
 
 read -p "按回车键关闭此窗口..."
