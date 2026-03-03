@@ -27,8 +27,8 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
 }) => {
   const [name, setName] = useState(initialName);
   const [workingDirectory, setWorkingDirectory] = useState(initialWorkingDirectory);
-  const [mode, setMode] = useState<'claude' | 'custom'>(
-    initialConfig?.mode === 'claude' || initialConfig?.mode === 'custom' ? initialConfig.mode : 'claude'
+  const [mode, setMode] = useState<'claude' | 'custom' | 'codex'>(
+    initialConfig?.mode === 'claude' || initialConfig?.mode === 'custom' || initialConfig?.mode === 'codex' ? initialConfig.mode : 'claude'
   );
   const [isPinned, setIsPinned] = useState(initialIsPinned);
 
@@ -42,12 +42,14 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
   // Update config fields when initialConfig changes (for async loading of last project config)
   useEffect(() => {
     if (initialConfig) {
-      if (initialConfig.mode === 'claude' || initialConfig.mode === 'custom') setMode(initialConfig.mode);
+      if (initialConfig.mode === 'claude' || initialConfig.mode === 'custom' || initialConfig.mode === 'codex') setMode(initialConfig.mode);
       if (initialConfig.proxy) setProxy(initialConfig.proxy);
       if (initialConfig.model) setModel(initialConfig.model);
       if (initialConfig.base_url) setBaseUrl(initialConfig.base_url);
       if (initialConfig.token) setToken(initialConfig.token);
       if (initialConfig.skip_permissions !== undefined) setSkipPermissions(initialConfig.skip_permissions);
+      if (initialConfig.codex_api_key) setCodexApiKey(initialConfig.codex_api_key);
+      if (initialConfig.custom_cli) setCustomCli(initialConfig.custom_cli);
     }
   }, [initialConfig]);
 
@@ -61,7 +63,10 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
   const [baseUrl, setBaseUrl] = useState(initialConfig?.base_url || 'http://litellm.uattest.weoa.com');
   const [token, setToken] = useState(initialConfig?.token || '');
   const [skipPermissions, setSkipPermissions] = useState(initialConfig?.skip_permissions ?? false);
+  const [codexApiKey, setCodexApiKey] = useState(initialConfig?.codex_api_key || '');
+  const [customCli, setCustomCli] = useState<'claude' | 'codex'>(initialConfig?.custom_cli || 'claude');
   const [showToken, setShowToken] = useState(false);
+  const [showCodexKey, setShowCodexKey] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const validate = (): boolean => {
@@ -101,6 +106,8 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       base_url: baseUrl,
       token,
       skip_permissions: skipPermissions,
+      codex_api_key: codexApiKey,
+      custom_cli: customCli,
       bridge_server_url: '',
       bridge_bind_key: '',
       bridge_client_id: '',
@@ -169,7 +176,18 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
               onChange={() => setMode('claude')}
               className="w-4 h-4"
             />
-            <span className="text-[12px]">Claude 原版</span>
+            <span className="text-[12px]">Claude 账号</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="radio"
+              name="mode"
+              value="codex"
+              checked={mode === 'codex'}
+              onChange={() => setMode('codex')}
+              className="w-4 h-4"
+            />
+            <span className="text-[12px]">Codex 账号</span>
           </label>
           <label className="flex items-center gap-2 cursor-pointer">
             <input
@@ -185,7 +203,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
         </div>
       </div>
 
-      {/* Claude 原版模式 */}
+      {/* Claude 账号模式 */}
       {mode === 'claude' && (
         <div>
           <label className="block text-[12px] mb-1">代理地址 (可选)</label>
@@ -203,9 +221,64 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
         </div>
       )}
 
+      {/* Codex 账号模式 */}
+      {mode === 'codex' && (
+        <div>
+          <label className="block text-[12px] mb-1">OpenAI API Key</label>
+          <div className="flex items-center gap-2">
+            <input
+              type={showCodexKey ? 'text' : 'password'}
+              value={codexApiKey}
+              onChange={(e) => setCodexApiKey(e.target.value)}
+              placeholder="输入 OpenAI API Key"
+              className="flex-1 px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px]"
+            />
+            <button
+              type="button"
+              onClick={() => setShowCodexKey(!showCodexKey)}
+              className="px-3 py-2 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded"
+            >
+              {showCodexKey ? '隐藏' : '显示'}
+            </button>
+          </div>
+          <p className="text-[10px] text-[#999999] mt-1">
+            Codex 使用 OpenAI API，需要提供 API Key
+          </p>
+        </div>
+      )}
+
       {/* 自定义模型模式 */}
       {mode === 'custom' && (
         <div className="space-y-3">
+          {/* CLI 工具选择 */}
+          <div>
+            <label className="block text-[12px] mb-2">CLI 工具</label>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="customCli"
+                  value="claude"
+                  checked={customCli === 'claude'}
+                  onChange={() => setCustomCli('claude')}
+                  className="w-4 h-4"
+                />
+                <span className="text-[12px]">Claude Code</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="customCli"
+                  value="codex"
+                  checked={customCli === 'codex'}
+                  onChange={() => setCustomCli('codex')}
+                  className="w-4 h-4"
+                />
+                <span className="text-[12px]">Codex</span>
+              </label>
+            </div>
+          </div>
+
           {/* Model Name */}
           <div>
             <label className="block text-[12px] mb-1">Model Name (可选)</label>
@@ -218,14 +291,14 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
             />
           </div>
 
-          {/* Base URL */}
+          {/* Base URL / Provider */}
           <div>
-            <label className="block text-[12px] mb-1">Base URL (可选)</label>
+            <label className="block text-[12px] mb-1">{customCli === 'codex' ? 'Provider (可选)' : 'Base URL (可选)'}</label>
             <input
               type="text"
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder="例: http://api.example.com"
+              placeholder={customCli === 'codex' ? '例: openai' : '例: http://api.example.com'}
               className="w-full px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px]"
             />
             {errors.baseUrl && <p className="text-[10px] text-red-500 mt-1">{errors.baseUrl}</p>}
@@ -233,13 +306,13 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
 
           {/* Auth Token */}
           <div>
-            <label className="block text-[12px] mb-1">Auth Token (可选)</label>
+            <label className="block text-[12px] mb-1">{customCli === 'codex' ? 'API Key (可选)' : 'Auth Token (可选)'}</label>
             <div className="flex items-center gap-2">
               <input
                 type={showToken ? 'text' : 'password'}
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
-                placeholder="输入认证令牌"
+                placeholder={customCli === 'codex' ? '输入 API Key' : '输入认证令牌'}
                 className="flex-1 px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px]"
               />
               <button
@@ -276,11 +349,11 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
                 onChange={() => setSkipPermissions(true)}
                 className="w-4 h-4"
               />
-              <span className="text-[12px]">dangerously-skip 模式</span>
+              <span className="text-[12px]">跳过确认模式</span>
             </label>
           </div>
           <p className="text-[10px] text-[#999999] mt-1">
-            dangerously-skip 模式会跳过权限确认提示，适合自动化场景
+            跳过确认模式会跳过权限确认提示，适合自动化场景
           </p>
         </div>
 

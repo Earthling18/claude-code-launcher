@@ -53,7 +53,8 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
   };
 
   const getModeLabel = () => {
-    if (project.config.mode === 'claude') return 'Claude原版';
+    if (project.config.mode === 'claude') return 'Claude账号';
+    if (project.config.mode === 'codex') return 'Codex账号';
     if (project.config.mode === 'remote') return '远程桥接';
     return '自定义模型';
   };

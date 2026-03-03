@@ -8,6 +8,10 @@ fn default_mode() -> String {
     "claude".to_string()
 }
 
+fn default_custom_cli() -> String {
+    "claude".to_string()
+}
+
 fn default_bridge_server_url() -> String {
     "ws://172.21.11.82:80/bridge".to_string()
 }
@@ -40,7 +44,7 @@ fn default_bridge_max_turns() -> u32 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectConfig {
     #[serde(default = "default_mode")]
-    pub mode: String,                    // "claude", "custom", or "remote"
+    pub mode: String,                    // "claude", "custom", "codex", or "remote"
     #[serde(default)]
     pub proxy: String,                   // HTTP/HTTPS proxy for Claude mode
     #[serde(default)]
@@ -51,6 +55,10 @@ pub struct ProjectConfig {
     pub token: String,                   // API token (Base64 encoded in storage)
     #[serde(default = "default_skip_permissions")]
     pub skip_permissions: bool,          // Skip permissions flag
+    #[serde(default)]
+    pub codex_api_key: String,           // OpenAI API Key for Codex mode
+    #[serde(default = "default_custom_cli")]
+    pub custom_cli: String,              // CLI tool for custom mode: "claude" or "codex"
 
     // Remote bridge fields
     #[serde(default = "default_bridge_server_url")]
@@ -84,6 +92,8 @@ impl Default for ProjectConfig {
             base_url: "http://litellm.uattest.weoa.com".to_string(),
             token: String::new(),
             skip_permissions: true,
+            codex_api_key: String::new(),
+            custom_cli: "claude".to_string(),
             bridge_server_url: default_bridge_server_url(),
             bridge_bind_key: String::new(),
             bridge_client_id: String::new(),

@@ -24,7 +24,7 @@ export const ModeSelectPage: React.FC = () => {
             <div className="text-center">
               <div className="text-[15px] font-semibold mb-1">本地使用</div>
               <div className="text-[11px] text-[#999999] leading-relaxed">
-                在本地启动 Claude Code
+                在本地使用 Claude Code 或 Codex
               </div>
             </div>
           </button>

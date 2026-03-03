@@ -10,6 +10,8 @@ export const api = {
   checkNodejsWithUpdate: () => invoke<DependencyStatus>('check_nodejs_with_update'),
   checkClaudeWithUpdate: () => invoke<DependencyStatus>('check_claude_with_update'),
   checkGitbashWithUpdate: () => invoke<DependencyStatus>('check_gitbash_with_update'),
+  checkCodex: () => invoke<DependencyStatus>('check_codex'),
+  checkCodexWithUpdate: () => invoke<DependencyStatus>('check_codex_with_update'),
   refreshSystemPath: () => invoke('refresh_system_path'),
 
   // 安装/更新
@@ -19,6 +21,8 @@ export const api = {
   updateClaude: () => invoke('update_claude'),
   installGitbash: () => invoke('install_gitbash'),
   updateGitbash: () => invoke('update_gitbash'),
+  installCodex: () => invoke('install_codex'),
+  updateCodex: () => invoke('update_codex'),
 
   // 启动
   launchClaudeCode: (config: Record<string, string>) =>

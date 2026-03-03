@@ -6,19 +6,22 @@ export const DependencyFrame = () => {
   const [nodejsStatus, setNodejsStatus] = useState<DependencyStatus | null>(null);
   const [claudeStatus, setClaudeStatus] = useState<DependencyStatus | null>(null);
   const [gitbashStatus, setGitbashStatus] = useState<DependencyStatus | null>(null);
+  const [codexStatus, setCodexStatus] = useState<DependencyStatus | null>(null);
   const [nodejsLoading, setNodejsLoading] = useState(false);
   const [claudeLoading, setClaudeLoading] = useState(false);
   const [gitbashLoading, setGitbashLoading] = useState(false);
+  const [codexLoading, setCodexLoading] = useState(false);
 
   // 自动检测(启动时)，使用 sessionStorage 缓存避免重复检测
   useEffect(() => {
     const cached = sessionStorage.getItem('dependencyStatus');
     if (cached) {
       try {
-        const { nodejs, claude, gitbash } = JSON.parse(cached);
+        const { nodejs, claude, gitbash, codex } = JSON.parse(cached);
         setNodejsStatus(nodejs);
         setClaudeStatus(claude);
         setGitbashStatus(gitbash);
+        if (codex) setCodexStatus(codex);
         return;
       } catch (e) {
         // 缓存解析失败，重新检测
@@ -43,11 +46,16 @@ export const DependencyFrame = () => {
       await new Promise(resolve => setTimeout(resolve, 200));
       setGitbashStatus(gitbashResult);
 
+      const codexResult = await api.checkCodex();
+      await new Promise(resolve => setTimeout(resolve, 200));
+      setCodexStatus(codexResult);
+
       // 缓存检测结果到 sessionStorage
       sessionStorage.setItem('dependencyStatus', JSON.stringify({
         nodejs: nodeResult,
         claude: claudeResult,
         gitbash: gitbashResult,
+        codex: codexResult,
       }));
     } catch (error) {
       console.error('检测失败:', error);
@@ -60,6 +68,7 @@ export const DependencyFrame = () => {
     setNodejsStatus(null);
     setClaudeStatus(null);
     setGitbashStatus(null);
+    setCodexStatus(null);
 
     try {
       await api.refreshSystemPath();
@@ -75,6 +84,10 @@ export const DependencyFrame = () => {
       const gitbashResult = await api.checkGitbashWithUpdate();
       await new Promise(resolve => setTimeout(resolve, 200));
       setGitbashStatus(gitbashResult);
+
+      const codexResult = await api.checkCodexWithUpdate();
+      await new Promise(resolve => setTimeout(resolve, 200));
+      setCodexStatus(codexResult);
     } catch (error) {
       console.error('检测失败:', error);
     }
@@ -162,6 +175,34 @@ export const DependencyFrame = () => {
     } catch (error: any) {
       alert(`更新失败: ${error}`);
       setGitbashLoading(false);
+    }
+  };
+
+  const handleInstallCodex = async () => {
+    setCodexLoading(true);
+    try {
+      await api.installCodex();
+      setTimeout(() => {
+        checkInstallationOnly();
+        setCodexLoading(false);
+      }, 2000);
+    } catch (error: any) {
+      alert(`安装失败: ${error}`);
+      setCodexLoading(false);
+    }
+  };
+
+  const handleUpdateCodex = async () => {
+    setCodexLoading(true);
+    try {
+      await api.updateCodex();
+      setTimeout(() => {
+        checkInstallationOnly();
+        setCodexLoading(false);
+      }, 2000);
+    } catch (error: any) {
+      alert(`更新失败: ${error}`);
+      setCodexLoading(false);
     }
   };
 
@@ -281,6 +322,38 @@ export const DependencyFrame = () => {
     return null;
   };
 
+  const renderCodexButton = () => {
+    if (!codexStatus || codexLoading) {
+      return null;
+    }
+
+    if (!codexStatus.installed) {
+      return (
+        <button
+          onClick={handleInstallCodex}
+          disabled={codexLoading}
+          className="px-3 py-1 text-[10px] bg-primary hover:bg-primary-hover rounded text-white"
+        >
+          {codexLoading ? '安装中...' : '安装'}
+        </button>
+      );
+    }
+
+    if (codexStatus.update_available) {
+      return (
+        <button
+          onClick={handleUpdateCodex}
+          disabled={codexLoading}
+          className="px-3 py-1 text-[10px] bg-primary hover:bg-primary-hover rounded text-white"
+        >
+          {codexLoading ? '更新中...' : '更新'}
+        </button>
+      );
+    }
+
+    return null;
+  };
+
   return (
     <div className="px-5 py-2" data-onboarding="dependencies">
       <div className="card-frame">
@@ -303,6 +376,12 @@ export const DependencyFrame = () => {
             <span className="text-[10px]">Claude Code:</span>
             {renderStatus(claudeStatus)}
             {renderClaudeButton()}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-[10px]">Codex:</span>
+            {renderStatus(codexStatus)}
+            {renderCodexButton()}
           </div>
 
           <div className="flex-1" />

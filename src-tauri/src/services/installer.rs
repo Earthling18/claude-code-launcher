@@ -71,6 +71,40 @@ impl Installer {
         }
     }
 
+    pub fn install_codex() -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let script = Self::generate_codex_install_script_windows();
+            Self::execute_cmd_script(&script)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let script = Self::generate_codex_install_script_macos();
+            Self::execute_terminal_script(&script)
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            Err("不支持的操作系统".to_string())
+        }
+    }
+
+    pub fn update_codex() -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let script = Self::generate_codex_update_script_windows();
+            Self::execute_cmd_script(&script)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let script = Self::generate_codex_update_script_macos();
+            Self::execute_terminal_script(&script)
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            Err("不支持的操作系统".to_string())
+        }
+    }
+
     pub fn install_gitbash() -> Result<(), String> {
         #[cfg(windows)]
         {
@@ -215,6 +249,55 @@ pause"#.to_string()
     }
 
     #[cfg(windows)]
+    fn generate_codex_install_script_windows() -> String {
+        r#"@echo off
+echo Installing Codex CLI...
+echo.
+where npm >nul 2>nul
+if %errorlevel%==0 (
+    npm install -g @openai/codex
+) else (
+    if exist "C:\Program Files\nodejs\npm.cmd" (
+        "C:\Program Files\nodejs\npm.cmd" install -g @openai/codex
+    ) else (
+        echo npm not found. Please make sure Node.js is installed.
+        pause
+        exit /b 1
+    )
+)
+if %errorlevel%==0 (
+    echo.
+    echo [OK] Installation completed!
+) else (
+    echo.
+    echo [FAILED] Installation failed!
+)
+echo.
+pause"#.to_string()
+    }
+
+    #[cfg(windows)]
+    fn generate_codex_update_script_windows() -> String {
+        r#"@echo off
+echo Updating Codex CLI...
+echo.
+where npm >nul 2>nul
+if %errorlevel%==0 (
+    npm install -g @openai/codex@latest
+) else (
+    if exist "C:\Program Files\nodejs\npm.cmd" (
+        "C:\Program Files\nodejs\npm.cmd" install -g @openai/codex@latest
+    ) else (
+        echo npm not found.
+        pause
+        exit /b 1
+    )
+)
+echo.
+pause"#.to_string()
+    }
+
+    #[cfg(windows)]
     fn generate_gitbash_install_script_windows() -> String {
         r#"
 Write-Host '正在安装 Git...' -ForegroundColor Green
@@ -266,23 +349,59 @@ $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
 echo "正在安装 Node.js..."
 echo ""
 
-# Check if Homebrew is installed
-if ! command -v brew &> /dev/null; then
-    echo "✗ Homebrew 未安装"
-    echo "正在安装 Homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+# 1. Check if node is already installed
+if command -v node &> /dev/null; then
+    echo "✓ Node.js 已安装:"
+    node --version
+    echo ""
+    read -p "按回车键关闭此窗口..."
+    exit 0
 fi
 
-echo "使用 Homebrew 安装 Node.js..."
-brew install node
-
-if [ $? -eq 0 ]; then
+# 2. Try Homebrew if available
+if command -v brew &> /dev/null; then
+    echo "使用 Homebrew 安装 Node.js..."
+    brew install node
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo "✓ 安装成功完成!"
+        node --version
+    else
+        echo ""
+        echo "✗ Homebrew 安装失败!"
+    fi
     echo ""
-    echo "✓ 安装成功完成!"
-    node --version
+    read -p "按回车键关闭此窗口..."
+    exit 0
+fi
+
+# 3. No Homebrew — install Homebrew first, then node
+echo "未检测到 Homebrew，将先安装 Homebrew..."
+echo ""
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Add brew to PATH for current session (Apple Silicon vs Intel)
+if [ -f /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -f /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
+
+if command -v brew &> /dev/null; then
+    echo ""
+    echo "Homebrew 安装成功，正在安装 Node.js..."
+    brew install node
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo "✓ Node.js 安装成功!"
+        node --version
+    else
+        echo "✗ Node.js 安装失败!"
+    fi
 else
     echo ""
-    echo "✗ 安装失败!"
+    echo "✗ Homebrew 安装失败，正在打开 Node.js 下载页面..."
+    open "https://nodejs.org/en/download/"
 fi
 
 echo ""
@@ -296,17 +415,52 @@ read -p "按回车键关闭此窗口..."
 echo "正在更新 Node.js..."
 echo ""
 
-if ! command -v brew &> /dev/null; then
-    echo "✗ Homebrew 未安装"
-    exit 1
+# Try Homebrew if available
+if command -v brew &> /dev/null; then
+    export HOMEBREW_NO_AUTO_UPDATE=1
+    export HOMEBREW_NO_ENV_HINTS=1
+    # Check if node was installed via brew
+    if brew list node &> /dev/null; then
+        brew upgrade node 2>/dev/null || echo "Node.js 已是最新版本"
+    else
+        # Node exists but not via brew — reinstall through brew to manage future updates
+        echo "当前 Node.js 非 Homebrew 安装，正在通过 Homebrew 重新安装以便管理更新..."
+        brew install node
+    fi
+    echo ""
+    echo "✓ 更新完成!"
+    node --version
+    echo ""
+    read -p "按回车键关闭此窗口..."
+    exit 0
 fi
 
-brew upgrade node
+# No Homebrew — install Homebrew first, then upgrade
+echo "未检测到 Homebrew，正在安装 Homebrew..."
+echo ""
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Add brew to PATH for current session (Apple Silicon vs Intel)
+if [ -f /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -f /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
+
+if command -v brew &> /dev/null; then
+    echo ""
+    echo "✓ Homebrew 安装成功，正在更新 Node.js..."
+    brew upgrade node
+    echo ""
+    echo "✓ 更新完成!"
+    node --version
+else
+    echo ""
+    echo "✗ Homebrew 安装失败，正在打开 Node.js 下载页面..."
+    open "https://nodejs.org/en/download/"
+fi
 
 echo ""
-echo "✓ 更新完成!"
-node --version
-
 read -p "按回车键关闭此窗口..."
 "#.to_string()
     }
@@ -359,26 +513,109 @@ read -p "Press Enter to close..."
     }
 
     #[cfg(target_os = "macos")]
+    fn generate_codex_install_script_macos() -> String {
+        r#"
+echo "Installing Codex CLI..."
+echo ""
+
+if ! command -v npm &> /dev/null; then
+    echo "✗ npm not found. Please install Node.js first."
+    read -p "Press Enter to close..."
+    exit 1
+fi
+
+npm install -g @openai/codex
+
+if [ $? -eq 0 ]; then
+    echo ""
+    echo "✓ Installation completed!"
+else
+    echo ""
+    echo "✗ Installation failed!"
+fi
+
+read -p "Press Enter to close..."
+"#.to_string()
+    }
+
+    #[cfg(target_os = "macos")]
+    fn generate_codex_update_script_macos() -> String {
+        r#"
+echo "Updating Codex CLI..."
+echo ""
+
+if ! command -v npm &> /dev/null; then
+    echo "✗ npm not found."
+    read -p "Press Enter to close..."
+    exit 1
+fi
+
+npm install -g @openai/codex@latest
+
+echo ""
+echo "✓ Update completed!"
+
+read -p "Press Enter to close..."
+"#.to_string()
+    }
+
+    #[cfg(target_os = "macos")]
     fn generate_git_install_script_macos() -> String {
         r#"
 echo "正在安装 Git..."
 echo ""
 
-# macOS usually has git pre-installed via Xcode Command Line Tools
+# 1. Check if git is already installed
 if command -v git &> /dev/null; then
-    echo "Git 已安装:"
+    echo "✓ Git 已安装:"
     git --version
     read -p "按回车键关闭此窗口..."
     exit 0
 fi
 
-# Try Homebrew
+# 2. Try Homebrew if available
 if command -v brew &> /dev/null; then
+    echo "使用 Homebrew 安装 Git..."
     brew install git
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo "✓ 安装成功!"
+        git --version
+    else
+        echo "✗ 安装失败!"
+    fi
+    echo ""
+    read -p "按回车键关闭此窗口..."
+    exit 0
+fi
+
+# 3. No Homebrew — install Homebrew first, then git
+echo "未检测到 Homebrew，将先安装 Homebrew..."
+echo ""
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+# Add brew to PATH for current session (Apple Silicon vs Intel)
+if [ -f /opt/homebrew/bin/brew ]; then
+    eval "$(/opt/homebrew/bin/brew shellenv)"
+elif [ -f /usr/local/bin/brew ]; then
+    eval "$(/usr/local/bin/brew shellenv)"
+fi
+
+if command -v brew &> /dev/null; then
+    echo ""
+    echo "Homebrew 安装成功，正在安装 Git..."
+    brew install git
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo "✓ Git 安装成功!"
+        git --version
+    else
+        echo "✗ Git 安装失败!"
+    fi
 else
-    # Install Xcode Command Line Tools
-    echo "正在安装 Xcode Command Line Tools..."
-    xcode-select --install
+    echo ""
+    echo "✗ Homebrew 安装失败，正在打开 Git 下载页面..."
+    open "https://git-scm.com/download/mac"
 fi
 
 echo ""
@@ -398,7 +635,8 @@ if command -v brew &> /dev/null; then
     echo "✓ 更新完成!"
     git --version
 else
-    echo "请使用 Homebrew 管理 Git 更新"
+    echo "未检测到 Homebrew，正在打开 Git 下载页面..."
+    open "https://git-scm.com/download/mac"
 fi
 
 read -p "按回车键关闭此窗口..."

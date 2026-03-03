@@ -256,6 +256,68 @@ impl DependencyChecker {
         }
     }
 
+    pub fn check_codex() -> DependencyStatus {
+        #[cfg(windows)]
+        Self::refresh_system_path();
+
+        #[cfg(windows)]
+        let output = Command::new("cmd")
+            .args(&["/c", "codex", "--version"])
+            .output();
+
+        #[cfg(target_os = "macos")]
+        let output = {
+            let extended_path = get_macos_extended_path();
+            Command::new("sh")
+                .args(&["-c", &format!("PATH='{}' codex --version", extended_path)])
+                .output()
+        };
+
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        let output = Command::new("codex")
+            .arg("--version")
+            .output();
+
+        match output {
+            Ok(out) if out.status.success() => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                let combined = format!("{}{}", stdout, stderr);
+
+                if let Ok(re) = Regex::new(r"(\d+\.\d+\.\d+)") {
+                    if let Some(caps) = re.captures(&combined) {
+                        let version = caps.get(1).map(|m| m.as_str().to_string());
+                        return DependencyStatus {
+                            installed: true,
+                            version,
+                            meets_requirement: true,
+                            latest_version: None,
+                            update_available: false,
+                            error: None,
+                        };
+                    }
+                }
+
+                DependencyStatus {
+                    installed: true,
+                    version: None,
+                    meets_requirement: true,
+                    latest_version: None,
+                    update_available: false,
+                    error: Some("无法解析版本号".to_string()),
+                }
+            }
+            _ => DependencyStatus {
+                installed: false,
+                version: None,
+                meets_requirement: false,
+                latest_version: None,
+                update_available: false,
+                error: Some("Codex CLI not found".to_string()),
+            },
+        }
+    }
+
     fn check_dependency(
         command: &str,
         args: &[&str],
@@ -333,6 +395,17 @@ impl DependencyChecker {
         let mut status = Self::check_claude();
         if status.installed {
             status.latest_version = Self::get_claude_latest_version().await;
+            if let (Some(ref current), Some(ref latest)) = (&status.version, &status.latest_version) {
+                status.update_available = !Self::compare_versions(current, latest);
+            }
+        }
+        status
+    }
+
+    pub async fn check_codex_with_update() -> DependencyStatus {
+        let mut status = Self::check_codex();
+        if status.installed {
+            status.latest_version = Self::get_codex_latest_version().await;
             if let (Some(ref current), Some(ref latest)) = (&status.version, &status.latest_version) {
                 status.update_available = !Self::compare_versions(current, latest);
             }
@@ -452,6 +525,21 @@ impl DependencyChecker {
             Err(_) => {}
         }
 
+        None
+    }
+
+    async fn get_codex_latest_version() -> Option<String> {
+        let url = "https://registry.npmjs.org/@openai/codex/latest";
+        match reqwest::get(url).await {
+            Ok(response) => {
+                if let Ok(json) = response.json::<serde_json::Value>().await {
+                    return json.get("version")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string());
+                }
+            }
+            Err(_) => {}
+        }
         None
     }
 

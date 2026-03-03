@@ -125,7 +125,8 @@ export const ProjectDetailPage: React.FC = () => {
   const isRemote = project.config.mode === 'remote';
 
   const getModeLabel = () => {
-    if (project.config.mode === 'claude') return 'Claude 原版';
+    if (project.config.mode === 'claude') return 'Claude 账号';
+    if (project.config.mode === 'codex') return 'Codex 账号';
     if (project.config.mode === 'remote') return '远程桥接';
     return '自定义模型';
   };
@@ -170,8 +171,23 @@ export const ProjectDetailPage: React.FC = () => {
                 </div>
               )}
 
+              {project.config.mode === 'codex' && (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">API Key:</span>
+                    <span className="text-[12px]">
+                      {project.config.codex_api_key ? '••••••••' : '(未设置)'}
+                    </span>
+                  </div>
+                </>
+              )}
+
               {project.config.mode === 'custom' && (
                 <>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">CLI 工具:</span>
+                    <span className="text-[12px]">{project.config.custom_cli === 'codex' ? 'Codex' : 'Claude Code'}</span>
+                  </div>
                   {project.config.model && (
                     <div className="flex items-center gap-2">
                       <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">模型:</span>
@@ -180,13 +196,13 @@ export const ProjectDetailPage: React.FC = () => {
                   )}
                   {project.config.base_url && (
                     <div className="flex items-center gap-2">
-                      <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">Base URL:</span>
+                      <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">{project.config.custom_cli === 'codex' ? 'Provider:' : 'Base URL:'}</span>
                       <span className="text-[12px]">{project.config.base_url}</span>
                     </div>
                   )}
                   {project.config.token && (
                     <div className="flex items-center gap-2">
-                      <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">Token:</span>
+                      <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">{project.config.custom_cli === 'codex' ? 'API Key:' : 'Token:'}</span>
                       <span className="text-[12px]">••••••••</span>
                     </div>
                   )}
@@ -216,7 +232,7 @@ export const ProjectDetailPage: React.FC = () => {
                 <div className="flex items-center gap-2">
                   <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">启动模式:</span>
                   <span className="text-[12px]">
-                    {project.config.skip_permissions ? 'dangerously-skip 模式' : '普通模式'}
+                    {project.config.skip_permissions ? '跳过确认模式' : '普通模式'}
                   </span>
                 </div>
               )}
@@ -282,7 +298,7 @@ export const ProjectDetailPage: React.FC = () => {
                     onClick={handleLaunch}
                     className="flex-1 h-[42px] bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[14px] font-semibold rounded-lg transition-all duration-200"
                   >
-                    启动 Claude Code
+                    {project.config.mode === 'codex' ? '启动 Codex' : '启动 Claude Code'}
                   </button>
                   <button
                     onClick={handleEdit}

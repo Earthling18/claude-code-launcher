@@ -117,6 +117,9 @@ impl ConfigStorage {
         if !project.config.bridge_bind_key.is_empty() {
             project.config.bridge_bind_key = general_purpose::STANDARD.encode(&project.config.bridge_bind_key);
         }
+        if !project.config.codex_api_key.is_empty() {
+            project.config.codex_api_key = general_purpose::STANDARD.encode(&project.config.codex_api_key);
+        }
     }
 
     /// Decode token in project config after loading
@@ -132,6 +135,13 @@ impl ConfigStorage {
             if let Ok(decoded) = general_purpose::STANDARD.decode(&project.config.bridge_bind_key) {
                 if let Ok(key_str) = String::from_utf8(decoded) {
                     project.config.bridge_bind_key = key_str;
+                }
+            }
+        }
+        if !project.config.codex_api_key.is_empty() {
+            if let Ok(decoded) = general_purpose::STANDARD.decode(&project.config.codex_api_key) {
+                if let Ok(key_str) = String::from_utf8(decoded) {
+                    project.config.codex_api_key = key_str;
                 }
             }
         }

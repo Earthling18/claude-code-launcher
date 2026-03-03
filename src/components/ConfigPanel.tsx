@@ -1,8 +1,8 @@
 import { useState } from 'react';
 
 interface ConfigPanelProps {
-  mode: 'claude' | 'custom';
-  onModeChange: (mode: 'claude' | 'custom') => void;
+  mode: 'claude' | 'custom' | 'codex';
+  onModeChange: (mode: 'claude' | 'custom' | 'codex') => void;
   proxy: string;
   onProxyChange: (value: string) => void;
   model: string;
@@ -13,6 +13,10 @@ interface ConfigPanelProps {
   onTokenChange: (value: string) => void;
   skipPermissions: boolean;
   onSkipPermissionsChange: (value: boolean) => void;
+  codexApiKey: string;
+  onCodexApiKeyChange: (value: string) => void;
+  customCli: 'claude' | 'codex';
+  onCustomCliChange: (value: 'claude' | 'codex') => void;
   onLaunch: () => void;
   onCopyPowershell: () => void;
   onCopyCmd: () => void;
@@ -34,6 +38,10 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onTokenChange,
   skipPermissions,
   onSkipPermissionsChange,
+  codexApiKey,
+  onCodexApiKeyChange,
+  customCli,
+  onCustomCliChange,
   onLaunch,
   onCopyPowershell,
   onCopyCmd,
@@ -42,6 +50,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   platform,
 }) => {
   const [showToken, setShowToken] = useState(false);
+  const [showCodexKey, setShowCodexKey] = useState(false);
 
   return (
     <div className="px-5 py-3">
@@ -59,7 +68,19 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
             onChange={() => onModeChange('claude')}
             className="w-4 h-4"
           />
-          <span className="text-[12px]">Claude 原版</span>
+          <span className="text-[12px]">Claude 账号</span>
+        </label>
+
+        <label className="flex items-center gap-2 cursor-pointer">
+          <input
+            type="radio"
+            name="mode"
+            value="codex"
+            checked={mode === 'codex'}
+            onChange={() => onModeChange('codex')}
+            className="w-4 h-4"
+          />
+          <span className="text-[12px]">Codex 账号</span>
         </label>
 
         <label className="flex items-center gap-2 cursor-pointer">
@@ -75,7 +96,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
         </label>
       </div>
 
-      {/* Claude 原版模式 */}
+      {/* Claude 账号模式 */}
       {mode === 'claude' && (
         <div>
           <label className="block text-[12px] px-5 py-1">
@@ -95,9 +116,65 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
         </div>
       )}
 
+      {/* Codex 账号模式 */}
+      {mode === 'codex' && (
+        <div>
+          <label className="block text-[12px] px-5 py-1">
+            OpenAI API Key:
+          </label>
+          <div className="flex items-center gap-2 mx-5" style={{ width: 'calc(100% - 40px)' }}>
+            <input
+              type={showCodexKey ? 'text' : 'password'}
+              value={codexApiKey}
+              onChange={(e) => onCodexApiKeyChange(e.target.value)}
+              placeholder="输入 OpenAI API Key"
+              className="flex-1 px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px]"
+            />
+            <button
+              onClick={() => setShowCodexKey(!showCodexKey)}
+              className="px-3 py-2 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded"
+            >
+              {showCodexKey ? '隐藏' : '显示'}
+            </button>
+          </div>
+          <p className="text-[10px] text-[#999999] px-5 py-1 max-w-[480px]">
+            Codex 使用 OpenAI API，需要提供 API Key
+          </p>
+        </div>
+      )}
+
       {/* 自定义模型模式 */}
       {mode === 'custom' && (
         <div className="space-y-3">
+          {/* CLI 工具选择 */}
+          <div className="px-5">
+            <label className="block text-[12px] mb-2">CLI 工具:</label>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="customCli"
+                  value="claude"
+                  checked={customCli === 'claude'}
+                  onChange={() => onCustomCliChange('claude')}
+                  className="w-4 h-4"
+                />
+                <span className="text-[12px]">Claude Code</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="customCli"
+                  value="codex"
+                  checked={customCli === 'codex'}
+                  onChange={() => onCustomCliChange('codex')}
+                  className="w-4 h-4"
+                />
+                <span className="text-[12px]">Codex</span>
+              </label>
+            </div>
+          </div>
+
           {/* Model Name */}
           <div>
             <label className="block text-[12px] px-5 py-1">
@@ -113,42 +190,44 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
             />
           </div>
 
-          {/* Base URL */}
+          {/* Base URL / Provider */}
           <div>
             <label className="block text-[12px] px-5 py-1">
-              Base URL (可选):
+              {customCli === 'codex' ? 'Provider (可选):' : 'Base URL (可选):'}
             </label>
             <input
               type="text"
               value={baseUrl}
               onChange={(e) => onBaseUrlChange(e.target.value)}
-              placeholder="例: http://api.example.com"
+              placeholder={customCli === 'codex' ? '例: openai' : '例: http://api.example.com'}
               className="w-full px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px] mx-5"
               style={{ width: 'calc(100% - 40px)' }}
             />
-            <p className="text-[10px] text-[#999999] px-5 py-1 max-w-[480px]">
-              行内模型,请使用uat环境的,API可联系艾灵申请
-            </p>
+            {customCli !== 'codex' && (
+              <p className="text-[10px] text-[#999999] px-5 py-1 max-w-[480px]">
+                行内模型,请使用uat环境的,API可联系艾灵申请
+              </p>
+            )}
           </div>
 
-          {/* Auth Token */}
+          {/* Auth Token / API Key */}
           <div>
             <label className="block text-[12px] px-5 py-1">
-              Auth Token (可选):
+              {customCli === 'codex' ? 'API Key (可选):' : 'Auth Token (可选):'}
             </label>
             <div className="flex items-center gap-2 mx-5" style={{ width: 'calc(100% - 40px)' }}>
               <input
                 type={showToken ? 'text' : 'password'}
                 value={token}
                 onChange={(e) => onTokenChange(e.target.value)}
-                placeholder="输入认证令牌"
+                placeholder={customCli === 'codex' ? '输入 API Key' : '输入认证令牌'}
                 className="flex-1 px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px]"
               />
               <button
                 onClick={() => setShowToken(!showToken)}
                 className="px-3 py-2 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded"
               >
-                {showToken ? '🙈' : '👁'}
+                {showToken ? '隐藏' : '显示'}
               </button>
             </div>
           </div>
@@ -177,11 +256,11 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
               onChange={() => onSkipPermissionsChange(true)}
               className="w-4 h-4"
             />
-            <span className="text-[12px]">dangerously-skip 模式</span>
+            <span className="text-[12px]">跳过确认模式</span>
           </label>
         </div>
         <p className="text-[10px] text-[#999999] mt-1">
-          dangerously-skip 模式会跳过权限确认提示，适合自动化场景
+          跳过确认模式会跳过权限确认提示，适合自动化场景
         </p>
       </div>
 
@@ -226,7 +305,7 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           onClick={onLaunch}
           className="w-full h-[42px] bg-[#3b82f6] hover:bg-[#2563eb] text-white text-[14px] font-semibold rounded-lg transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5"
         >
-          启动 Claude Code
+          {mode === 'codex' ? '启动 Codex' : '启动 Claude Code'}
         </button>
       </div>
       </div>

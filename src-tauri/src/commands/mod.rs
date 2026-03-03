@@ -71,6 +71,26 @@ pub async fn update_gitbash() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn check_codex() -> Result<dependency_checker::DependencyStatus, String> {
+    Ok(DependencyChecker::check_codex())
+}
+
+#[tauri::command]
+pub async fn check_codex_with_update() -> Result<dependency_checker::DependencyStatus, String> {
+    Ok(DependencyChecker::check_codex_with_update().await)
+}
+
+#[tauri::command]
+pub async fn install_codex() -> Result<(), String> {
+    Installer::install_codex()
+}
+
+#[tauri::command]
+pub async fn update_codex() -> Result<(), String> {
+    Installer::update_codex()
+}
+
+#[tauri::command]
 pub fn launch_claude_code(config: HashMap<String, String>) -> Result<(), String> {
     Launcher::launch_with_config(config)
 }
@@ -168,30 +188,7 @@ pub fn delete_project(id: String) -> Result<(), String> {
 #[tauri::command]
 pub fn launch_project(id: String) -> Result<(), String> {
     let project = ConfigStorage::get_project(&id)?;
-
-    // Build config from project
-    let mut config: HashMap<String, String> = HashMap::new();
-
-    if project.config.mode == "claude" {
-        if !project.config.proxy.is_empty() {
-            config.insert("HTTP_PROXY".to_string(), project.config.proxy.clone());
-            config.insert("HTTPS_PROXY".to_string(), project.config.proxy.clone());
-        }
-    } else {
-        if !project.config.model.is_empty() {
-            config.insert("ANTHROPIC_MODEL".to_string(), project.config.model.clone());
-        }
-        if !project.config.base_url.is_empty() {
-            config.insert("ANTHROPIC_BASE_URL".to_string(), project.config.base_url.clone());
-        }
-        if !project.config.token.is_empty() {
-            config.insert("ANTHROPIC_AUTH_TOKEN".to_string(), project.config.token.clone());
-        }
-    }
-
-    if project.config.skip_permissions {
-        config.insert("SKIP_PERMISSIONS".to_string(), "true".to_string());
-    }
+    let config = build_config_map(&project);
 
     // Launch with working directory
     Launcher::launch_with_config_and_dir(config, Some(project.working_directory.clone()))?;
@@ -239,20 +236,51 @@ pub fn generate_project_bash_command(id: String) -> Result<String, String> {
 fn build_config_map(project: &Project) -> HashMap<String, String> {
     let mut config: HashMap<String, String> = HashMap::new();
 
-    if project.config.mode == "claude" {
-        if !project.config.proxy.is_empty() {
-            config.insert("HTTP_PROXY".to_string(), project.config.proxy.clone());
-            config.insert("HTTPS_PROXY".to_string(), project.config.proxy.clone());
+    match project.config.mode.as_str() {
+        "claude" => {
+            // Claude native mode: proxy only
+            if !project.config.proxy.is_empty() {
+                config.insert("HTTP_PROXY".to_string(), project.config.proxy.clone());
+                config.insert("HTTPS_PROXY".to_string(), project.config.proxy.clone());
+            }
         }
-    } else {
-        if !project.config.model.is_empty() {
-            config.insert("ANTHROPIC_MODEL".to_string(), project.config.model.clone());
+        "codex" => {
+            // Codex native mode: OPENAI_API_KEY, launch codex CLI
+            config.insert("CLI_COMMAND".to_string(), "codex".to_string());
+            if !project.config.codex_api_key.is_empty() {
+                config.insert("OPENAI_API_KEY".to_string(), project.config.codex_api_key.clone());
+            }
         }
-        if !project.config.base_url.is_empty() {
-            config.insert("ANTHROPIC_BASE_URL".to_string(), project.config.base_url.clone());
+        "custom" => {
+            if project.config.custom_cli == "codex" {
+                // Custom mode with Codex CLI
+                let mut cli_cmd = "codex".to_string();
+                if !project.config.model.is_empty() {
+                    cli_cmd.push_str(&format!(" --model {}", project.config.model));
+                }
+                if !project.config.base_url.is_empty() {
+                    cli_cmd.push_str(&format!(" --provider {}", project.config.base_url));
+                }
+                config.insert("CLI_COMMAND".to_string(), cli_cmd);
+                // For custom+codex, use token field as OPENAI_API_KEY
+                if !project.config.token.is_empty() {
+                    config.insert("OPENAI_API_KEY".to_string(), project.config.token.clone());
+                }
+            } else {
+                // Custom mode with Claude CLI (default)
+                if !project.config.model.is_empty() {
+                    config.insert("ANTHROPIC_MODEL".to_string(), project.config.model.clone());
+                }
+                if !project.config.base_url.is_empty() {
+                    config.insert("ANTHROPIC_BASE_URL".to_string(), project.config.base_url.clone());
+                }
+                if !project.config.token.is_empty() {
+                    config.insert("ANTHROPIC_AUTH_TOKEN".to_string(), project.config.token.clone());
+                }
+            }
         }
-        if !project.config.token.is_empty() {
-            config.insert("ANTHROPIC_AUTH_TOKEN".to_string(), project.config.token.clone());
+        _ => {
+            // remote or unknown — no CLI config needed
         }
     }
 
