@@ -66,7 +66,6 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
   const [codexApiKey, setCodexApiKey] = useState(initialConfig?.codex_api_key || '');
   const [customCli, setCustomCli] = useState<'claude' | 'codex'>(initialConfig?.custom_cli || 'claude');
   const [showToken, setShowToken] = useState(false);
-  const [showCodexKey, setShowCodexKey] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const validate = (): boolean => {
@@ -82,6 +81,10 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
 
     if (mode === 'claude' && proxy && !proxy.startsWith('http://') && !proxy.startsWith('https://')) {
       newErrors.proxy = '代理地址必须以 http:// 或 https:// 开头';
+    }
+
+    if (mode === 'codex' && codexApiKey && !codexApiKey.startsWith('http://') && !codexApiKey.startsWith('https://')) {
+      newErrors.codexProxy = '代理地址必须以 http:// 或 https:// 开头';
     }
 
     if (mode === 'custom' && baseUrl && !baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
@@ -224,25 +227,17 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       {/* Codex 账号模式 */}
       {mode === 'codex' && (
         <div>
-          <label className="block text-[12px] mb-1">OpenAI API Key</label>
-          <div className="flex items-center gap-2">
-            <input
-              type={showCodexKey ? 'text' : 'password'}
-              value={codexApiKey}
-              onChange={(e) => setCodexApiKey(e.target.value)}
-              placeholder="输入 OpenAI API Key"
-              className="flex-1 px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px]"
-            />
-            <button
-              type="button"
-              onClick={() => setShowCodexKey(!showCodexKey)}
-              className="px-3 py-2 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded"
-            >
-              {showCodexKey ? '隐藏' : '显示'}
-            </button>
-          </div>
+          <label className="block text-[12px] mb-1">代理地址 (可选)</label>
+          <input
+            type="text"
+            value={codexApiKey}
+            onChange={(e) => setCodexApiKey(e.target.value)}
+            placeholder="例: http://127.0.0.1:7890"
+            className="w-full px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px]"
+          />
+          {errors.codexProxy && <p className="text-[10px] text-red-500 mt-1">{errors.codexProxy}</p>}
           <p className="text-[10px] text-[#999999] mt-1">
-            Codex 使用 OpenAI API，需要提供 API Key
+            原版 Codex 服务需要翻墙，可在此处配置代理地址
           </p>
         </div>
       )}

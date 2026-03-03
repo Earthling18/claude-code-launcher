@@ -171,15 +171,11 @@ export const ProjectDetailPage: React.FC = () => {
                 </div>
               )}
 
-              {project.config.mode === 'codex' && (
-                <>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">API Key:</span>
-                    <span className="text-[12px]">
-                      {project.config.codex_api_key ? '••••••••' : '(未设置)'}
-                    </span>
-                  </div>
-                </>
+              {project.config.mode === 'codex' && project.config.codex_api_key && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">代理地址:</span>
+                  <span className="text-[12px]">{project.config.codex_api_key}</span>
+                </div>
               )}
 
               {project.config.mode === 'custom' && (

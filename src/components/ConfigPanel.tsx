@@ -13,8 +13,8 @@ interface ConfigPanelProps {
   onTokenChange: (value: string) => void;
   skipPermissions: boolean;
   onSkipPermissionsChange: (value: boolean) => void;
-  codexApiKey: string;
-  onCodexApiKeyChange: (value: string) => void;
+  codexProxy: string;
+  onCodexProxyChange: (value: string) => void;
   customCli: 'claude' | 'codex';
   onCustomCliChange: (value: 'claude' | 'codex') => void;
   onLaunch: () => void;
@@ -38,8 +38,8 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   onTokenChange,
   skipPermissions,
   onSkipPermissionsChange,
-  codexApiKey,
-  onCodexApiKeyChange,
+  codexProxy,
+  onCodexProxyChange,
   customCli,
   onCustomCliChange,
   onLaunch,
@@ -50,7 +50,6 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
   platform,
 }) => {
   const [showToken, setShowToken] = useState(false);
-  const [showCodexKey, setShowCodexKey] = useState(false);
 
   return (
     <div className="px-5 py-3">
@@ -120,25 +119,18 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
       {mode === 'codex' && (
         <div>
           <label className="block text-[12px] px-5 py-1">
-            OpenAI API Key:
+            代理地址 (可选):
           </label>
-          <div className="flex items-center gap-2 mx-5" style={{ width: 'calc(100% - 40px)' }}>
-            <input
-              type={showCodexKey ? 'text' : 'password'}
-              value={codexApiKey}
-              onChange={(e) => onCodexApiKeyChange(e.target.value)}
-              placeholder="输入 OpenAI API Key"
-              className="flex-1 px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px]"
-            />
-            <button
-              onClick={() => setShowCodexKey(!showCodexKey)}
-              className="px-3 py-2 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded"
-            >
-              {showCodexKey ? '隐藏' : '显示'}
-            </button>
-          </div>
+          <input
+            type="text"
+            value={codexProxy}
+            onChange={(e) => onCodexProxyChange(e.target.value)}
+            placeholder="例: http://127.0.0.1:7890"
+            className="w-full px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px] mx-5"
+            style={{ width: 'calc(100% - 40px)' }}
+          />
           <p className="text-[10px] text-[#999999] px-5 py-1 max-w-[480px]">
-            Codex 使用 OpenAI API，需要提供 API Key
+            原版 Codex 服务需要翻墙，可在此处配置代理地址
           </p>
         </div>
       )}

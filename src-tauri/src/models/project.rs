@@ -56,7 +56,7 @@ pub struct ProjectConfig {
     #[serde(default = "default_skip_permissions")]
     pub skip_permissions: bool,          // Skip permissions flag
     #[serde(default)]
-    pub codex_api_key: String,           // OpenAI API Key for Codex mode
+    pub codex_api_key: String,           // Proxy for Codex mode (legacy field name kept for backward compat)
     #[serde(default = "default_custom_cli")]
     pub custom_cli: String,              // CLI tool for custom mode: "claude" or "codex"
 

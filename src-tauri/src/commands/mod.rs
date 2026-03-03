@@ -245,10 +245,11 @@ fn build_config_map(project: &Project) -> HashMap<String, String> {
             }
         }
         "codex" => {
-            // Codex native mode: OPENAI_API_KEY, launch codex CLI
+            // Codex native mode: proxy + launch codex CLI
             config.insert("CLI_COMMAND".to_string(), "codex".to_string());
             if !project.config.codex_api_key.is_empty() {
-                config.insert("OPENAI_API_KEY".to_string(), project.config.codex_api_key.clone());
+                config.insert("HTTP_PROXY".to_string(), project.config.codex_api_key.clone());
+                config.insert("HTTPS_PROXY".to_string(), project.config.codex_api_key.clone());
             }
         }
         "custom" => {
