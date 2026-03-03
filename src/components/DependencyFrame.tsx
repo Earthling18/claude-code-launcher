@@ -357,9 +357,16 @@ export const DependencyFrame = () => {
   return (
     <div className="px-5 py-2" data-onboarding="dependencies">
       <div className="card-frame">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center justify-between mb-2">
           <h2 className="text-base font-bold">系统依赖(先装node)</h2>
-
+          <button
+            onClick={checkWithUpdates}
+            className="px-4 py-1 text-[10px] bg-[#666666] hover:bg-[#555555] text-white rounded"
+          >
+            检查更新
+          </button>
+        </div>
+        <div className="flex items-center gap-4 flex-wrap">
           <div className="flex items-center gap-2">
             <span className="text-[10px]">Node.js:</span>
             {renderStatus(nodejsStatus)}
@@ -383,15 +390,6 @@ export const DependencyFrame = () => {
             {renderStatus(codexStatus)}
             {renderCodexButton()}
           </div>
-
-          <div className="flex-1" />
-
-          <button
-            onClick={checkWithUpdates}
-            className="px-4 py-1 text-[10px] bg-[#666666] hover:bg-[#555555] text-white rounded"
-          >
-            检查更新
-          </button>
         </div>
       </div>
     </div>
