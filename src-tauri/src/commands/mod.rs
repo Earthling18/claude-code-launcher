@@ -258,11 +258,12 @@ fn build_config_map(project: &Project) -> HashMap<String, String> {
                 if !project.config.model.is_empty() {
                     cli_cmd.push_str(&format!(" --model {}", project.config.model));
                 }
-                if !project.config.base_url.is_empty() {
-                    cli_cmd.push_str(&format!(" --provider {}", project.config.base_url));
-                }
                 config.insert("CLI_COMMAND".to_string(), cli_cmd);
-                // For custom+codex, use token field as OPENAI_API_KEY
+                // base_url → OPENAI_BASE_URL env var
+                if !project.config.base_url.is_empty() {
+                    config.insert("OPENAI_BASE_URL".to_string(), project.config.base_url.clone());
+                }
+                // token → OPENAI_API_KEY env var
                 if !project.config.token.is_empty() {
                     config.insert("OPENAI_API_KEY".to_string(), project.config.token.clone());
                 }

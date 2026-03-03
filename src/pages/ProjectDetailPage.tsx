@@ -196,7 +196,7 @@ export const ProjectDetailPage: React.FC = () => {
                   )}
                   {project.config.base_url && (
                     <div className="flex items-center gap-2">
-                      <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">{project.config.custom_cli === 'codex' ? 'Provider:' : 'Base URL:'}</span>
+                      <span className="text-[12px] text-[#999999] w-24 flex-shrink-0">Base URL:</span>
                       <span className="text-[12px]">{project.config.base_url}</span>
                     </div>
                   )}

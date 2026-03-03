@@ -161,16 +161,15 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
                 />
                 <span className="text-[12px]">Claude Code</span>
               </label>
-              <label className="flex items-center gap-2 cursor-pointer">
+              <label className="flex items-center gap-2 opacity-40 cursor-not-allowed">
                 <input
                   type="radio"
                   name="customCli"
                   value="codex"
-                  checked={customCli === 'codex'}
-                  onChange={() => onCustomCliChange('codex')}
+                  disabled
                   className="w-4 h-4"
                 />
-                <span className="text-[12px]">Codex</span>
+                <span className="text-[12px]">Codex (暂不支持)</span>
               </label>
             </div>
           </div>
@@ -193,13 +192,13 @@ export const ConfigPanel: React.FC<ConfigPanelProps> = ({
           {/* Base URL / Provider */}
           <div>
             <label className="block text-[12px] px-5 py-1">
-              {customCli === 'codex' ? 'Provider (可选):' : 'Base URL (可选):'}
+              Base URL (可选):
             </label>
             <input
               type="text"
               value={baseUrl}
               onChange={(e) => onBaseUrlChange(e.target.value)}
-              placeholder={customCli === 'codex' ? '例: openai' : '例: http://api.example.com'}
+              placeholder="例: http://api.example.com"
               className="w-full px-3 py-2 bg-[#343638] border border-[#565B5E] rounded text-[12px] mx-5"
               style={{ width: 'calc(100% - 40px)' }}
             />

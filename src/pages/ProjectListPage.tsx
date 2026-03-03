@@ -111,7 +111,11 @@ export const ProjectListPage: React.FC = () => {
   const handleLaunch = async (id: string) => {
     try {
       await projectApi.launch(id);
-      loadProjects();
+      // Silently refresh project data without loading state to preserve scroll position
+      try {
+        const data = await projectApi.getAll();
+        setProjects(data);
+      } catch (_) {}
     } catch (err: any) {
       alert(`启动失败: ${err}`);
     }

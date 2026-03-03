@@ -65,9 +65,9 @@ impl Launcher {
         let skip_permissions = config.get("SKIP_PERMISSIONS").map(|v| v == "true").unwrap_or(false);
 
         if skip_permissions {
-            // For codex, use --full-auto; for claude, use --dangerously-skip-permissions
+            // For codex, use --yolo; for claude, use --dangerously-skip-permissions
             if cli.starts_with("codex") {
-                format!("{} --full-auto", cli)
+                format!("{} --yolo", cli)
             } else {
                 format!("{} --dangerously-skip-permissions", cli)
             }
@@ -83,6 +83,7 @@ impl Launcher {
             "ANTHROPIC_MODEL",
             "ANTHROPIC_BASE_URL",
             "ANTHROPIC_AUTH_TOKEN",
+            "OPENAI_BASE_URL",
             "OPENAI_API_KEY",
             "HTTP_PROXY",
             "HTTPS_PROXY",
@@ -221,7 +222,7 @@ impl Launcher {
         Self::log_line(&format!("PATH len: {}", std::env::var("PATH").unwrap_or_default().len()));
 
         // Determine CLI binary name from the command string.
-        // Command format: "$env:KEY='val'; $env:KEY2='val2'; codex --full-auto"
+        // Command format: "$env:KEY='val'; $env:KEY2='val2'; codex --yolo"
         // Split by ';', take the last segment (the CLI command), then extract the first word.
         let cli_bin = command.split(';')
             .map(|s| s.trim())

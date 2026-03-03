@@ -2,31 +2,29 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import type { DependencyStatus } from '../types';
 
+// Read cache once for initial state to avoid flicker on re-mount
+const getInitialCache = () => {
+  try {
+    const cached = sessionStorage.getItem('dependencyStatus');
+    if (cached) return JSON.parse(cached);
+  } catch (_) {}
+  return null;
+};
+
 export const DependencyFrame = () => {
-  const [nodejsStatus, setNodejsStatus] = useState<DependencyStatus | null>(null);
-  const [claudeStatus, setClaudeStatus] = useState<DependencyStatus | null>(null);
-  const [gitbashStatus, setGitbashStatus] = useState<DependencyStatus | null>(null);
-  const [codexStatus, setCodexStatus] = useState<DependencyStatus | null>(null);
+  const initialCache = getInitialCache();
+  const [nodejsStatus, setNodejsStatus] = useState<DependencyStatus | null>(initialCache?.nodejs || null);
+  const [claudeStatus, setClaudeStatus] = useState<DependencyStatus | null>(initialCache?.claude || null);
+  const [gitbashStatus, setGitbashStatus] = useState<DependencyStatus | null>(initialCache?.gitbash || null);
+  const [codexStatus, setCodexStatus] = useState<DependencyStatus | null>(initialCache?.codex || null);
   const [nodejsLoading, setNodejsLoading] = useState(false);
   const [claudeLoading, setClaudeLoading] = useState(false);
   const [gitbashLoading, setGitbashLoading] = useState(false);
   const [codexLoading, setCodexLoading] = useState(false);
 
-  // 自动检测(启动时)，使用 sessionStorage 缓存避免重复检测
+  // 首次无缓存时自动检测
   useEffect(() => {
-    const cached = sessionStorage.getItem('dependencyStatus');
-    if (cached) {
-      try {
-        const { nodejs, claude, gitbash, codex } = JSON.parse(cached);
-        setNodejsStatus(nodejs);
-        setClaudeStatus(claude);
-        setGitbashStatus(gitbash);
-        if (codex) setCodexStatus(codex);
-        return;
-      } catch (e) {
-        // 缓存解析失败，重新检测
-      }
-    }
+    if (initialCache) return;
     setTimeout(() => {
       checkInstallationOnly();
     }, 100);
