@@ -8,7 +8,7 @@ use std::env;
 /// Get extended PATH for macOS that includes common installation locations
 /// This is needed because GUI apps don't inherit shell PATH from .zshrc/.bash_profile
 #[cfg(target_os = "macos")]
-fn get_macos_extended_path() -> String {
+pub fn get_macos_extended_path() -> String {
     let home = dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| "".to_string());
@@ -197,19 +197,17 @@ impl DependencyChecker {
                     use std::os::windows::process::CommandExt;
                     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-                    let npm_check = Command::new("cmd")
-                        .args(&["/c", "npm", "list", "-g", "@anthropic-ai/claude-code", "--depth=0"])
+                    // Check if npm itself is available
+                    let npm_available = Command::new("cmd")
+                        .args(&["/c", "where", "npm"])
                         .creation_flags(CREATE_NO_WINDOW)
-                        .output();
-
-                    let package_installed = npm_check
-                        .as_ref()
+                        .output()
                         .map(|o| o.status.success())
                         .unwrap_or(false);
 
-                    if package_installed {
-                        // Package exists but shim is broken/missing — reinstall to recreate shims
-                        eprintln!("[check_claude] package installed but shim missing, repairing...");
+                    if npm_available {
+                        // claude not found but npm is available — reinstall to repair
+                        eprintln!("[check_claude] Windows: claude not found, attempting reinstall...");
                         let _ = Command::new("cmd")
                             .args(&["/c", "npm", "install", "-g", "@anthropic-ai/claude-code"])
                             .creation_flags(CREATE_NO_WINDOW)
@@ -246,20 +244,22 @@ impl DependencyChecker {
 
                 #[cfg(target_os = "macos")]
                 {
-                    // On macOS, check if the npm package is installed but the
-                    // symlink is broken/missing (e.g. after a failed auto-update).
+                    // On macOS, if claude command is missing, attempt auto-repair.
+                    // This handles both cases:
+                    // 1. npm package exists but symlink is broken
+                    // 2. npm package was corrupted/removed by a failed auto-update
+                    // In both cases, npm install -g will fix it.
                     let extended_path = get_macos_extended_path();
-                    let npm_check = Command::new("sh")
-                        .args(&["-c", &format!("PATH='{}' npm list -g @anthropic-ai/claude-code --depth=0", extended_path)])
-                        .output();
 
-                    let package_installed = npm_check
-                        .as_ref()
+                    // Check if npm itself is available
+                    let npm_available = Command::new("sh")
+                        .args(&["-c", &format!("PATH='{}' which npm", extended_path)])
+                        .output()
                         .map(|o| o.status.success())
                         .unwrap_or(false);
 
-                    if package_installed {
-                        eprintln!("[check_claude] macOS: package installed but claude not found, repairing...");
+                    if npm_available {
+                        eprintln!("[check_claude] macOS: claude not found, attempting reinstall...");
                         let _ = Command::new("sh")
                             .args(&["-c", &format!("PATH='{}' npm install -g @anthropic-ai/claude-code", extended_path)])
                             .output();
@@ -353,13 +353,108 @@ impl DependencyChecker {
                     error: Some("无法解析版本号".to_string()),
                 }
             }
-            _ => DependencyStatus {
-                installed: false,
-                version: None,
-                meets_requirement: false,
-                latest_version: None,
-                update_available: false,
-                error: Some("Codex CLI not found".to_string()),
+            _ => {
+                // codex --version failed. Attempt auto-repair if npm is available.
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
+                    const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+                    let npm_available = Command::new("cmd")
+                        .args(&["/c", "where", "npm"])
+                        .creation_flags(CREATE_NO_WINDOW)
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
+
+                    if npm_available {
+                        eprintln!("[check_codex] Windows: codex not found, attempting reinstall...");
+                        let _ = Command::new("cmd")
+                            .args(&["/c", "npm", "install", "-g", "@openai/codex"])
+                            .creation_flags(CREATE_NO_WINDOW)
+                            .output();
+
+                        Self::refresh_system_path();
+
+                        let retry = Command::new("cmd")
+                            .args(&["/c", "codex", "--version"])
+                            .creation_flags(CREATE_NO_WINDOW)
+                            .output();
+
+                        if let Ok(out) = retry {
+                            if out.status.success() {
+                                let stdout = String::from_utf8_lossy(&out.stdout);
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                let combined = format!("{}{}", stdout, stderr);
+                                if let Ok(re) = Regex::new(r"(\d+\.\d+\.\d+)") {
+                                    if let Some(caps) = re.captures(&combined) {
+                                        let version = caps.get(1).map(|m| m.as_str().to_string());
+                                        return DependencyStatus {
+                                            installed: true,
+                                            version,
+                                            meets_requirement: true,
+                                            latest_version: None,
+                                            update_available: false,
+                                            error: None,
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                #[cfg(target_os = "macos")]
+                {
+                    let extended_path = get_macos_extended_path();
+
+                    let npm_available = Command::new("sh")
+                        .args(&["-c", &format!("PATH='{}' which npm", extended_path)])
+                        .output()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
+
+                    if npm_available {
+                        eprintln!("[check_codex] macOS: codex not found, attempting reinstall...");
+                        let _ = Command::new("sh")
+                            .args(&["-c", &format!("PATH='{}' npm install -g @openai/codex", extended_path)])
+                            .output();
+
+                        let retry = Command::new("sh")
+                            .args(&["-c", &format!("PATH='{}' codex --version", extended_path)])
+                            .output();
+
+                        if let Ok(out) = retry {
+                            if out.status.success() {
+                                let stdout = String::from_utf8_lossy(&out.stdout);
+                                let stderr = String::from_utf8_lossy(&out.stderr);
+                                let combined = format!("{}{}", stdout, stderr);
+                                if let Ok(re) = Regex::new(r"(\d+\.\d+\.\d+)") {
+                                    if let Some(caps) = re.captures(&combined) {
+                                        let version = caps.get(1).map(|m| m.as_str().to_string());
+                                        return DependencyStatus {
+                                            installed: true,
+                                            version,
+                                            meets_requirement: true,
+                                            latest_version: None,
+                                            update_available: false,
+                                            error: None,
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                DependencyStatus {
+                    installed: false,
+                    version: None,
+                    meets_requirement: false,
+                    latest_version: None,
+                    update_available: false,
+                    error: Some("Codex CLI not found".to_string()),
+                }
             },
         }
     }

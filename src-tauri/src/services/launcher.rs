@@ -270,11 +270,13 @@ impl Launcher {
             ));
 
             if !npm_check.status.success() {
-                return Err(format!("{}未安装或未在PATH中。请先安装{}。", cli_label, cli_label));
+                Self::log_line(&format!("{} npm package not found either, attempting full reinstall...", cli_bin));
+            } else {
+                Self::log_line(&format!("{} npm package exists but shim missing", cli_bin));
             }
 
-            // Package is installed via npm but shim files are missing.
-            Self::log_line(&format!("{} not in PATH but npm package exists, attempting shim repair...", cli_bin));
+            // Attempt repair regardless — npm install -g will fix both broken symlinks and missing packages
+            Self::log_line(&format!("{} not in PATH, attempting reinstall...", cli_bin));
             let repair = Command::new("cmd.exe")
                 .args(&["/c", "npm", "install", "-g", npm_package])
                 .creation_flags(CREATE_NO_WINDOW)
@@ -397,11 +399,38 @@ impl Launcher {
 
     #[cfg(target_os = "macos")]
     fn execute_macos(command: &str, working_dir: Option<String>) -> Result<(), String> {
-        // Note: We don't check for claude existence here because:
-        // 1. Terminal.app will launch with a login shell that loads .zshrc/.bash_profile
-        // 2. This means PATH will include npm global bin, homebrew, nvm, etc.
-        // 3. The GUI app doesn't have this PATH, so `which claude` would fail even when claude is installed
-        // 4. If claude is not installed, the user will see the error directly in Terminal
+        // Pre-check CLI availability and auto-repair if needed.
+        // This catches cases where a failed auto-update removed the binary.
+        {
+            let (cli_bin, npm_package) = if command.contains("codex") {
+                ("codex", "@openai/codex")
+            } else {
+                ("claude", "@anthropic-ai/claude-code")
+            };
+
+            let extended_path = super::dependency_checker::get_macos_extended_path();
+
+            let cli_ok = Command::new("sh")
+                .args(&["-c", &format!("PATH='{}' which {}", extended_path, cli_bin)])
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false);
+
+            if !cli_ok {
+                let npm_available = Command::new("sh")
+                    .args(&["-c", &format!("PATH='{}' which npm", extended_path)])
+                    .output()
+                    .map(|o| o.status.success())
+                    .unwrap_or(false);
+
+                if npm_available {
+                    eprintln!("[launcher] macOS: {} not found before launch, attempting reinstall...", cli_bin);
+                    let _ = Command::new("sh")
+                        .args(&["-c", &format!("PATH='{}' npm install -g {}", extended_path, npm_package)])
+                        .output();
+                }
+            }
+        }
 
         let target_dir = working_dir.unwrap_or_else(|| {
             dirs::home_dir()
