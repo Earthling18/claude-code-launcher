@@ -190,8 +190,8 @@ impl DependencyChecker {
                 }
             }
             _ => {
-                // claude --version failed. On Windows, check if the npm package is installed
-                // but the shim files (claude.cmd) are missing, and auto-repair if so.
+                // claude --version failed. Check if the npm package is installed
+                // but the symlink/shim is missing, and auto-repair if so.
                 #[cfg(windows)]
                 {
                     use std::os::windows::process::CommandExt;
@@ -221,6 +221,52 @@ impl DependencyChecker {
                         let retry = Command::new("cmd")
                             .args(&["/c", "claude", "--version"])
                             .creation_flags(CREATE_NO_WINDOW)
+                            .output();
+
+                        if let Ok(out) = retry {
+                            if out.status.success() {
+                                let stdout = String::from_utf8_lossy(&out.stdout);
+                                if let Ok(re) = Regex::new(r"(\d+\.\d+\.\d+)") {
+                                    if let Some(caps) = re.captures(&stdout) {
+                                        let version = caps.get(1).map(|m| m.as_str().to_string());
+                                        return DependencyStatus {
+                                            installed: true,
+                                            version,
+                                            meets_requirement: true,
+                                            latest_version: None,
+                                            update_available: false,
+                                            error: None,
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                #[cfg(target_os = "macos")]
+                {
+                    // On macOS, check if the npm package is installed but the
+                    // symlink is broken/missing (e.g. after a failed auto-update).
+                    let extended_path = get_macos_extended_path();
+                    let npm_check = Command::new("sh")
+                        .args(&["-c", &format!("PATH='{}' npm list -g @anthropic-ai/claude-code --depth=0", extended_path)])
+                        .output();
+
+                    let package_installed = npm_check
+                        .as_ref()
+                        .map(|o| o.status.success())
+                        .unwrap_or(false);
+
+                    if package_installed {
+                        eprintln!("[check_claude] macOS: package installed but claude not found, repairing...");
+                        let _ = Command::new("sh")
+                            .args(&["-c", &format!("PATH='{}' npm install -g @anthropic-ai/claude-code", extended_path)])
+                            .output();
+
+                        // Retry version check after repair
+                        let retry = Command::new("sh")
+                            .args(&["-c", &format!("PATH='{}' claude --version", extended_path)])
                             .output();
 
                         if let Ok(out) = retry {

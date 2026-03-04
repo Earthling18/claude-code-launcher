@@ -7,7 +7,7 @@ tags: [rust, tauri, react, typescript, claude-sdk]
 
 # claude-code-launcher-tauri
 
-Claude Code桌面启动器完整源码，Tauri 2应用，支持多项目管理、4种启动模式（原生/自定义/远程Bridge/Mobot）、自动更新。
+Claude Code桌面启动器完整源码，Tauri 2应用，支持多项目管理、5种启动模式（原生/自定义/Codex/远程Bridge/Mobot）、自动更新。
 
 ## 技术栈
 - Frontend: React 19 + TypeScript + Tailwind CSS + Vite
@@ -26,7 +26,7 @@ Claude Code桌面启动器完整源码，Tauri 2应用，支持多项目管理�
   - App.tsx — 应用入口
 - src-tauri/ — Rust后端
   - Cargo.toml — Rust依赖配置
-  - tauri.conf.json — Tauri配置（v0.2.5）
+  - tauri.conf.json — Tauri配置（v0.2.6）
   - resources/ — 资源文件
   - icons/ — 应用图标
 - .github/ — CI/CD配置
@@ -34,12 +34,14 @@ Claude Code桌面启动器完整源码，Tauri 2应用，支持多项目管理�
 
 ## 功能特性
 - 项目CRUD + 拖拽排序 + 置顶
-- 4种启动模式：原生/自定义/远程Bridge/Mobot
+- 5种启动模式：原生/自定义/Codex/远程Bridge/Mobot
+- Codex CLI支持：独立代理配置、自定义模式、依赖检测与一键安装
 - 远程Bridge：Python FastAPI + Claude Agent SDK，WebSocket长连接
 - 远程Bridge自动获取Key：通过管理后台API自动创建/获取用户Bind Key，基于OS用户名识别
 - 远程Bridge连接提示：显示可复制的 /变身 命令 + 艾灵企微二维码
 - 启动桥接时自动保存配置
-- 依赖检测 + 一键安装 + npm shim自动修复（启动/检测时若shim丢失则静默重建）
+- 依赖检测 + 一键安装 + npm shim自动修复（Windows/macOS，启动/检测时若shim丢失则静默重建）
+- macOS：Homebrew-free Node.js安装、xcode-select优先的Git安装
 - 自动更新（GitHub Releases）
 - 新手引导
 - WebView2 Runtime自动安装（embedBootstrapper，安装时自动引导用户安装WebView2）
