@@ -557,9 +557,30 @@ impl DependencyChecker {
     pub async fn check_gitbash_with_update() -> DependencyStatus {
         let mut status = Self::check_gitbash();
         if status.installed {
-            status.latest_version = Self::get_gitbash_latest_version().await;
-            if let (Some(ref current), Some(ref latest)) = (&status.version, &status.latest_version) {
-                status.update_available = !Self::compare_versions(current, latest);
+            // On macOS, skip update check for Apple Git — it's managed by macOS/Xcode
+            // and comparing against Homebrew's latest version is misleading.
+            #[cfg(target_os = "macos")]
+            {
+                let is_apple_git = Command::new("git")
+                    .args(&["--version"])
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).contains("Apple Git"))
+                    .unwrap_or(false);
+
+                if !is_apple_git {
+                    status.latest_version = Self::get_gitbash_latest_version().await;
+                    if let (Some(ref current), Some(ref latest)) = (&status.version, &status.latest_version) {
+                        status.update_available = !Self::compare_versions(current, latest);
+                    }
+                }
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                status.latest_version = Self::get_gitbash_latest_version().await;
+                if let (Some(ref current), Some(ref latest)) = (&status.version, &status.latest_version) {
+                    status.update_available = !Self::compare_versions(current, latest);
+                }
             }
         }
         status
