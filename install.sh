@@ -17,17 +17,6 @@ if [ "$(uname -s)" != "Darwin" ]; then
     exit 1
 fi
 
-# 检测架构
-ARCH=$(uname -m)
-if [ "$ARCH" = "arm64" ]; then
-    echo "检测到 Apple Silicon (arm64)"
-elif [ "$ARCH" = "x86_64" ]; then
-    echo "检测到 Intel (x86_64)"
-else
-    echo -e "${RED}错误：不支持的架构 $ARCH${NC}"
-    exit 1
-fi
-
 # 获取最新版本号
 echo -e "${YELLOW}获取最新版本...${NC}"
 LATEST_VERSION=$(curl -sL https://api.github.com/repos/Earthling18/claude-code-launcher/releases/latest | grep '"tag_name"' | sed -E 's/.*"v([^"]+)".*/\1/')
@@ -37,20 +26,8 @@ if [ -z "$LATEST_VERSION" ]; then
 fi
 echo "最新版本: v${LATEST_VERSION}"
 
-# 优先使用 universal binary，否则按架构选择
-DMG_NAME_UNIVERSAL="Claude.Code.Launcher_${LATEST_VERSION}_universal.dmg"
-DMG_URL_UNIVERSAL="https://github.com/Earthling18/claude-code-launcher/releases/download/v${LATEST_VERSION}/${DMG_NAME_UNIVERSAL}"
-
-if curl -sI -o /dev/null -w "%{http_code}" -L "$DMG_URL_UNIVERSAL" | grep -q "200"; then
-    DMG_NAME="$DMG_NAME_UNIVERSAL"
-else
-    # 回退到架构特定版本
-    if [ "$ARCH" = "arm64" ]; then
-        DMG_NAME="Claude.Code.Launcher_${LATEST_VERSION}_aarch64.dmg"
-    else
-        DMG_NAME="Claude.Code.Launcher_${LATEST_VERSION}_x64.dmg"
-    fi
-fi
+# Universal binary 支持所有 Mac（Apple Silicon + Intel）
+DMG_NAME="Claude.Code.Launcher_${LATEST_VERSION}_universal.dmg"
 DMG_URL="https://github.com/Earthling18/claude-code-launcher/releases/download/v${LATEST_VERSION}/${DMG_NAME}"
 DMG_PATH="/tmp/claude-code-launcher.dmg"
 VOLUME_NAME="Claude Code Launcher"
