@@ -38,7 +38,7 @@ fi
 echo "最新版本: v${LATEST_VERSION}"
 
 # 优先使用 universal binary，否则按架构选择
-DMG_NAME_UNIVERSAL="Claude.Code.Launcher_${LATEST_VERSION}_universal-apple-darwin.dmg"
+DMG_NAME_UNIVERSAL="Claude.Code.Launcher_${LATEST_VERSION}_universal.dmg"
 DMG_URL_UNIVERSAL="https://github.com/Earthling18/claude-code-launcher/releases/download/v${LATEST_VERSION}/${DMG_NAME_UNIVERSAL}"
 
 if curl -sI -o /dev/null -w "%{http_code}" -L "$DMG_URL_UNIVERSAL" | grep -q "200"; then
