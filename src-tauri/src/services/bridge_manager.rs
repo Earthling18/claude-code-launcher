@@ -143,8 +143,17 @@ impl BridgeManager {
         }
         #[cfg(not(windows))]
         {
+            // Check versioned binaries first (python3.13, 3.12, ...) then generic python3
             let candidates = [
+                "/opt/homebrew/bin/python3.13",
+                "/opt/homebrew/bin/python3.12",
+                "/opt/homebrew/bin/python3.11",
+                "/opt/homebrew/bin/python3.10",
                 "/opt/homebrew/bin/python3",
+                "/usr/local/bin/python3.13",
+                "/usr/local/bin/python3.12",
+                "/usr/local/bin/python3.11",
+                "/usr/local/bin/python3.10",
                 "/usr/local/bin/python3",
                 "/opt/local/bin/python3",
                 "/usr/bin/python3",
