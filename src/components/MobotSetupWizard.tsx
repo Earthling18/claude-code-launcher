@@ -73,7 +73,8 @@ export const MobotSetupWizard: React.FC<MobotSetupWizardProps> = ({
       updateStep(2, { status: 'running' });
       addLog('正在安装 Python 依赖包，请稍候...');
 
-      await mobotApi.installDeps(installPath, python);
+      // installDeps returns the python path to use (venv python on macOS/Linux)
+      const servicePython = await mobotApi.installDeps(installPath, python);
       updateStep(2, { status: 'done' });
       addLog('依赖安装完成');
 
@@ -82,7 +83,7 @@ export const MobotSetupWizard: React.FC<MobotSetupWizardProps> = ({
       updateStep(3, { status: 'running' });
       addLog('正在启动 mobot-bridge 服务...');
 
-      const pid = await mobotApi.startService(installPath, python, 8000);
+      const pid = await mobotApi.startService(installPath, servicePython, 8000);
       addLog(`服务已启动, PID: ${pid}`);
 
       // Wait for health check

@@ -128,11 +128,31 @@ impl BridgeManager {
         ))
     }
 
-    /// Detect system Python >= 3.10
+    /// Detect Python >= 3.10. Prefers venv python in mobot-bridge dir if available.
     pub fn detect_python() -> Option<String> {
+        // First check if mobot-bridge has a venv with python already
+        let mobot_dir = Self::get_mobot_dir();
+        #[cfg(not(windows))]
+        {
+            let venv_python = mobot_dir.join("venv").join("bin").join("python");
+            if venv_python.exists() {
+                if let Some(p) = Self::check_python_path(&venv_python.to_string_lossy(), 10) {
+                    return Some(p);
+                }
+            }
+        }
         #[cfg(windows)]
         {
-            // On Windows, try py launcher first, then common paths
+            let venv_python = mobot_dir.join("venv").join("Scripts").join("python.exe");
+            if venv_python.exists() {
+                if let Some(p) = Self::check_python_cmd(&venv_python.to_string_lossy(), 10) {
+                    return Some(p);
+                }
+            }
+        }
+
+        #[cfg(windows)]
+        {
             let candidates = ["py", "python3", "python"];
             for cmd in &candidates {
                 if let Some(path) = Self::check_python_cmd(cmd, 10) {
@@ -143,7 +163,6 @@ impl BridgeManager {
         }
         #[cfg(not(windows))]
         {
-            // Check versioned binaries first (python3.13, 3.12, ...) then generic python3
             let candidates = [
                 "/opt/homebrew/bin/python3.13",
                 "/opt/homebrew/bin/python3.12",
@@ -179,8 +198,9 @@ impl BridgeManager {
         }
     }
 
-    /// Install Python dependencies using pip
-    pub fn install_dependencies(bridge_path: &str, python: &str) -> Result<(), String> {
+    /// Install Python dependencies using pip (via venv on macOS/Linux)
+    /// Returns the python executable path to use for running the service
+    pub fn install_dependencies(bridge_path: &str, python: &str) -> Result<String, String> {
         let bridge_dir = Path::new(bridge_path);
         let req_file = bridge_dir.join("requirements.txt");
 
@@ -193,40 +213,86 @@ impl BridgeManager {
 
         log::info!("Installing mobot-bridge dependencies...");
 
-        let mut cmd = Command::new(python);
-        cmd.args(["-m", "pip", "install", "-r", &req_file.to_string_lossy()])
-            .current_dir(bridge_dir);
+        #[cfg(not(windows))]
+        let pip_python = {
+            // macOS/Linux: create venv to avoid PEP 668 "externally-managed-environment" error
+            let venv_dir = bridge_dir.join("venv");
+            let venv_python = venv_dir.join("bin").join("python");
+            let venv_pip = venv_dir.join("bin").join("pip");
 
-        // Clear proxy vars for pip install
-        cmd.env("HTTP_PROXY", "");
-        cmd.env("HTTPS_PROXY", "");
+            if !venv_python.exists() {
+                log::info!("Creating venv at {}", venv_dir.display());
+                let output = Command::new(python)
+                    .args(["-m", "venv", &venv_dir.to_string_lossy()])
+                    .output()
+                    .map_err(|e| format!("Failed to create venv: {}", e))?;
+
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    return Err(format!("Failed to create venv: {}", stderr));
+                }
+            }
+
+            // Upgrade pip first
+            let _ = Command::new(venv_python.to_string_lossy().to_string())
+                .args(["-m", "pip", "install", "--upgrade", "pip"])
+                .output();
+
+            // Install deps using venv pip
+            let output = Command::new(venv_pip.to_string_lossy().to_string())
+                .args(["install", "-r", &req_file.to_string_lossy()])
+                .current_dir(bridge_dir)
+                .output()
+                .map_err(|e| format!("Failed to run pip install: {}", e))?;
+
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                return Err(format!(
+                    "pip install failed:\n{}\n{}",
+                    stderr.lines().take(10).collect::<Vec<_>>().join("\n"),
+                    stdout.lines().take(5).collect::<Vec<_>>().join("\n")
+                ));
+            }
+
+            venv_python.to_string_lossy().to_string()
+        };
 
         #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x08000000);
-        }
+        let pip_python = {
+            let mut cmd = Command::new(python);
+            cmd.args(["-m", "pip", "install", "-r", &req_file.to_string_lossy()])
+                .current_dir(bridge_dir);
+            cmd.env("HTTP_PROXY", "");
+            cmd.env("HTTPS_PROXY", "");
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x08000000);
+            }
 
-        let output = cmd
-            .output()
-            .map_err(|e| format!("Failed to run pip install: {}", e))?;
+            let output = cmd
+                .output()
+                .map_err(|e| format!("Failed to run pip install: {}", e))?;
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            return Err(format!(
-                "pip install failed:\n{}\n{}",
-                stderr.lines().take(10).collect::<Vec<_>>().join("\n"),
-                stdout.lines().take(5).collect::<Vec<_>>().join("\n")
-            ));
-        }
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                return Err(format!(
+                    "pip install failed:\n{}\n{}",
+                    stderr.lines().take(10).collect::<Vec<_>>().join("\n"),
+                    stdout.lines().take(5).collect::<Vec<_>>().join("\n")
+                ));
+            }
+
+            python.to_string()
+        };
 
         // Write install marker
         let marker = bridge_dir.join(".deps_installed");
         let _ = std::fs::write(&marker, "ok");
 
         log::info!("mobot-bridge dependencies installed successfully");
-        Ok(())
+        Ok(pip_python)
     }
 
     /// Start mobot-bridge service

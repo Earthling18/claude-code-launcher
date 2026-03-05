@@ -341,7 +341,7 @@ pub fn detect_python() -> Option<String> {
 }
 
 #[tauri::command]
-pub fn install_mobot_deps(bridge_path: String, python: String) -> Result<(), String> {
+pub fn install_mobot_deps(bridge_path: String, python: String) -> Result<String, String> {
     BridgeManager::install_dependencies(&bridge_path, &python)
 }
 
