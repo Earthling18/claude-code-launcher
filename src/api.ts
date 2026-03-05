@@ -86,6 +86,8 @@ export const mobotApi = {
   detectInstallation: () => invoke<InstallStatus>('detect_mobot_installation'),
   install: () => invoke<string>('install_mobot_bridge'),
   detectPython: () => invoke<string | null>('detect_python'),
+  checkDepsInstalled: (bridgePath: string) =>
+    invoke<boolean>('check_mobot_deps_installed', { bridgePath }),
   installDeps: (bridgePath: string, python: string) =>
     invoke<string>('install_mobot_deps', { bridgePath, python }),
   startService: (bridgePath: string, python: string, port: number) =>

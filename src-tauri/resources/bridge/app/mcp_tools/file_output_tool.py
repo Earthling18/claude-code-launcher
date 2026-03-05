@@ -39,7 +39,7 @@ def _write_marker(workspace: Path, file_path: str, description: str = "") -> Dic
         # 检查是否已存在
         for item in existing:
             if item.get("file_path") == file_path:
-                return {"success": True, "message": f"文件已标记: {file_path}"}
+                return {"success": True, "message": f"该文件已标记过，无需重复调用。文件将自动发送给用户: {file_path}"}
 
         # 追加新项
         existing.append({
@@ -54,7 +54,7 @@ def _write_marker(workspace: Path, file_path: str, description: str = "") -> Dic
         )
 
         logger.info(f"[FileOutputTool] Marked file: {file_path}")
-        return {"success": True, "message": f"已标记文件: {file_path}"}
+        return {"success": True, "message": f"已标记文件并将自动发送给用户: {file_path}。请勿对同一文件重复调用此工具。"}
 
     except Exception as e:
         logger.error(f"[FileOutputTool] Failed to write marker: {e}")
@@ -80,8 +80,23 @@ def create_file_output_server(workspace: Path):
 
     @tool(
         "return_file_to_user",
-        "标记一个文件为最终输出，该文件将被返回给用户。只有通过此工具标记的文件才会被返回。",
-        {"file_path": str, "description": str}
+        "标记一个文件返回给用户。每个需要发送给用户的文件都必须调用一次此工具。"
+        "使用文件的绝对路径（必须来自 Glob/Bash 等工具的精确输出，不要手动拼写）。"
+        "未通过此工具标记的文件不会被发送。",
+        {
+            "type": "object",
+            "properties": {
+                "file_path": {
+                    "type": "string",
+                    "description": "文件的绝对路径"
+                },
+                "description": {
+                    "type": "string",
+                    "description": "文件的简短描述（可选）"
+                }
+            },
+            "required": ["file_path"]
+        }
     )
     async def return_file_to_user_handler(args: Dict[str, Any]) -> Dict[str, Any]:
         """标记文件为输出的工具处理函数"""
@@ -95,6 +110,21 @@ def create_file_output_server(workspace: Path):
                 "content": [{"type": "text", "text": "错误：file_path 参数不能为空"}],
                 "is_error": True
             }
+
+        # Git Bash 路径归一化：/c/Users/... → C:\Users\...
+        p = Path(file_path)
+        path_str = str(p)
+        if len(path_str) >= 3 and path_str[0] == "/" and path_str[2] == "/":
+            drive = path_str[1].upper()
+            p = Path(f"{drive}:{path_str[2:]}")
+            file_path = str(p)
+
+        # 容错：文件不存在时去空格重试
+        if not p.exists():
+            no_space = p.parent / p.name.replace(" ", "")
+            if no_space.exists():
+                logger.warning(f"[FileOutputTool] Path corrected (spaces removed): {p.name} -> {no_space.name}")
+                file_path = str(no_space)
 
         result = _write_marker(captured_workspace, file_path, description)
 

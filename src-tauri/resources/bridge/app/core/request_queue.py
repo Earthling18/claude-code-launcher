@@ -108,6 +108,7 @@ class RequestQueue:
         parsed: ParsedQuery,
         workspace: Path,
         user_token: str,
+        channel: str = "wecom",
     ) -> Tuple[bool, int]:
         """
         处理纯文件请求（文件上传但没有文本）
@@ -121,6 +122,7 @@ class RequestQueue:
             parsed: 解析后的请求（包含文件列表）
             workspace: 工作目录
             user_token: 用户鉴权 Token
+            channel: 渠道标识 ("wecom" | "feishu")
 
         Returns:
             (success, file_count) 元组
@@ -137,6 +139,7 @@ class RequestQueue:
                 file_items=parsed.files,
                 workspace=workspace,
                 user_token=user_token,
+                channel=channel,
             )
 
             if not processed_files:
@@ -154,6 +157,7 @@ class RequestQueue:
         parsed: ParsedQuery,
         workspace: Path,
         user_token: str,
+        channel: str = "wecom",
     ) -> Tuple[str, List[ProcessedFile]]:
         """
         处理文本请求（可能带有文件）
@@ -168,6 +172,7 @@ class RequestQueue:
             parsed: 解析后的请求
             workspace: 工作目录
             user_token: 用户鉴权 Token
+            channel: 渠道标识 ("wecom" | "feishu")
 
         Returns:
             (text, processed_files) 元组
@@ -202,12 +207,14 @@ class RequestQueue:
                 all_files.extend(cached_processed)
 
             # 2. 下载当前请求的文件（如果有）
-            if parsed.files and user_token:
+            # 飞书渠道不需要 user_token（内部使用 tenant_token）
+            if parsed.files and (user_token or channel == "feishu"):
                 logger.info(f"[RequestQueue] Downloading {len(parsed.files)} files from current request")
                 current_processed = await file_processor.process_files(
                     file_items=parsed.files,
                     workspace=workspace,
                     user_token=user_token,
+                    channel=channel,
                 )
                 all_files.extend(current_processed)
 

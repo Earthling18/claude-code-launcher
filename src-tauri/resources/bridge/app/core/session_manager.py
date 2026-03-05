@@ -161,6 +161,9 @@ class SessionManager:
                 if session.is_expired(self.ttl):
                     expired_count += 1
                     continue
+                # 重算 workspace（JSON 里的旧路径可能已失效，如项目目录迁移后）
+                safe_user_id = sanitize_path_component(session.user_id)
+                session.workspace = self.workspace_dir / safe_user_id
                 self.sessions[user_id] = session
                 loaded_count += 1
 

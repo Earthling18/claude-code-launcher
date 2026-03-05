@@ -351,6 +351,16 @@ class RequestRouter:
             group_chat_name=context.get("group_chat_name"),
             workspace=context.get("workspace"),
             conversation_type=context.get("conversation_type"),
+            channel=context.get("channel", "wecom"),
+        )
+        logger.info(
+            f"[IMMEDIATE] session_context: user_id={session_context.user_id!r}, "
+            f"session_id={session_context.session_id!r}, "
+            f"user_name={session_context.user_name!r}, "
+            f"conversation_id={session_context.conversation_id!r}, "
+            f"channel={session_context.channel!r}, "
+            f"conversation_type={session_context.conversation_type!r}, "
+            f"workspace={session_context.workspace!r}"
         )
 
         # 获取或创建用户会话
@@ -361,9 +371,9 @@ class RequestRouter:
         )
 
         if is_new:
-            logger.info(f"[IMMEDIATE] Request {request_id}: New session created")
+            logger.info(f"[IMMEDIATE] Request {request_id}: New session created (session_key={session.session_key})")
         else:
-            logger.info(f"[IMMEDIATE] Request {request_id}: Appending to existing session")
+            logger.info(f"[IMMEDIATE] Request {request_id}: Appending to existing session (session_key={session.session_key})")
 
         # 添加消息到会话（首条会启动任务，后续会追加）
         started_new_task = await session.add_message(parsed)

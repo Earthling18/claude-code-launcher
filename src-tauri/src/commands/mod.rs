@@ -320,54 +320,81 @@ pub fn set_onboarding_completed() -> Result<(), String> {
 // ============ Mobot Bridge Management Commands ============
 
 #[tauri::command]
-pub fn detect_mobot_installation() -> InstallStatus {
-    BridgeManager::detect_installation()
+pub async fn detect_mobot_installation() -> InstallStatus {
+    tokio::task::spawn_blocking(BridgeManager::detect_installation)
+        .await
+        .unwrap_or(InstallStatus::NotInstalled)
 }
 
 #[tauri::command]
-pub fn install_mobot_bridge(app_handle: tauri::AppHandle) -> Result<String, String> {
+pub async fn install_mobot_bridge(app_handle: tauri::AppHandle) -> Result<String, String> {
     let resource_dir = app_handle
         .path()
         .resource_dir()
         .map_err(|e| format!("Failed to get resource dir: {}", e))?;
     let resource_dir_str = resource_dir.to_string_lossy().to_string();
 
-    BridgeManager::install_mobot_bridge(&resource_dir_str)
+    tokio::task::spawn_blocking(move || BridgeManager::install_mobot_bridge(&resource_dir_str))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
-pub fn detect_python() -> Option<String> {
-    BridgeManager::detect_python()
+pub async fn check_mobot_deps_installed(bridge_path: String) -> bool {
+    BridgeManager::check_deps_installed(&bridge_path)
 }
 
 #[tauri::command]
-pub fn install_mobot_deps(bridge_path: String, python: String) -> Result<String, String> {
-    BridgeManager::install_dependencies(&bridge_path, &python)
+pub async fn detect_python() -> Option<String> {
+    tokio::task::spawn_blocking(BridgeManager::detect_python)
+        .await
+        .unwrap_or(None)
 }
 
 #[tauri::command]
-pub fn start_mobot_service(bridge_path: String, python: String, port: u16) -> Result<u32, String> {
-    BridgeManager::start_service(&bridge_path, &python, port)
+pub async fn install_mobot_deps(bridge_path: String, python: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || BridgeManager::install_dependencies(&bridge_path, &python))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
-pub fn stop_mobot_service() -> Result<(), String> {
-    BridgeManager::stop_service()
+pub async fn start_mobot_service(bridge_path: String, python: String, port: u16) -> Result<u32, String> {
+    tokio::task::spawn_blocking(move || BridgeManager::start_service(&bridge_path, &python, port))
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
-pub fn check_mobot_health(port: u16) -> HealthStatus {
-    BridgeManager::check_health(port)
+pub async fn stop_mobot_service() -> Result<(), String> {
+    tokio::task::spawn_blocking(BridgeManager::stop_service)
+        .await
+        .map_err(|e| format!("Task error: {}", e))?
 }
 
 #[tauri::command]
-pub fn get_mobot_status(port: u16) -> MobotServiceStatus {
-    BridgeManager::get_service_status(port)
+pub async fn check_mobot_health(port: u16) -> HealthStatus {
+    tokio::task::spawn_blocking(move || BridgeManager::check_health(port))
+        .await
+        .unwrap_or(HealthStatus { healthy: false, details: "Task error".to_string() })
 }
 
 #[tauri::command]
-pub fn get_mobot_logs(max_lines: Option<usize>) -> Vec<String> {
-    BridgeManager::get_logs(max_lines.unwrap_or(200))
+pub async fn get_mobot_status(port: u16) -> MobotServiceStatus {
+    tokio::task::spawn_blocking(move || BridgeManager::get_service_status(port))
+        .await
+        .unwrap_or(MobotServiceStatus {
+            installed: false, running: false, pid: None,
+            port, install_path: None, healthy: false, started_at: None,
+        })
+}
+
+#[tauri::command]
+pub async fn get_mobot_logs(max_lines: Option<usize>) -> Vec<String> {
+    let lines = max_lines.unwrap_or(200);
+    tokio::task::spawn_blocking(move || BridgeManager::get_logs(lines))
+        .await
+        .unwrap_or_default()
 }
 
 // ============ Claude Login Check Commands ============

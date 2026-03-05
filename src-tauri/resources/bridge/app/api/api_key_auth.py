@@ -6,6 +6,7 @@ Key 仅用于请求验证，不绑定 user_id。
 """
 import json
 import logging
+import secrets
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
@@ -29,30 +30,50 @@ class ApiKeyInfo:
 _key_store: Dict[str, ApiKeyInfo] = {}
 
 
+def _generate_api_key() -> str:
+    """Generate a random API key with ak- prefix."""
+    return f"ak-{secrets.token_hex(20)}"
+
+
+def _save_api_keys():
+    """Persist current _key_store to api_keys.json."""
+    data = {
+        "keys": [
+            {"key": info.key, "name": info.name, "enabled": info.enabled}
+            for info in _key_store.values()
+        ]
+    }
+    API_KEYS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 def load_api_keys() -> int:
     """从 api_keys.json 加载 API Key 到内存。"""
     global _key_store
     _key_store.clear()
 
-    if not API_KEYS_FILE.exists():
-        logger.warning(f"[API_KEY] Config file not found: {API_KEYS_FILE}")
-        return 0
+    if API_KEYS_FILE.exists():
+        try:
+            data = json.loads(API_KEYS_FILE.read_text(encoding="utf-8"))
+            for item in data.get("keys", []):
+                info = ApiKeyInfo(
+                    key=item["key"],
+                    name=item.get("name", ""),
+                    enabled=item.get("enabled", True),
+                )
+                _key_store[info.key] = info
+        except Exception as e:
+            logger.error(f"[API_KEY] Failed to load api_keys.json: {e}")
 
-    try:
-        data = json.loads(API_KEYS_FILE.read_text(encoding="utf-8"))
-        for item in data.get("keys", []):
-            info = ApiKeyInfo(
-                key=item["key"],
-                name=item.get("name", ""),
-                enabled=item.get("enabled", True),
-            )
-            _key_store[info.key] = info
+    # Auto-generate a default key if none exist
+    if not _key_store:
+        new_key = _generate_api_key()
+        info = ApiKeyInfo(key=new_key, name="default", enabled=True)
+        _key_store[new_key] = info
+        _save_api_keys()
+        logger.info("[API_KEY] Auto-generated default API key")
 
-        logger.info(f"[API_KEY] Loaded {len(_key_store)} API keys")
-        return len(_key_store)
-    except Exception as e:
-        logger.error(f"[API_KEY] Failed to load api_keys.json: {e}")
-        return 0
+    logger.info(f"[API_KEY] Loaded {len(_key_store)} API keys")
+    return len(_key_store)
 
 
 def reload_api_keys() -> int:
@@ -63,21 +84,15 @@ def reload_api_keys() -> int:
 
 
 async def verify_api_key(
-    authorization: Optional[str] = Header(None, description="Bearer API Key"),
+    authorization: str = Header(..., description="Bearer API Key"),
 ) -> ApiKeyInfo:
     """
     FastAPI Depends 依赖：验证 Authorization Header。
 
-    当没有配置 api_keys.json 时（桌面 Launcher 场景），跳过认证。
-
     Raises:
-        HTTPException 401: 配置了 API Key 但提供的 key 无效或禁用
+        HTTPException 401: 无效或禁用的 API Key
     """
-    # 没有配置任何 API Key 时，跳过认证（桌面本地调用场景）
-    if not _key_store:
-        return ApiKeyInfo(key="", name="local", enabled=True)
-
-    if not authorization or not authorization.startswith("Bearer "):
+    if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Invalid Authorization header format")
 
     token = authorization[7:].strip()

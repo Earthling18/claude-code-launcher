@@ -38,10 +38,6 @@ class COSClient:
         Returns:
             是否下载成功
         """
-        if not self.base_url:
-            logger.error(f"COS download skipped: cos_api_base not configured")
-            return False
-
         if not user_token:
             logger.error(f"COS download failed: user_token is required for {cos_path}")
             return False
@@ -69,7 +65,9 @@ class COSClient:
             # 格式：{field_name: (None, field_value)} 用于非文件字段
             files = {"file_path": (None, file_path)}
 
-            logger.debug(f"[COS] Download: {file_path}")
+            logger.info(f"[COS] Requesting: {url}")
+            logger.info(f"[COS] Multipart form data: file_path={file_path}")
+            logger.info(f"[COS] user-token length: {len(user_token)}")
 
             # 禁用代理，因为 COS 是内网地址，不应该通过代理访问
             async with httpx.AsyncClient(
@@ -79,6 +77,9 @@ class COSClient:
                 # 注意：虽然文档写的是 GET，但 curl -F 实际上会发送 POST 请求
                 # httpx 的 GET 不支持 body，所以使用 POST
                 response = await client.post(url, headers=headers, files=files)
+
+                logger.info(f"[COS] Response status: {response.status_code}")
+                logger.info(f"[COS] Response headers: {dict(response.headers)}")
 
                 if response.status_code == 200:
                     # 写入本地文件
@@ -117,10 +118,6 @@ class COSClient:
         Returns:
             上传成功返回 COS 路径/URL，失败返回 None
         """
-        if not self.base_url:
-            logger.error("COS upload skipped: cos_api_base not configured")
-            return None
-
         if not user_token:
             logger.error("COS upload failed: user_token is required")
             return None
@@ -151,7 +148,8 @@ class COSClient:
                 if cos_path:
                     data["staticPath"] = cos_path  # 可选：自定义存储路径
 
-                logger.debug(f"[COS] Upload: {local_path.name}")
+                logger.info(f"[COS] Upload request: url={url}, fileName={local_path.name}")
+                logger.info(f"[COS] Upload form data: {data}")
 
                 response = await client.post(
                     url, headers=headers, files=files, data=data
@@ -159,9 +157,10 @@ class COSClient:
 
                 if response.status_code == 200:
                     result = response.json()
+                    logger.info(f"[COS] Upload response: {result}")
                     # 直接使用 COS 返回的 path
                     uploaded_path = result.get("path") or result.get("file_path")
-                    logger.info(f"[COS] Uploaded: {local_path.name} -> {uploaded_path}")
+                    logger.info(f"Uploaded: {local_path} -> {uploaded_path}")
                     return uploaded_path
                 else:
                     logger.error(

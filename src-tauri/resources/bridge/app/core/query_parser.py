@@ -18,6 +18,8 @@ class QueryItem:
     """查询项"""
     type: str  # text | file | image
     content: str
+    message_id: str = ""  # 飞书消息 ID（用于下载消息附件）
+    filename: str = ""  # 原始文件名（保留扩展名，飞书 file 类型提供）
 
 
 @dataclass
@@ -27,6 +29,7 @@ class ParsedQuery:
     files: List[QueryItem]  # 文件列表（file 和 image 类型）
     has_text_item: bool = False  # 是否包含 type=text 的 item（用于判断是否需要调用 SDK）
     history_list: Optional[str] = None  # 原始 history_list JSON（群聊上下文注入用）
+    is_system_notification: bool = False  # 标记系统通知消息（Worker 注入的完成通知）
 
 
 def parse_query_info(
@@ -55,7 +58,18 @@ def parse_query_info(
     Returns:
         ParsedQuery 包含合并的文本和文件列表
     """
-    logger.debug(f"[PARSE] query_len={len(query) if query else 0}, query_info={'str:'+str(len(query_info)) if isinstance(query_info, str) else type(query_info).__name__ if query_info else 'None'}")
+    # 详细日志：函数入口
+    logger.info(f"[PARSE] ========== parse_query_info START ==========")
+    logger.info(f"[PARSE] query type: {type(query)}, length: {len(query) if query else 0}")
+    logger.info(f"[PARSE] query content (first 200 chars): '{query[:200] if query else 'EMPTY'}'")
+    logger.info(f"[PARSE] query_info type: {type(query_info)}")
+    logger.info(f"[PARSE] query_info is None: {query_info is None}")
+    if query_info:
+        if isinstance(query_info, str):
+            logger.info(f"[PARSE] query_info string length: {len(query_info)}")
+            logger.info(f"[PARSE] query_info string content (first 500 chars): '{query_info[:500]}'")
+        else:
+            logger.info(f"[PARSE] query_info repr (first 500 chars): {repr(query_info)[:500]}")
 
     text_parts: List[str] = []
     files: List[QueryItem] = []
@@ -68,24 +82,32 @@ def parse_query_info(
         # 如果 query 是 JSON 格式（以 [ 或 { 开头），跳过它
         if not (query_stripped.startswith('[') or query_stripped.startswith('{')):
             text_parts.append(query_stripped)
+            logger.info(f"[PARSE] Added query text to text_parts")
         else:
-            logger.debug(f"[PARSE] Skipped JSON-like query")
+            logger.info(f"[PARSE] Skipped query (looks like JSON): {query_stripped[:100]}")
 
     # 解析 query_info
     if query_info:
         try:
             # 兼容字符串和已解析对象
             if isinstance(query_info, str):
+                logger.info(f"[PARSE] Parsing query_info as JSON string...")
                 items = json.loads(query_info)
+                logger.info(f"[PARSE] JSON parsed successfully, type: {type(items)}")
             elif isinstance(query_info, (list, dict)):
+                logger.info(f"[PARSE] query_info is already parsed as {type(query_info)}")
                 items = query_info
             else:
                 items = None
                 logger.warning(f"[PARSE] Unexpected query_info type: {type(query_info)}")
 
             if isinstance(items, list):
+                logger.info(f"[PARSE] Processing {len(items)} items from query_info list")
                 for idx, item in enumerate(items):
+                    logger.info(f"[PARSE] Item {idx}: type={type(item)}, content={repr(item)[:200]}")
+
                     if not isinstance(item, dict):
+                        logger.warning(f"[PARSE] Item {idx} is not a dict, skipping")
                         continue
 
                     # 兼容 "type" 和 "message_type" 字段
@@ -98,8 +120,10 @@ def parse_query_info(
                         or item.get("message_file")  # 企业微信图片消息使用此字段
                         or ""
                     )
+                    logger.info(f"[PARSE] Item {idx}: item_type='{item_type}', content_length={len(content) if content else 0}")
 
                     if not content:
+                        logger.warning(f"[PARSE] Item {idx} has empty content, skipping")
                         continue
 
                     if item_type == "text":
@@ -108,13 +132,22 @@ def parse_query_info(
                         # 避免重复添加（query 字段可能已包含）
                         if content.strip() and content.strip() not in text_parts:
                             text_parts.append(content.strip())
+                            logger.info(f"[PARSE] Item {idx}: Added text (length {len(content.strip())})")
+                        else:
+                            logger.info(f"[PARSE] Item {idx}: Text already in text_parts or empty, skipped")
                     elif item_type in ("file", "image"):
                         # 文件或图片类型
-                        files.append(QueryItem(type=item_type, content=content))
+                        msg_id = item.get("message_id", "") if isinstance(item, dict) else ""
+                        fname = item.get("filename", "") if isinstance(item, dict) else ""
+                        files.append(QueryItem(type=item_type, content=content, message_id=msg_id, filename=fname))
+                        logger.info(f"[PARSE] Item {idx}: Added {item_type} - {content} (filename={fname})")
                     elif item_type == "combined":
                         # 组合类型：包含多个子项（图片+文本）
+                        logger.info(f"[PARSE] Item {idx}: Processing combined type")
                         try:
+                            # content 是一个 JSON 字符串，包含多个 sub_item
                             sub_items = json.loads(content) if isinstance(content, str) else content
+                            logger.info(f"[PARSE] Item {idx}: Found {len(sub_items)} sub-items in combined")
 
                             for sub_idx, sub_item in enumerate(sub_items):
                                 if not isinstance(sub_item, dict):
@@ -132,17 +165,23 @@ def parse_query_info(
                                     continue
 
                                 if sub_type == "text":
-                                    has_text_item = True
+                                    has_text_item = True  # 标记有 text item
                                     if sub_content.strip() and sub_content.strip() not in text_parts:
                                         text_parts.append(sub_content.strip())
+                                        logger.info(f"[PARSE] Item {idx}.{sub_idx}: Added text from combined (length {len(sub_content.strip())})")
                                 elif sub_type in ("image", "file"):
-                                    files.append(QueryItem(type=sub_type, content=sub_content))
+                                    sub_msg_id = sub_item.get("message_id", "")
+                                    sub_fname = sub_item.get("filename", "")
+                                    files.append(QueryItem(type=sub_type, content=sub_content, message_id=sub_msg_id, filename=sub_fname))
+                                    logger.info(f"[PARSE] Item {idx}.{sub_idx}: Added {sub_type} from combined - {sub_content} (filename={sub_fname})")
                         except json.JSONDecodeError as e:
-                            logger.error(f"[PARSE] Failed to parse combined content: {e}")
+                            logger.error(f"[PARSE] Item {idx}: Failed to parse combined content: {e}")
                         except Exception as e:
-                            logger.error(f"[PARSE] Error processing combined type: {e}")
+                            logger.error(f"[PARSE] Item {idx}: Error processing combined type: {e}")
                     else:
-                        logger.debug(f"[PARSE] Unknown type '{item_type}'")
+                        logger.warning(f"[PARSE] Item {idx}: Unknown type '{item_type}'")
+            else:
+                logger.warning(f"[PARSE] items is not a list, type: {type(items)}")
 
         except json.JSONDecodeError as e:
             logger.error(f"[PARSE] Failed to parse query_info JSON: {e}")
@@ -159,10 +198,17 @@ def parse_query_info(
     if files and (not combined_text or len(combined_text.strip()) < 10):
         history_context = extract_history_context(history_list, max_items=2)
         if history_context:
-            logger.debug(f"[PARSE] Added history context for file-heavy request")
+            logger.info(f"[PARSE] Current message has files but little text, adding history context")
             combined_text = history_context + "\n" + combined_text
 
-    logger.debug(f"[PARSE] Result: text_len={len(combined_text)}, files={len(files)}, has_text_item={has_text_item}")
+    # 详细日志：函数结果
+    logger.info(f"[PARSE] ========== parse_query_info RESULT ==========")
+    logger.info(f"[PARSE] Final text length: {len(combined_text)}")
+    logger.info(f"[PARSE] Final text (first 200 chars): '{combined_text[:200] if combined_text else 'EMPTY'}'")
+    logger.info(f"[PARSE] Total files found: {len(files)}")
+    for idx, f in enumerate(files):
+        logger.info(f"[PARSE] File {idx}: type={f.type}, content={f.content}")
+    logger.info(f"[PARSE] ========== parse_query_info END ==========")
 
     # 构建初始 ParsedQuery
     parsed = ParsedQuery(text=combined_text, files=files, has_text_item=has_text_item, history_list=history_list)
@@ -345,7 +391,7 @@ def format_group_chat_history(
         header = "[群聊上下文 - 续]" if since_time else "[群聊上下文 - 最近的群内对话]"
         result = header + "\n" + "\n".join(lines) + "\n---"
 
-        logger.debug(f"[GROUP_HISTORY] Formatted {len(lines)} messages")
+        logger.info(f"[GROUP_HISTORY] Formatted {len(lines)} messages (since_time={since_time}, latest={latest_time})")
         return result, latest_time
 
     except json.JSONDecodeError as e:
@@ -397,14 +443,14 @@ def extract_related_context_from_history(
         # 重要：不要在这里自动关联历史问题！这会破坏 RequestQueue 的缓存机制
         # 纯文件请求应该进入 process_file_only_request 分支，缓存文件等待后续文本请求
         if has_files and not has_text:
-            logger.debug("[HISTORY_LINK] File-only request, handled by cache")
+            logger.info("[HISTORY_LINK] File-only request detected, will be handled by RequestQueue cache")
             # 不做任何处理，让 routes.py 走 process_file_only_request 分支
 
         # 场景2：当前有文本但没有文件 → 找最近的用户文件
         # 作为 RequestQueue 缓存机制的备份，防止竞态条件导致文件未被缓存
         # 只查找最近 60 秒内的文件，避免关联太旧的文件
         elif has_text and not has_files:
-            logger.debug("[HISTORY_LINK] Looking for recent user files in history...")
+            logger.info("[HISTORY_LINK] Current message has text but no files, looking for recent user files...")
 
             # 解析当前消息时间（如果有）用于时间比较
             from datetime import datetime
@@ -430,7 +476,7 @@ def extract_related_context_from_history(
                                 msg_time = datetime.strptime(msg_time_str, "%Y%m%d%H%M%S")
                                 time_diff = (current_time - msg_time).total_seconds()
                                 if time_diff > 120:  # 超过 2 分钟的文件不关联
-                                    logger.debug(f"[HISTORY_LINK] File too old ({time_diff:.0f}s), skip")
+                                    logger.info(f"[HISTORY_LINK] File too old ({time_diff:.0f}s), skipping: {message_file[:50]}...")
                                     continue
                             except:
                                 pass  # 时间解析失败则不做时间限制
@@ -438,7 +484,7 @@ def extract_related_context_from_history(
                         # 找到文件
                         file_path = message_file if message_file else msg.get("message_content", "")
                         if file_path:
-                            logger.info(f"[HISTORY_LINK] Found file: {file_path}")
+                            logger.info(f"[HISTORY_LINK] Found related file from history: '{file_path}'")
                             # 添加到文件列表
                             parsed.files.append(QueryItem(
                                 type="file" if message_type == "file" else "image",
@@ -606,12 +652,12 @@ async def ensure_history_files_downloaded(
 
         # 检查文件是否已存在
         if local_path.exists():
-            logger.debug(f"[FILE_WAIT] Exists: {filename}")
+            logger.info(f"[FILE_WAIT] File already exists: {filename}")
             validated_files.append(file_item)
             continue
 
         # 文件不存在，需要下载
-        logger.debug(f"[FILE_WAIT] Downloading: {filename}")
+        logger.info(f"[FILE_WAIT] File not found, downloading: {filename}")
 
         if not user_token:
             logger.error(f"[FILE_WAIT] Cannot download {filename} without user_token")
@@ -621,7 +667,7 @@ async def ensure_history_files_downloaded(
         success = await cos_client.download_file(cos_path, local_path, user_token)
 
         if success:
-            logger.debug(f"[FILE_WAIT] Downloaded: {filename}")
+            logger.info(f"[FILE_WAIT] Successfully downloaded: {filename}")
             validated_files.append(file_item)
         else:
             logger.warning(f"[FILE_WAIT] Failed to download: {filename}")

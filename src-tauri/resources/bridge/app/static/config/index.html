@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mbot - 控制台</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/material-symbols@latest/rounded.css">
+    <link rel="stylesheet" href="/static/config/style.css">
+</head>
+<body>
+    <div class="layout">
+        <!-- Left Navigation -->
+        <nav class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h1 class="logo">
+                    <svg class="logo-icon" viewBox="0 0 28 22" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M1.5 16L7 3.5L14 12L21 3.5L26.5 16Z" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+                    </svg>
+                    Mbot
+                </h1>
+                <span class="version" id="app-version"></span>
+            </div>
+            <ul class="nav-list">
+                <li class="nav-category">设置</li>
+                <li class="nav-item active" data-page="model">
+                    <span class="ms nav-icon">deployed_code</span>
+                    <span>模型设置</span>
+                </li>
+                <li class="nav-item" data-page="channels">
+                    <span class="ms nav-icon">forum</span>
+                    <span>消息通道</span>
+                </li>
+                <li class="nav-category">扩展</li>
+                <li class="nav-item" data-page="skills">
+                    <span class="ms nav-icon">stars</span>
+                    <span>Skills</span>
+                </li>
+                <li class="nav-item" data-page="soul">
+                    <span class="ms nav-icon">person</span>
+                    <span>Persona</span>
+                </li>
+                <li class="nav-item" data-page="whitelist">
+                    <span class="ms nav-icon">lock</span>
+                    <span>白名单</span>
+                </li>
+                <li class="nav-item" data-page="cron">
+                    <span class="ms nav-icon">schedule</span>
+                    <span>定时任务</span>
+                </li>
+                <li class="nav-category">监控</li>
+                <li class="nav-item" data-page="logs">
+                    <span class="ms nav-icon">terminal</span>
+                    <span>日志</span>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="content">
+            <header class="content-header">
+                <div class="header-left">
+                    <button class="sidebar-toggle" id="sidebar-toggle" title="Toggle sidebar">
+                        <span class="ms">menu</span>
+                    </button>
+                    <h2 class="page-title" id="page-title">模型设置</h2>
+                </div>
+                <div class="header-right">
+                    <!-- Service Status Bar -->
+                    <div id="service-status-bar" class="service-status-bar">
+                        <div class="service-uptime">
+                            <span class="uptime-label">PID:</span>
+                            <span class="service-pid-value">-</span>
+                        </div>
+                        <div class="service-uptime-divider">|</div>
+                        <div class="service-uptime">
+                            <span class="ms" style="font-size:14px;color:var(--text-hint)">schedule</span>
+                            <span class="uptime-value">-</span>
+                        </div>
+                        <button id="global-update-btn" class="btn btn-update btn-update-disabled" onclick="App.applyUpdate()" disabled title="Check for updates">
+                            <span class="ms" style="font-size:14px">download</span>
+                            <span id="update-btn-text">检查中...</span>
+                        </button>
+                        <button id="global-restart-btn" class="btn btn-restart btn-disabled" onclick="App.restartAllServices()" disabled>
+                            <span class="ms" style="font-size:14px">refresh</span>
+                            重启
+                        </button>
+                    </div>
+                </div>
+            </header>
+
+            <div class="content-body" id="content-body">
+                <!-- Dynamic content loaded here -->
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast notification -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="/static/config/app.js"></script>
+</body>
+</html>

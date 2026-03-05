@@ -57,12 +57,17 @@ impl BridgeManager {
             .join("mobot-bridge")
     }
 
-    /// Detect mobot-bridge installation status
+    /// Detect mobot-bridge installation status.
+    /// Requires both start.py and .mobot_version marker to consider it installed.
+    /// The marker is written during install to distinguish from old bridge code.
     pub fn detect_installation() -> InstallStatus {
         let mobot_dir = Self::get_mobot_dir();
         let start_py = mobot_dir.join("start.py");
+        let version_marker = mobot_dir.join(".mobot_version");
 
-        if !start_py.exists() {
+        // Must have start.py + version marker + deps installed
+        let deps_marker = mobot_dir.join(".deps_installed");
+        if !start_py.exists() || !version_marker.exists() || !deps_marker.exists() {
             return InstallStatus::NotInstalled;
         }
 
@@ -100,6 +105,22 @@ impl BridgeManager {
         // Copy all files from source to target
         Self::copy_dir_recursive(&bridge_src, &mobot_dir)?;
 
+        // Restore renamed dot-files (Tauri doesn't bundle dotfiles)
+        let env_example = mobot_dir.join("env.example");
+        if env_example.exists() {
+            let _ = std::fs::rename(&env_example, mobot_dir.join(".env.example"));
+        }
+        let mcp_example = mobot_dir.join("mcp.json.example");
+        if mcp_example.exists() {
+            let _ = std::fs::rename(&mcp_example, mobot_dir.join(".mcp.json.example"));
+        }
+
+        // Write version marker from VERSION file, or fallback
+        let version_marker = mobot_dir.join(".mobot_version");
+        let version = std::fs::read_to_string(mobot_dir.join("VERSION"))
+            .unwrap_or_else(|_| "1.0.0".to_string());
+        let _ = std::fs::write(&version_marker, version.trim());
+
         log::info!("mobot-bridge installed successfully");
         Ok(mobot_dir.to_string_lossy().to_string())
     }
@@ -126,6 +147,12 @@ impl BridgeManager {
             "mobot-bridge source not found in resources. Checked: {:?}",
             candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>()
         ))
+    }
+
+    /// Check if dependencies are installed (marker file exists)
+    pub fn check_deps_installed(bridge_path: &str) -> bool {
+        let marker = Path::new(bridge_path).join(".deps_installed");
+        marker.exists()
     }
 
     /// Detect Python >= 3.10. Prefers venv python in mobot-bridge dir if available.
@@ -224,6 +251,10 @@ impl BridgeManager {
                 log::info!("Creating venv at {}", venv_dir.display());
                 let output = Command::new(python)
                     .args(["-m", "venv", &venv_dir.to_string_lossy()])
+                    .env("HTTP_PROXY", "")
+                    .env("HTTPS_PROXY", "")
+                    .env("http_proxy", "")
+                    .env("https_proxy", "")
                     .output()
                     .map_err(|e| format!("Failed to create venv: {}", e))?;
 
@@ -233,15 +264,29 @@ impl BridgeManager {
                 }
             }
 
-            // Upgrade pip first
+            // Upgrade pip first (clear proxy/SSL to avoid interference)
             let _ = Command::new(venv_python.to_string_lossy().to_string())
                 .args(["-m", "pip", "install", "--upgrade", "pip"])
+                .env("HTTP_PROXY", "")
+                .env("HTTPS_PROXY", "")
+                .env("http_proxy", "")
+                .env("https_proxy", "")
+                .env("SSL_CERT_FILE", "")
+                .env("REQUESTS_CA_BUNDLE", "")
+                .env("CURL_CA_BUNDLE", "")
                 .output();
 
             // Install deps using venv pip
             let output = Command::new(venv_pip.to_string_lossy().to_string())
                 .args(["install", "-r", &req_file.to_string_lossy()])
                 .current_dir(bridge_dir)
+                .env("HTTP_PROXY", "")
+                .env("HTTPS_PROXY", "")
+                .env("http_proxy", "")
+                .env("https_proxy", "")
+                .env("SSL_CERT_FILE", "")
+                .env("REQUESTS_CA_BUNDLE", "")
+                .env("CURL_CA_BUNDLE", "")
                 .output()
                 .map_err(|e| format!("Failed to run pip install: {}", e))?;
 

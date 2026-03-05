@@ -90,11 +90,11 @@ class MessageBuilder:
         """
         if len(documents) == 1:
             doc = documents[0]
-            return f"用户上传了文件 {doc.filename}，路径：{doc.local_path}\n请使用 Read 工具读取文件内容。"
+            return f"[用户上传] {doc.filename} → {doc.local_path}"
         else:
-            lines = ["用户上传了以下文件，请使用 Read 工具读取："]
+            lines = ["[用户上传]"]
             for i, doc in enumerate(documents, 1):
-                lines.append(f"{i}. {doc.filename} - {doc.local_path}")
+                lines.append(f"  {i}. {doc.filename} → {doc.local_path}")
             return "\n".join(lines)
 
     @staticmethod

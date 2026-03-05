@@ -55,6 +55,7 @@ class ChatRequest(BaseModel):
         default=None,
         description="企微会话类型：'GROUP' 或 'PRIVATE'（入口处统一转换）"
     )
+    channel: str = Field(default="wecom", description="消息渠道: wecom | feishu")
 
     @field_validator("conversation_type", mode="before")
     @classmethod
@@ -135,12 +136,24 @@ class SkillsResponse(BaseModel):
     count: int
 
 
+class ChannelHealthInfo(BaseModel):
+    """通道健康信息"""
+    status: str = "disabled"         # connected, starting, disabled, error, disconnected
+    since: Optional[float] = None    # 状态变更时间戳
+    error: Optional[str] = None
+
+
 class HealthResponse(BaseModel):
     """健康检查响应"""
     status: str = "healthy"
-    version: str = "1.0.0"
+    version: str = "0.0.0"
     active_sessions: int = 0
     loaded_skills: int = 0
+    pid: int = 0
+    channels_ready: bool = True
+    channels: Dict[str, ChannelHealthInfo] = {}
+    sdk_ready: bool = False
+    module_build: Optional[str] = None
 
 
 class ErrorResponse(BaseModel):

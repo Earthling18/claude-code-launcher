@@ -9,6 +9,7 @@
     options.hooks = build_security_hooks()
 """
 import logging
+import posixpath
 import re
 from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, Optional, cast
@@ -103,6 +104,9 @@ _BLOCKED_EXACT_FILENAMES: list[str] = [
     "ntds.dit",
 ]
 
+# 敏感文件名正则（供 Bash 规则复用）
+_SENSITIVE_FILE_RE = r"(?:\.env\b|system_prompt\.md|claude\.md|\bconfig\.py\b|\.ssh[/\\]|\.pem\b|\.key\b)"
+
 # Bash 命令黑名单（正则，大小写不敏感）
 _BLOCKED_BASH_PATTERNS: list[re.Pattern] = [
     # 批量删除（cmd + bash + PowerShell）
@@ -161,6 +165,18 @@ _BLOCKED_BASH_PATTERNS: list[re.Pattern] = [
     re.compile(r"(cat|type|more|less|head|tail|get-content).*\.ssh[\\/]", re.IGNORECASE),
     re.compile(r"(cat|type|more|less|head|tail|get-content).*\.pem\b", re.IGNORECASE),
     re.compile(r"(cat|type|more|less|head|tail|get-content).*\.key\b", re.IGNORECASE),
+
+    # 解释器内联代码读取敏感文件
+    re.compile(
+        rf"(python[23]?|node|powershell[\w.]*)\s+(-c|-e|-command|--eval)\s+.*{_SENSITIVE_FILE_RE}",
+        re.IGNORECASE,
+    ),
+
+    # 复制/移动敏感文件
+    re.compile(
+        rf"(cp|copy|xcopy|robocopy|move\b|mv|move-item|copy-item)\s+.*{_SENSITIVE_FILE_RE}",
+        re.IGNORECASE,
+    ),
 ]
 
 
@@ -169,8 +185,10 @@ _BLOCKED_BASH_PATTERNS: list[re.Pattern] = [
 # ──────────────────────────────────────────────
 
 def _normalize_path(raw: str) -> str:
-    """标准化路径用于匹配（小写、统一分隔符）"""
-    return raw.replace("\\", "/").lower()
+    """标准化路径用于匹配（小写、统一分隔符、解析 ..）"""
+    s = raw.replace("\\", "/")
+    s = posixpath.normpath(s)      # 折叠 .. 和 .
+    return s.lower()
 
 
 def _is_blocked_file_path(raw_path: str) -> Optional[str]:
@@ -207,6 +225,9 @@ def _is_blocked_file_path(raw_path: str) -> Optional[str]:
                 if any(prefix.replace("\\", "/").lower() in normalized
                        for prefix in _APP_SAFE_PREFIXES):
                     continue  # 放行 workspace 下的 app 目录
+                # 放行 soul.md（身份人格文件，Agent 需要读写）
+                if normalized.endswith("/soul.md") or normalized.endswith("\\soul.md"):
+                    continue
             return f"Blocked: matches pattern '{pattern}'"
 
     # 2. 扩展名检查
@@ -249,6 +270,7 @@ _FILE_PATH_KEYS = {
     "Read": ["file_path"],
     "Write": ["file_path"],
     "Edit": ["file_path"],
+    "NotebookEdit": ["notebook_path"],
     "Glob": ["pattern", "path"],
     "Grep": ["path", "glob"],
 }

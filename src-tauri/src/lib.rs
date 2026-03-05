@@ -73,6 +73,7 @@ pub fn run() {
             // Mobot bridge management commands
             commands::detect_mobot_installation,
             commands::install_mobot_bridge,
+            commands::check_mobot_deps_installed,
             commands::detect_python,
             commands::install_mobot_deps,
             commands::start_mobot_service,

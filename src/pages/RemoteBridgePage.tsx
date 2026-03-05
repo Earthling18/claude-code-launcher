@@ -18,6 +18,8 @@ export const RemoteBridgePage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [iframeError, setIframeError] = useState(false);
   const logsRef = useRef<HTMLDivElement>(null);
   const isUserScrolling = useRef(false);
   const pollRef = useRef<number | null>(null);
@@ -90,6 +92,8 @@ export const RemoteBridgePage: React.FC = () => {
   const handleSetupComplete = (installPath: string, python: string) => {
     setBridgePath(installPath);
     setPythonPath(python);
+    setIframeLoaded(false);
+    setIframeError(false);
     setViewState('running');
     startPolling();
   };
@@ -114,6 +118,8 @@ export const RemoteBridgePage: React.FC = () => {
       // Wait briefly for process to start
       await new Promise((r) => setTimeout(r, 2000));
 
+      setIframeLoaded(false);
+      setIframeError(false);
       setViewState('running');
       startPolling();
     } catch (err: any) {
@@ -349,13 +355,50 @@ export const RemoteBridgePage: React.FC = () => {
             </div>
 
             {/* iframe: mobot-bridge Web Config UI */}
-            <div className="flex-1">
-              <iframe
-                src={`http://127.0.0.1:${port}/config`}
-                className="w-full h-full border-0"
-                title="Mobot Bridge Config"
-                allow="clipboard-read; clipboard-write"
-              />
+            <div className="flex-1 relative">
+              {/* Show loading/waiting when service not healthy or iframe not loaded */}
+              {(!status?.healthy || !iframeLoaded) && !iframeError && (
+                <div className="absolute inset-0 flex items-center justify-center bg-[#212121] z-10">
+                  <div className="text-center space-y-3">
+                    <div className="w-8 h-8 border-2 border-[#3b82f6] border-t-transparent rounded-full animate-spin mx-auto" />
+                    <p className="text-[13px] text-[#999999]">
+                      {!status?.healthy ? '等待服务就绪...' : '加载配置界面...'}
+                    </p>
+                    <p className="text-[11px] text-[#666666]">
+                      服务启动可能需要几秒钟
+                    </p>
+                  </div>
+                </div>
+              )}
+              {iframeError && (
+                <div className="absolute inset-0 flex items-center justify-center bg-[#212121] z-10">
+                  <div className="text-center space-y-3">
+                    <p className="text-[13px] text-red-400">配置界面加载失败</p>
+                    <p className="text-[11px] text-[#666666]">
+                      请确认 mobot-bridge 服务正常运行
+                    </p>
+                    <button
+                      onClick={() => {
+                        setIframeError(false);
+                        setIframeLoaded(false);
+                      }}
+                      className="px-4 py-1.5 text-[12px] bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded-lg transition-colors"
+                    >
+                      重试
+                    </button>
+                  </div>
+                </div>
+              )}
+              {status?.healthy && (
+                <iframe
+                  src={`http://127.0.0.1:${port}/config`}
+                  className="w-full h-full border-0"
+                  title="Mobot Bridge Config"
+                  allow="clipboard-read; clipboard-write"
+                  onLoad={() => setIframeLoaded(true)}
+                  onError={() => setIframeError(true)}
+                />
+              )}
             </div>
           </div>
         )}

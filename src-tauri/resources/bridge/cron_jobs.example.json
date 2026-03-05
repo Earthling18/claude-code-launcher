@@ -1,0 +1,66 @@
+{
+  "jobs": [
+    {
+      "id": "job-example-daily",
+      "cron": "0 7 * * *",
+      "command": "/daily-report",
+      "context_type": "private",
+      "target_type": "self",
+      "owner_conversation_id": "your-conversation-id",
+      "owner_name": "your-name",
+      "target_conversation_id": "your-conversation-id",
+      "target_name": "your-name",
+      "created_at": "2026-01-15T10:00:00",
+      "enabled": false,
+      "_comment": "示例：每天早上7点生成晨报，发给自己（私聊场景）"
+    },
+    {
+      "id": "job-example-weekly",
+      "cron": "0 9 * * 1",
+      "command": "/weekly-report",
+      "context_type": "group",
+      "target_type": "group",
+      "owner_conversation_id": "user-conversation-id",
+      "owner_name": "user-name",
+      "group_conversation_id": "group-conversation-id",
+      "group_name": "project-group-name",
+      "target_conversation_id": "group-conversation-id",
+      "target_name": "project-group-name",
+      "created_at": "2026-01-15T10:00:00",
+      "enabled": false,
+      "_comment": "示例：每周一早上9点生成周报，发到群里（群聊场景）"
+    },
+    {
+      "id": "job-example-reminder",
+      "cron": "0 8 * * 1-5",
+      "command": "/loan-reminder",
+      "context_type": "group",
+      "target_type": "self",
+      "owner_conversation_id": "user-conversation-id",
+      "owner_name": "user-name",
+      "group_conversation_id": "group-conversation-id",
+      "group_name": "project-group-name",
+      "target_conversation_id": "user-conversation-id",
+      "target_name": "user-name",
+      "created_at": "2026-01-15T10:00:00",
+      "enabled": false,
+      "_comment": "示例：工作日早上8点检查贷款到期，私发给自己（群聊场景创建但私发）"
+    }
+  ],
+  "_说明": {
+    "cron格式": "分 时 日 月 周（5段式）",
+    "cron示例": {
+      "每天早上7点": "0 7 * * *",
+      "每天下午3点": "0 15 * * *",
+      "每周一早上9点": "0 9 * * 1",
+      "工作日早上8点": "0 8 * * 1-5",
+      "每月1号早上9点": "0 9 1 * *"
+    },
+    "context_type": "private（私聊创建）或 group（群聊创建）",
+    "target_type": "self（发给自己）或 group（发到群）",
+    "发送规则": {
+      "私聊创建": "只能发给自己",
+      "群聊创建": "可以发到当前群，或私发给自己"
+    }
+  }
+}

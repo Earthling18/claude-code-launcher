@@ -1,0 +1,36 @@
+# Agent Bridge Client 配置
+# 复制此文件为 config.yaml 后修改：cp config.yaml.example config.yaml
+
+client:
+  # 服务端 WebSocket 地址（所有部署者共用，无需修改）
+  server_url: "ws://172.21.11.82:80/bridge"
+
+  # 用户绑定 Key (从管理员处获取的 API Key, sk-xxx 格式)
+  bind_key: "<YOUR_BIND_KEY>"
+
+  # 客户端 ID (留空默认取主机名，一般无需手动指定)
+  client_id: ""
+
+  # 后端类型: "openclaw", "http", 或 "both"
+  # openclaw: 通过 WebSocket 连接本地 OpenClaw Gateway
+  # http: 通过 HTTP POST 连接自定义 Agent (V2 API 格式)
+  # both: 同时连接两个后端，按任务路由
+  backend_type: "http"
+
+  # 双后端模式默认路由 (backend_type = "both" 时使用)
+  # 未指定 backend 的任务默认走哪个后端
+  default_backend: "http"
+
+  # HTTP Agent 配置 (backend_type = "http" 或 "both" 时使用)
+  # 【必改】Agent 的 HTTP 端点 URL，改为本机 IP + mobot-bridge 端口
+  http_agent_url: "http://<YOUR_LOCAL_IP>:8000/api/v2/chat"
+  # 【必改】HTTP Agent API Key (用于 Authorization: Bearer 认证)
+  http_agent_key: "<YOUR_HTTP_AGENT_KEY>"
+  # HTTP 请求超时 (秒)
+  http_agent_timeout: 300
+
+  # 重连间隔 (秒)
+  reconnect_interval: 5
+
+  # 心跳间隔 (秒)
+  heartbeat_interval: 30

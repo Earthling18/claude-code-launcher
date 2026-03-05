@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { mobotApi } from '../api';
 
 type StepStatus = 'pending' | 'running' | 'done' | 'error';
@@ -28,6 +28,7 @@ export const MobotSetupWizard: React.FC<MobotSetupWizardProps> = ({
   const [currentStep, setCurrentStep] = useState(-1);
   const [isRunning, setIsRunning] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
+  const hasStarted = useRef(false);
 
   const addLog = (msg: string) => {
     setLogs((prev) => [...prev.slice(-50), msg]);
@@ -120,8 +121,10 @@ export const MobotSetupWizard: React.FC<MobotSetupWizardProps> = ({
     }
   };
 
-  // Auto-start on mount
+  // Auto-start on mount (guard against React strict mode double-mount)
   useEffect(() => {
+    if (hasStarted.current) return;
+    hasStarted.current = true;
     startInstall();
   }, []);
 

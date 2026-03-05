@@ -23,11 +23,13 @@ from app.core.request_router import request_router
 from app.core.user_session import UserSessionManager
 from app.config import settings
 
-# 复用 v1 的处理函数
+# 复用 v1 的处理函数和模式切换命令
 from app.api.routes import (
     _process_queue_request,
     _process_queue_request_with_progress,
     preprocess_qiwei_request,
+    _handle_avatar_command,
+    _handle_clearall_command,
 )
 
 logger = logging.getLogger(__name__)
@@ -75,14 +77,31 @@ async def chat_v2(
         chat_request = ChatRequest(**processed_data)
         logger.info(
             f"[V2] ChatRequest: query='{chat_request.query[:50] if chat_request.query else 'EMPTY'}', "
-            f"session={chat_request.session_id}, user_id={chat_request.user_id}"
+            f"session={chat_request.session_id}, user_id={chat_request.user_id}, "
+            f"user_name={chat_request.user_name!r}, conversation_id={chat_request.conversation_id!r}, "
+            f"has_query_info={bool(chat_request.query_info)}"
         )
 
         # ======== 白名单检查 ========
         whitelist = settings.user_whitelist_set
-        if whitelist and chat_request.user_id not in whitelist:
-            logger.info(f"[V2] [WHITELIST] Blocked user: {chat_request.user_id}")
+        logger.info(
+            f"[V2] [WHITELIST] Check: user_name={chat_request.user_name!r}, "
+            f"whitelist_size={len(whitelist) if whitelist else 0}"
+        )
+        if whitelist and (not chat_request.user_name or chat_request.user_name not in whitelist):
+            logger.info(f"[V2] [WHITELIST] Blocked user: {chat_request.user_name}")
             return JSONResponse(content={"message_list": []})
+        logger.info(f"[V2] [WHITELIST] Passed: {chat_request.user_name}")
+
+        # ======== 模式切换命令拦截 ========
+        avatar_result = await _handle_avatar_command(chat_request)
+        if avatar_result is not None:
+            return JSONResponse(content=avatar_result.model_dump(exclude_none=True))
+
+        # ======== /clearallbypass 命令拦截 ========
+        clearall_result = await _handle_clearall_command(chat_request)
+        if clearall_result is not None:
+            return JSONResponse(content=clearall_result.model_dump(exclude_none=True))
 
         # ======== 处理引用消息（与 v1 一致） ========
         reference_info = chat_request.reference_info
@@ -144,6 +163,20 @@ async def chat_v2(
                 user_name=chat_request.user_name or "",
                 session_id=chat_request.session_id,
             )
+            async_ctx = {
+                "conversation_id": chat_request.conversation_id,
+                "user_name": chat_request.user_name,
+                "group_chat_name": chat_request.group_chat_name,
+                "workspace": temp_session.workspace,
+                "conversation_type": chat_request.conversation_type,
+                "channel": chat_request.channel,
+            }
+            logger.info(
+                f"[V2] async_context: conversation_id={async_ctx['conversation_id']!r}, "
+                f"channel={async_ctx['channel']!r}, "
+                f"conversation_type={async_ctx['conversation_type']!r}, "
+                f"workspace={async_ctx['workspace']!r}"
+            )
             result = await request_router.route_request_immediate_async(
                 user_id=chat_request.user_id,
                 parsed=parsed,
@@ -151,13 +184,7 @@ async def chat_v2(
                 user_name=chat_request.user_name,
                 user_token=chat_request.user_token,
                 process_func=_process_queue_request_with_progress,
-                async_context={
-                    "conversation_id": chat_request.conversation_id,
-                    "user_name": chat_request.user_name,
-                    "group_chat_name": chat_request.group_chat_name,
-                    "workspace": temp_session.workspace,
-                    "conversation_type": chat_request.conversation_type,
-                },
+                async_context=async_ctx,
             )
         else:
             logger.info(f"[V2] Sync mode")

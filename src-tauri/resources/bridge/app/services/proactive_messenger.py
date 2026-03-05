@@ -175,8 +175,8 @@ class ProactiveMessenger:
         发送单条消息（带退避重试）
 
         sendMsg 参数规则：
-        - 群聊（sendType=3）：使用 conversationId
-        - 私聊（sendType=1）：使用 conversationName（用户名）
+        - 优先使用 conversationId（私聊、群聊通用，更可靠）
+        - 私聊 fallback：无 conversationId 时使用 conversationName（用户名）
 
         重试策略：所有错误默认重试，退避间隔递增 3s → 6s → 12s
         注意：错误使用会导致 B2AA1002（对话不存在）
@@ -195,20 +195,29 @@ class ProactiveMessenger:
             "fullOutPut": "Y",
         }
 
-        # 群聊和私聊都使用 conversationId
+        # 优先使用 conversationId（私聊、群聊通用，更可靠）
         if conversation_id:
             arguments["conversationId"] = conversation_id
+        elif send_type == "3":
+            logger.warning("[SENDMSG] Group chat (sendType=3) but no conversationId provided")
         else:
-            # 回退：私聊没有 conversationId 时用 conversationName
-            if conversation_name:
-                arguments["conversationName"] = conversation_name
-            logger.warning(f"[SENDMSG] No conversationId, fallback to conversationName={conversation_name}")
+            # 私聊无 conversationId：告警（生产环境应始终有 conversationId）
+            logger.warning("[SENDMSG] Private chat (sendType=1) but no conversationId provided")
 
         logger.info(
-            f"[SENDMSG] Full arguments: {{{', '.join(f'{k}={repr(v[:80]) if isinstance(v, str) and len(v) > 80 else repr(v)}' for k, v in arguments.items())}}}"
+            f"[SENDMSG] Sending: type={message_type}, sendType={send_type}, "
+            f"depUserId={settings.sendmsg_dep_user_id}, "
+            f"authKey={settings.sendmsg_auth_key[:8]}..., "
+            f"convId={conversation_id or 'N/A'}, "
+            f"convName={conversation_name or 'N/A'}, "
+            f"content_len={len(content)}, "
+            f"head={content[:60]}..., "
+            f"tail=...{content[-40:]}"
         )
 
         last_error = None
+        taskgroup_failure_count = 0  # 追踪 MCP 部分失败（202 Accepted 后 cleanup 503）
+
         for attempt in range(self.MAX_RETRIES + 1):
             try:
                 result = await self._call_sendmsg(arguments)
@@ -223,6 +232,18 @@ class ProactiveMessenger:
 
             except Exception as e:
                 last_error = e
+
+                # TaskGroup 错误表示 MCP 部分通信失败（可能 202 Accepted 后 cleanup 503）
+                # 消息可能已投递，连续 2 次则停止重试避免重复发送
+                if "TaskGroup" in str(e):
+                    taskgroup_failure_count += 1
+                    if taskgroup_failure_count >= 2:
+                        logger.warning(
+                            f"[SENDMSG] Repeated partial failures ({taskgroup_failure_count}x), "
+                            f"message likely delivered, stopping retries"
+                        )
+                        raise
+
                 if attempt < self.MAX_RETRIES:
                     delay = self.RETRY_BASE_DELAY * (self.RETRY_BACKOFF_FACTOR ** attempt)
                     logger.warning(
@@ -278,15 +299,23 @@ class ProactiveMessenger:
                 kwargs["auth"] = auth
             return httpx.AsyncClient(**kwargs)
 
-        async with streamablehttp_client(
-            url=url,
-            httpx_client_factory=_no_proxy_client_factory,
-        ) as (read, write, _):
-            async with ClientSession(read, write) as session:
-                await session.initialize()
-                result = await session.call_tool("sendToUser", arguments=arguments)
-                logger.info(f"[SENDMSG] MCP call completed")
+        result = None
+        try:
+            async with streamablehttp_client(
+                url=url,
+                httpx_client_factory=_no_proxy_client_factory,
+            ) as (read, write, _):
+                async with ClientSession(read, write) as session:
+                    await session.initialize()
+                    result = await session.call_tool("sendToUser", arguments=arguments)
+                    logger.info(f"[SENDMSG] MCP call completed")
+        except Exception as e:
+            if result is not None:
+                # call_tool 已成功，消息已投递，会话关闭出错可忽略
+                logger.warning(f"[SENDMSG] MCP session cleanup error (message already sent): {e}")
                 return result
+            raise
+        return result
 
 
 # 全局实例

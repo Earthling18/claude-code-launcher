@@ -11,7 +11,7 @@ from enum import Enum
 from pathlib import Path
 from typing import List, Optional
 
-from app.services.cos_client import cos_client
+from app.channels import get_file_client
 
 logger = logging.getLogger(__name__)
 
@@ -117,36 +117,89 @@ class FileProcessor:
             logger.error(f"[FileProcessor] Failed to read image: {e}")
             return None, None
 
+    @staticmethod
+    def _detect_extension_from_magic(file_path: Path) -> Optional[str]:
+        """从文件头 magic bytes 检测文件扩展名"""
+        try:
+            with open(file_path, "rb") as f:
+                header = f.read(16)
+            if header[:3] == b'\xff\xd8\xff':
+                return '.jpg'
+            if header[:8] == b'\x89PNG\r\n\x1a\n':
+                return '.png'
+            if header[:4] == b'GIF8':
+                return '.gif'
+            if header[:4] == b'RIFF' and len(header) >= 12 and header[8:12] == b'WEBP':
+                return '.webp'
+            if header[:2] == b'BM':
+                return '.bmp'
+            if header[:4] == b'%PDF':
+                return '.pdf'
+        except Exception:
+            pass
+        return None
+
     async def download_file(
         self,
         cos_path: str,
         workspace: Path,
         user_token: str,
+        channel: str = "wecom",
+        message_id: str = "",
+        filename: str = "",
     ) -> Optional[Path]:
         """
         下载单个文件到工作目录
 
         Args:
-            cos_path: COS 路径
+            cos_path: COS 路径（企微）或 file_key/image_key（飞书）
             workspace: 工作目录
             user_token: 用户鉴权 Token
+            channel: 渠道标识 ("wecom" | "feishu")
+            message_id: 飞书消息 ID（用于消息资源端点下载用户附件）
+            filename: 原始文件名（保留扩展名，飞书 file 类型提供）
 
         Returns:
             本地文件路径，失败返回 None
         """
-        # 提取文件名
-        filename = cos_path.split("/")[-1] if "/" in cos_path else cos_path
-        local_path = workspace / filename
+        # 确定保存文件名：优先使用提供的 filename（保留原始扩展名）
+        if filename:
+            save_filename = filename
+        else:
+            save_filename = cos_path.split("/")[-1] if "/" in cos_path else cos_path
+
+        local_path = workspace / save_filename
 
         # 如果文件已存在，直接返回
         if local_path.exists():
             logger.info(f"[FileProcessor] File already exists: {local_path}")
             return local_path
 
-        # 下载文件
-        success = await cos_client.download_file(cos_path, local_path, user_token)
+        # 无扩展名时，检查是否已有检测过的重命名版本（如 img_xxx.jpg）
+        if not Path(save_filename).suffix:
+            for ext in ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.pdf'):
+                candidate = workspace / f"{save_filename}{ext}"
+                if candidate.exists():
+                    logger.info(f"[FileProcessor] Found renamed file: {candidate}")
+                    return candidate
+
+        # 走渠道路由下载
+        file_client = get_file_client(channel)
+        if channel == "feishu":
+            success = await file_client.download_file(cos_path, local_path, user_token, message_id=message_id)
+        else:
+            success = await file_client.download_file(cos_path, local_path, user_token)
 
         if success:
+            # 无扩展名 → 从文件头 magic bytes 检测真实类型并重命名
+            if not local_path.suffix:
+                detected_ext = self._detect_extension_from_magic(local_path)
+                if detected_ext:
+                    new_path = local_path.with_suffix(detected_ext)
+                    local_path.rename(new_path)
+                    local_path = new_path
+                    logger.info(f"[FileProcessor] Detected type and renamed: {cos_path} -> {local_path}")
+
             logger.info(f"[FileProcessor] Downloaded: {cos_path} -> {local_path}")
             return local_path
         else:
@@ -159,21 +212,27 @@ class FileProcessor:
         original_type: str,
         workspace: Path,
         user_token: str,
+        channel: str = "wecom",
+        message_id: str = "",
+        filename: str = "",
     ) -> Optional[ProcessedFile]:
         """
         处理单个文件：下载 + 分类 + (图片) base64 编码
 
         Args:
-            cos_path: COS 路径
+            cos_path: COS 路径（企微）或 file_key/image_key（飞书）
             original_type: 原始类型 (file/image)
             workspace: 工作目录
             user_token: 用户鉴权 Token
+            channel: 渠道标识 ("wecom" | "feishu")
+            message_id: 飞书消息 ID（用于消息资源端点下载用户附件）
+            filename: 原始文件名（保留扩展名）
 
         Returns:
             ProcessedFile 对象，失败返回 None
         """
         # 1. 下载文件
-        local_path = await self.download_file(cos_path, workspace, user_token)
+        local_path = await self.download_file(cos_path, workspace, user_token, channel=channel, message_id=message_id, filename=filename)
         if not local_path:
             return None
 
@@ -204,6 +263,7 @@ class FileProcessor:
         file_items: list,  # List[QueryItem]
         workspace: Path,
         user_token: str,
+        channel: str = "wecom",
     ) -> List[ProcessedFile]:
         """
         处理多个文件
@@ -212,11 +272,13 @@ class FileProcessor:
             file_items: 文件列表 (QueryItem 格式)
             workspace: 工作目录
             user_token: 用户鉴权 Token
+            channel: 渠道标识 ("wecom" | "feishu")
 
         Returns:
             ProcessedFile 列表（只包含成功处理的文件）
         """
-        if not user_token:
+        # 飞书渠道不需要 user_token（内部使用 tenant_token），企微渠道需要
+        if not user_token and channel != "feishu":
             logger.error("[FileProcessor] Missing user_token, cannot process files")
             return []
 
@@ -227,6 +289,9 @@ class FileProcessor:
                 original_type=item.type,
                 workspace=workspace,
                 user_token=user_token,
+                channel=channel,
+                message_id=getattr(item, "message_id", ""),
+                filename=getattr(item, "filename", ""),
             )
             if processed:
                 results.append(processed)
