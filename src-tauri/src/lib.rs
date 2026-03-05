@@ -20,7 +20,7 @@ pub fn run() {
         })
         .on_window_event(|_window, event| {
             if let tauri::WindowEvent::Destroyed = event {
-                // Stop all bridge processes when app window is destroyed
+                // Stop mobot-bridge process when app window is destroyed
                 services::BridgeManager::stop_all();
             }
         })
@@ -70,28 +70,22 @@ pub fn run() {
             // Onboarding commands
             commands::get_onboarding_status,
             commands::set_onboarding_completed,
-            // Bridge management commands
-            commands::start_bridge,
-            commands::stop_bridge,
-            commands::get_bridge_status,
-            commands::get_bridge_logs,
-            commands::restart_bridge,
-            commands::check_bridge_deps,
-            commands::prepare_bridge_env,
-            // Agent config commands
-            commands::open_agent_config_file,
-            commands::open_agent_config_folder,
+            // Mobot bridge management commands
+            commands::detect_mobot_installation,
+            commands::install_mobot_bridge,
+            commands::detect_python,
+            commands::install_mobot_deps,
+            commands::start_mobot_service,
+            commands::stop_mobot_service,
+            commands::check_mobot_health,
+            commands::get_mobot_status,
+            commands::get_mobot_logs,
             // Claude login check commands
             commands::check_claude_login,
             commands::launch_claude_for_login,
-            // Bridge admin API commands
+            // Utility commands
             commands::get_hostname,
             commands::get_username,
-            commands::bridge_get_or_create_key,
-            // Remote config commands
-            commands::load_remote_config,
-            commands::save_remote_config,
-            commands::start_remote_bridge,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

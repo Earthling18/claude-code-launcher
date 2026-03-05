@@ -1,5 +1,5 @@
 use crate::services::*;
-use crate::services::bridge_manager::BridgeStatus;
+use crate::services::bridge_manager::{InstallStatus, HealthStatus, MobotServiceStatus};
 use crate::models::{Project, ProjectConfig, CreateProjectInput, UpdateProjectInput, ProjectOrderItem, PinnedOrderItem};
 use std::collections::HashMap;
 use tauri::Manager;
@@ -238,14 +238,12 @@ fn build_config_map(project: &Project) -> HashMap<String, String> {
 
     match project.config.mode.as_str() {
         "claude" => {
-            // Claude native mode: proxy only
             if !project.config.proxy.is_empty() {
                 config.insert("HTTP_PROXY".to_string(), project.config.proxy.clone());
                 config.insert("HTTPS_PROXY".to_string(), project.config.proxy.clone());
             }
         }
         "codex" => {
-            // Codex native mode: proxy + launch codex CLI
             config.insert("CLI_COMMAND".to_string(), "codex".to_string());
             if !project.config.codex_api_key.is_empty() {
                 config.insert("HTTP_PROXY".to_string(), project.config.codex_api_key.clone());
@@ -254,22 +252,18 @@ fn build_config_map(project: &Project) -> HashMap<String, String> {
         }
         "custom" => {
             if project.config.custom_cli == "codex" {
-                // Custom mode with Codex CLI
                 let mut cli_cmd = "codex".to_string();
                 if !project.config.model.is_empty() {
                     cli_cmd.push_str(&format!(" --model {}", project.config.model));
                 }
                 config.insert("CLI_COMMAND".to_string(), cli_cmd);
-                // base_url → OPENAI_BASE_URL env var
                 if !project.config.base_url.is_empty() {
                     config.insert("OPENAI_BASE_URL".to_string(), project.config.base_url.clone());
                 }
-                // token → OPENAI_API_KEY env var
                 if !project.config.token.is_empty() {
                     config.insert("OPENAI_API_KEY".to_string(), project.config.token.clone());
                 }
             } else {
-                // Custom mode with Claude CLI (default)
                 if !project.config.model.is_empty() {
                     config.insert("ANTHROPIC_MODEL".to_string(), project.config.model.clone());
                 }
@@ -281,9 +275,7 @@ fn build_config_map(project: &Project) -> HashMap<String, String> {
                 }
             }
         }
-        _ => {
-            // remote or unknown — no CLI config needed
-        }
+        _ => {}
     }
 
     if project.config.skip_permissions {
@@ -325,113 +317,57 @@ pub fn set_onboarding_completed() -> Result<(), String> {
     ConfigStorage::set_onboarding_completed()
 }
 
-// ============ Bridge Management Commands ============
+// ============ Mobot Bridge Management Commands ============
 
 #[tauri::command]
-pub fn start_bridge(id: String, app_handle: tauri::AppHandle) -> Result<(), String> {
-    let config = if id == "__remote__" {
-        ConfigStorage::load_remote_config()?
-    } else {
-        let project = ConfigStorage::get_project(&id)?;
-        if project.config.mode != "remote" {
-            return Err("Project is not in remote bridge mode".to_string());
-        }
-        project.config
-    };
+pub fn detect_mobot_installation() -> InstallStatus {
+    BridgeManager::detect_installation()
+}
 
-    // Get resource dir
+#[tauri::command]
+pub fn install_mobot_bridge(app_handle: tauri::AppHandle) -> Result<String, String> {
     let resource_dir = app_handle
         .path()
         .resource_dir()
         .map_err(|e| format!("Failed to get resource dir: {}", e))?;
     let resource_dir_str = resource_dir.to_string_lossy().to_string();
 
-    BridgeManager::start_bridge(&id, &config, &resource_dir_str)
+    BridgeManager::install_mobot_bridge(&resource_dir_str)
 }
 
 #[tauri::command]
-pub fn stop_bridge(id: String) -> Result<(), String> {
-    BridgeManager::stop_bridge(&id)
+pub fn detect_python() -> Option<String> {
+    BridgeManager::detect_python()
 }
 
 #[tauri::command]
-pub fn get_bridge_status(id: String) -> BridgeStatus {
-    BridgeManager::get_status(&id)
+pub fn install_mobot_deps(bridge_path: String, python: String) -> Result<(), String> {
+    BridgeManager::install_dependencies(&bridge_path, &python)
 }
 
 #[tauri::command]
-pub fn get_bridge_logs(id: String, max_lines: Option<usize>) -> Vec<String> {
-    BridgeManager::get_logs(&id, max_lines.unwrap_or(200))
+pub fn start_mobot_service(bridge_path: String, python: String, port: u16) -> Result<u32, String> {
+    BridgeManager::start_service(&bridge_path, &python, port)
 }
 
 #[tauri::command]
-pub fn restart_bridge(id: String, app_handle: tauri::AppHandle) -> Result<(), String> {
-    BridgeManager::stop_bridge(&id)?;
-
-    let config = if id == "__remote__" {
-        ConfigStorage::load_remote_config()?
-    } else {
-        let project = ConfigStorage::get_project(&id)?;
-        if project.config.mode != "remote" {
-            return Err("Project is not in remote bridge mode".to_string());
-        }
-        project.config
-    };
-
-    let resource_dir = app_handle
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
-    let resource_dir_str = resource_dir.to_string_lossy().to_string();
-
-    BridgeManager::start_bridge(&id, &config, &resource_dir_str)
+pub fn stop_mobot_service() -> Result<(), String> {
+    BridgeManager::stop_service()
 }
 
 #[tauri::command]
-pub fn check_bridge_deps() -> Result<(), String> {
-    BridgeManager::check_deps()
+pub fn check_mobot_health(port: u16) -> HealthStatus {
+    BridgeManager::check_health(port)
 }
 
 #[tauri::command]
-pub fn prepare_bridge_env(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let resource_dir = app_handle
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
-    let resource_dir_str = resource_dir.to_string_lossy().to_string();
-
-    BridgeManager::prepare_env(&resource_dir_str)?;
-    Ok(())
-}
-
-// ============ Agent Config Commands ============
-
-#[tauri::command]
-pub fn open_agent_config_file(name: String) -> Result<(), String> {
-    let agent_dir = BridgeManager::get_agent_data_dir();
-    let path = match name.as_str() {
-        "env" => agent_dir.join(".env"),
-        "mcp" => agent_dir.join(".mcp.json"),
-        "soul" => agent_dir.join("app").join("soul.md"),
-        "system_prompt" => agent_dir.join("app").join("system_prompt.md"),
-        "allowed_tools" => agent_dir.join("allowed_tools.txt"),
-        "claude_md" => agent_dir.join("CLAUDE.md"),
-        _ => return Err(format!("Unknown config: {}", name)),
-    };
-    BridgeManager::open_path_in_system(&path)
+pub fn get_mobot_status(port: u16) -> MobotServiceStatus {
+    BridgeManager::get_service_status(port)
 }
 
 #[tauri::command]
-pub fn open_agent_config_folder(name: String) -> Result<(), String> {
-    let agent_dir = BridgeManager::get_agent_data_dir();
-    let path = match name.as_str() {
-        "skills" => agent_dir.join(".claude").join("skills"),
-        "workspace" => agent_dir.join("workspace"),
-        "logs" => agent_dir.join("logs"),
-        "root" => agent_dir,
-        _ => return Err(format!("Unknown folder: {}", name)),
-    };
-    BridgeManager::open_path_in_system(&path)
+pub fn get_mobot_logs(max_lines: Option<usize>) -> Vec<String> {
+    BridgeManager::get_logs(max_lines.unwrap_or(200))
 }
 
 // ============ Claude Login Check Commands ============
@@ -461,164 +397,14 @@ pub fn launch_claude_for_login(proxy: Option<String>) -> Result<(), String> {
     Launcher::launch_with_config_and_dir(config, Some(home_dir))
 }
 
-// ============ Bridge Admin API Commands ============
-
-#[derive(serde::Deserialize)]
-pub struct BridgeAdminConfig {
-    pub url: String,
-    pub user: String,
-    pub pass: String,
-    pub sendmsg_api_url: String,
-    pub sendmsg_auth_key: String,
-    pub sendmsg_dep_user_id: String,
-    pub cos_api_base: String,
-}
-
-pub fn bridge_admin_config() -> BridgeAdminConfig {
-    serde_json::from_str(include_str!("../../resources/bridge/bridge_admin.json"))
-        .expect("Invalid bridge_admin.json")
-}
+// ============ Utility Commands ============
 
 #[tauri::command]
 pub fn get_hostname() -> String {
-    // Try reading persisted client_id first (matches Python bridge client behavior)
-    if let Some(home) = dirs::home_dir() {
-        let id_file = home.join(".agent-bridge").join("client_id");
-        if let Ok(id) = std::fs::read_to_string(&id_file) {
-            let id = id.trim().to_string();
-            if !id.is_empty() {
-                return id;
-            }
-        }
-    }
-    // Fallback to COMPUTERNAME (Windows) or HOSTNAME
-    std::env::var("COMPUTERNAME")
-        .or_else(|_| std::env::var("HOSTNAME"))
-        .unwrap_or_else(|_| "unknown".to_string())
+    BridgeManager::get_hostname()
 }
 
 #[tauri::command]
 pub fn get_username() -> String {
-    std::env::var("USERNAME")
-        .or_else(|_| std::env::var("USER"))
-        .unwrap_or_else(|_| "unknown".to_string())
-        .to_lowercase()
-}
-
-#[tauri::command]
-pub async fn bridge_get_or_create_key(username: String) -> Result<String, String> {
-    let cfg = bridge_admin_config();
-    let client = reqwest::Client::builder()
-        .no_proxy()
-        .build()
-        .map_err(|e| format!("HTTP 客户端初始化失败: {}", e))?;
-
-    // 1. Login to get admin token
-    let login_res = client
-        .post(format!("{}/api/login", cfg.url))
-        .json(&serde_json::json!({
-            "username": cfg.user,
-            "password": cfg.pass
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("连接管理后台失败: {}", e))?;
-
-    if !login_res.status().is_success() {
-        return Err("管理后台登录失败".to_string());
-    }
-
-    // Extract admin_token from Set-Cookie header
-    let token = login_res
-        .headers()
-        .get_all("set-cookie")
-        .iter()
-        .find_map(|v| {
-            let s = v.to_str().ok()?;
-            for part in s.split(';') {
-                let part = part.trim();
-                if let Some(val) = part.strip_prefix("admin_token=") {
-                    return Some(val.to_string());
-                }
-            }
-            None
-        })
-        .ok_or_else(|| "登录成功但未获取到认证令牌".to_string())?;
-
-    let cookie_header = format!("admin_token={}", token);
-
-    // 2. Try to get existing user
-    let get_res = client
-        .get(format!("{}/api/admin/users/{}", cfg.url, username))
-        .header("Cookie", &cookie_header)
-        .send()
-        .await
-        .map_err(|e| format!("查询用户失败: {}", e))?;
-
-    if get_res.status().is_success() {
-        let data: serde_json::Value = get_res
-            .json()
-            .await
-            .map_err(|e| format!("解析响应失败: {}", e))?;
-        if let Some(key) = data["user"]["api_key"].as_str() {
-            if !key.is_empty() {
-                return Ok(key.to_string());
-            }
-        }
-    }
-
-    // 3. Create new user
-    let create_res = client
-        .post(format!("{}/api/admin/users", cfg.url))
-        .header("Cookie", &cookie_header)
-        .json(&serde_json::json!({
-            "user_id": username,
-            "name": username,
-            "max_clients": 5
-        }))
-        .send()
-        .await
-        .map_err(|e| format!("创建用户失败: {}", e))?;
-
-    if !create_res.status().is_success() {
-        let body = create_res.text().await.unwrap_or_default();
-        return Err(format!("创建用户失败: {}", body));
-    }
-
-    let data: serde_json::Value = create_res
-        .json()
-        .await
-        .map_err(|e| format!("解析响应失败: {}", e))?;
-    data["user"]["api_key"]
-        .as_str()
-        .map(|s| s.to_string())
-        .ok_or_else(|| "创建成功但未获取到 API Key".to_string())
-}
-
-// ============ Remote Config Commands ============
-
-#[tauri::command]
-pub fn load_remote_config() -> Result<ProjectConfig, String> {
-    ConfigStorage::load_remote_config()
-}
-
-#[tauri::command]
-pub fn save_remote_config(config: ProjectConfig) -> Result<(), String> {
-    ConfigStorage::save_remote_config(&config)
-}
-
-#[tauri::command]
-pub fn start_remote_bridge(app_handle: tauri::AppHandle) -> Result<(), String> {
-    let config = ConfigStorage::load_remote_config()?;
-    if config.bridge_bind_key.is_empty() {
-        return Err("请先配置 Bind Key".to_string());
-    }
-
-    let resource_dir = app_handle
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
-    let resource_dir_str = resource_dir.to_string_lossy().to_string();
-
-    BridgeManager::start_bridge("__remote__", &config, &resource_dir_str)
+    BridgeManager::get_username()
 }

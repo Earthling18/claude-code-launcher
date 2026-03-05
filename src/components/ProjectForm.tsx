@@ -111,16 +111,8 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       skip_permissions: skipPermissions,
       codex_api_key: codexApiKey,
       custom_cli: customCli,
-      bridge_server_url: '',
-      bridge_bind_key: '',
-      bridge_client_id: '',
-      bridge_agent_port: 5000,
-      bridge_agent_timeout: 1800,
-      bridge_proxy: '',
-      bridge_reconnect_interval: 5,
-      bridge_heartbeat_interval: 30,
-      bridge_agent_mode: 'claude',
-      bridge_max_turns: 3,
+      mobot_bridge_path: null,
+      mobot_bridge_port: 8000,
     };
 
     onSubmit(name.trim(), workingDirectory.trim(), config, isPinned);

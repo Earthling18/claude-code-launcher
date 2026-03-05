@@ -44,7 +44,7 @@ export const ModeSelectPage: React.FC = () => {
             <div className="text-center">
               <div className="text-[15px] font-semibold mb-1">Mobot (远程连接)</div>
               <div className="text-[11px] text-[#999999] leading-relaxed">
-                生成服务，可对接企微
+                企微/飞书 AI 助手服务
               </div>
             </div>
           </button>

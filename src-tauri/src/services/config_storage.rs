@@ -40,8 +40,13 @@ pub struct AppConfigV2 {
     pub projects: Vec<Project>,
     #[serde(default)]
     pub has_seen_onboarding: bool,
-    #[serde(default)]
-    pub remote_config: Option<ProjectConfig>,
+    // mobot_bridge_port is stored globally (not per-project) for the remote mode
+    #[serde(default = "default_mobot_port")]
+    pub mobot_bridge_port: u16,
+}
+
+fn default_mobot_port() -> u16 {
+    8000
 }
 
 impl Default for AppConfigV2 {
@@ -50,7 +55,7 @@ impl Default for AppConfigV2 {
             version: 2,
             projects: vec![Project::default_project()],
             has_seen_onboarding: false,
-            remote_config: None,
+            mobot_bridge_port: 8000,
         }
     }
 }
@@ -89,7 +94,7 @@ impl ConfigStorage {
             proxy: v1_config.proxy,
             model: v1_config.model,
             base_url: v1_config.base_url,
-            token: v1_config.token, // Already decoded at this point
+            token: v1_config.token,
             skip_permissions: v1_config.skip_permissions,
             ..Default::default()
         };
@@ -105,7 +110,7 @@ impl ConfigStorage {
             version: 2,
             projects: vec![default_project],
             has_seen_onboarding: false,
-            remote_config: None,
+            mobot_bridge_port: 8000,
         }
     }
 
@@ -113,9 +118,6 @@ impl ConfigStorage {
     fn encode_project_token(project: &mut Project) {
         if !project.config.token.is_empty() {
             project.config.token = general_purpose::STANDARD.encode(&project.config.token);
-        }
-        if !project.config.bridge_bind_key.is_empty() {
-            project.config.bridge_bind_key = general_purpose::STANDARD.encode(&project.config.bridge_bind_key);
         }
         if !project.config.codex_api_key.is_empty() {
             project.config.codex_api_key = general_purpose::STANDARD.encode(&project.config.codex_api_key);
@@ -128,13 +130,6 @@ impl ConfigStorage {
             if let Ok(decoded) = general_purpose::STANDARD.decode(&project.config.token) {
                 if let Ok(token_str) = String::from_utf8(decoded) {
                     project.config.token = token_str;
-                }
-            }
-        }
-        if !project.config.bridge_bind_key.is_empty() {
-            if let Ok(decoded) = general_purpose::STANDARD.decode(&project.config.bridge_bind_key) {
-                if let Ok(key_str) = String::from_utf8(decoded) {
-                    project.config.bridge_bind_key = key_str;
                 }
             }
         }
@@ -172,24 +167,6 @@ impl ConfigStorage {
                 Self::decode_project_token(project);
             }
 
-            // Decode remote_config tokens
-            if let Some(ref mut remote) = config.remote_config {
-                if !remote.bridge_bind_key.is_empty() {
-                    if let Ok(decoded) = general_purpose::STANDARD.decode(&remote.bridge_bind_key) {
-                        if let Ok(key_str) = String::from_utf8(decoded) {
-                            remote.bridge_bind_key = key_str;
-                        }
-                    }
-                }
-                if !remote.token.is_empty() {
-                    if let Ok(decoded) = general_purpose::STANDARD.decode(&remote.token) {
-                        if let Ok(token_str) = String::from_utf8(decoded) {
-                            remote.token = token_str;
-                        }
-                    }
-                }
-            }
-
             Ok(config)
         } else {
             // Migrate from v1
@@ -224,16 +201,6 @@ impl ConfigStorage {
             Self::encode_project_token(project);
         }
 
-        // Encode remote_config secrets
-        if let Some(ref mut remote) = config_to_save.remote_config {
-            if !remote.bridge_bind_key.is_empty() {
-                remote.bridge_bind_key = general_purpose::STANDARD.encode(&remote.bridge_bind_key);
-            }
-            if !remote.token.is_empty() {
-                remote.token = general_purpose::STANDARD.encode(&remote.token);
-            }
-        }
-
         let json_string = serde_json::to_string_pretty(&config_to_save)
             .map_err(|e| format!("无法序列化配置: {}", e))?;
 
@@ -262,7 +229,6 @@ impl ConfigStorage {
     pub fn create_project(input: CreateProjectInput) -> Result<Project, String> {
         let mut config = Self::load_config_v2()?;
 
-        // Calculate sort_order: max of non-pinned projects + 1
         let max_order = config.projects
             .iter()
             .filter(|p| !p.is_pinned)
@@ -274,7 +240,7 @@ impl ConfigStorage {
             input.name,
             input.working_directory,
             input.config,
-            false, // New projects are not default
+            false,
             max_order + 1,
         );
 
@@ -288,7 +254,6 @@ impl ConfigStorage {
     pub fn update_project(id: &str, updates: UpdateProjectInput) -> Result<Project, String> {
         let mut config = Self::load_config_v2()?;
 
-        // Pre-calculate max_order in case we need it for unpinning
         let max_order = config.projects
             .iter()
             .filter(|p| !p.is_pinned && p.id != id)
@@ -317,11 +282,9 @@ impl ConfigStorage {
                 .as_secs();
 
             if is_pinned && !project.is_pinned {
-                // Setting pinned: record the time
                 project.is_pinned = true;
                 project.pinned_at = Some(now);
             } else if !is_pinned && project.is_pinned {
-                // Unpinning: clear pinned_at, assign a sort_order
                 project.is_pinned = false;
                 project.pinned_at = None;
                 project.sort_order = max_order + 1;
@@ -381,7 +344,6 @@ impl ConfigStorage {
 
         for order_item in orders {
             if let Some(project) = config.projects.iter_mut().find(|p| p.id == order_item.id) {
-                // Only update non-pinned, non-default projects
                 if !project.is_pinned && !project.is_default {
                     project.sort_order = order_item.sort_order;
                 }
@@ -392,13 +354,12 @@ impl ConfigStorage {
         Ok(())
     }
 
-    /// Update pinned_at for pinned projects (batch) - used for reordering pinned items
+    /// Update pinned_at for pinned projects (batch)
     pub fn update_pinned_order(orders: Vec<PinnedOrderItem>) -> Result<(), String> {
         let mut config = Self::load_config_v2()?;
 
         for order_item in orders {
             if let Some(project) = config.projects.iter_mut().find(|p| p.id == order_item.id) {
-                // Only update pinned projects
                 if project.is_pinned {
                     project.pinned_at = Some(order_item.pinned_at);
                 }
@@ -433,56 +394,11 @@ impl ConfigStorage {
         Self::save_config_v2(&config)
     }
 
-    // ============ Remote Config ============
-
-    /// Load remote config (returns default if not set)
-    pub fn load_remote_config() -> Result<ProjectConfig, String> {
-        let config = Self::load_config_v2()?;
-        let mut remote = config.remote_config.unwrap_or_else(|| {
-            let mut default_cfg = ProjectConfig::default();
-            default_cfg.mode = "remote".to_string();
-            default_cfg
-        });
-        // Ensure mode is always "remote"
-        remote.mode = "remote".to_string();
-        Ok(remote)
-    }
-
-    /// Save remote config
-    pub fn save_remote_config(remote: &ProjectConfig) -> Result<(), String> {
-        let mut config = Self::load_config_v2()?;
-        let mut to_save = remote.clone();
-        to_save.mode = "remote".to_string();
-        // Encode secrets for storage
-        if !to_save.bridge_bind_key.is_empty() {
-            to_save.bridge_bind_key = general_purpose::STANDARD.encode(&to_save.bridge_bind_key);
-        }
-        if !to_save.token.is_empty() {
-            to_save.token = general_purpose::STANDARD.encode(&to_save.token);
-        }
-        config.remote_config = Some(to_save);
-        // save_config_v2 will re-encode project tokens, but remote_config is already encoded
-        // We need to save raw here to avoid double-encoding
-        let config_path = Self::get_config_path()?;
-        // Create a copy with encoded project tokens
-        let mut config_to_save = config.clone();
-        for project in &mut config_to_save.projects {
-            Self::encode_project_token(project);
-        }
-        let json_string = serde_json::to_string_pretty(&config_to_save)
-            .map_err(|e| format!("无法序列化配置: {}", e))?;
-        fs::write(&config_path, json_string)
-            .map_err(|e| format!("无法写入配置文件: {}", e))?;
-        Ok(())
-    }
-
     // ============ Legacy v1 API for backwards compatibility ============
 
     pub fn save_config(config: &AppConfig) -> Result<(), String> {
-        // Convert to v2 and save
         let mut v2_config = Self::load_config_v2().unwrap_or_default();
 
-        // Update default project with new config
         if let Some(default_project) = v2_config.projects.iter_mut().find(|p| p.is_default) {
             default_project.config = ProjectConfig {
                 mode: config.mode.clone(),
@@ -505,7 +421,6 @@ impl ConfigStorage {
     pub fn load_config() -> Result<AppConfig, String> {
         let config = Self::load_config_v2()?;
 
-        // Return default project's config as AppConfig
         let default_project = config.projects
             .iter()
             .find(|p| p.is_default)

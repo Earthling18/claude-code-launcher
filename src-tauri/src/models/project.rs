@@ -12,32 +12,8 @@ fn default_custom_cli() -> String {
     "claude".to_string()
 }
 
-fn default_bridge_server_url() -> String {
-    "ws://172.21.11.82:80/bridge".to_string()
-}
-
-fn default_bridge_agent_port() -> u16 {
-    5000
-}
-
-fn default_bridge_agent_timeout() -> u32 {
-    1800
-}
-
-fn default_bridge_reconnect_interval() -> u32 {
-    5
-}
-
-fn default_bridge_heartbeat_interval() -> u32 {
-    30
-}
-
-fn default_bridge_agent_mode() -> String {
-    "claude".to_string()
-}
-
-fn default_bridge_max_turns() -> u32 {
-    3
+fn default_mobot_bridge_port() -> u16 {
+    8000
 }
 
 /// Project-specific configuration
@@ -60,27 +36,11 @@ pub struct ProjectConfig {
     #[serde(default = "default_custom_cli")]
     pub custom_cli: String,              // CLI tool for custom mode: "claude" or "codex"
 
-    // Remote bridge fields
-    #[serde(default = "default_bridge_server_url")]
-    pub bridge_server_url: String,       // Bridge server WebSocket URL
+    // Mobot bridge fields (simplified — all config lives in mobot-bridge's own .env / Web UI)
     #[serde(default)]
-    pub bridge_bind_key: String,         // User bind key (sk-xxx, Base64 encoded in storage)
-    #[serde(default)]
-    pub bridge_client_id: String,        // Client ID (empty = use hostname)
-    #[serde(default = "default_bridge_agent_port")]
-    pub bridge_agent_port: u16,          // Agent server port
-    #[serde(default = "default_bridge_agent_timeout")]
-    pub bridge_agent_timeout: u32,       // Agent request timeout (seconds)
-    #[serde(default)]
-    pub bridge_proxy: String,            // HTTP proxy for bridge connections
-    #[serde(default = "default_bridge_reconnect_interval")]
-    pub bridge_reconnect_interval: u32,  // Reconnect interval (seconds)
-    #[serde(default = "default_bridge_heartbeat_interval")]
-    pub bridge_heartbeat_interval: u32,  // Heartbeat interval (seconds)
-    #[serde(default = "default_bridge_agent_mode")]
-    pub bridge_agent_mode: String,       // "claude" or "custom" — agent model mode for remote bridge
-    #[serde(default = "default_bridge_max_turns")]
-    pub bridge_max_turns: u32,           // Max turns for Claude Agent SDK (default 30)
+    pub mobot_bridge_path: Option<String>,  // Install path (auto-detected or user-specified)
+    #[serde(default = "default_mobot_bridge_port")]
+    pub mobot_bridge_port: u16,             // Service port (default 8000)
 }
 
 impl Default for ProjectConfig {
@@ -94,16 +54,8 @@ impl Default for ProjectConfig {
             skip_permissions: true,
             codex_api_key: String::new(),
             custom_cli: "claude".to_string(),
-            bridge_server_url: default_bridge_server_url(),
-            bridge_bind_key: String::new(),
-            bridge_client_id: String::new(),
-            bridge_agent_port: 5000,
-            bridge_agent_timeout: 1800,
-            bridge_proxy: String::new(),
-            bridge_reconnect_interval: 5,
-            bridge_heartbeat_interval: 30,
-            bridge_agent_mode: "claude".to_string(),
-            bridge_max_turns: 3,
+            mobot_bridge_path: None,
+            mobot_bridge_port: 8000,
         }
     }
 }

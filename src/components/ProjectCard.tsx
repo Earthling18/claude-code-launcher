@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 import type { Project } from '../types/project';
-import type { BridgeStatus } from '../types/project';
-import { projectApi, bridgeApi } from '../api';
+import { projectApi } from '../api';
 
 interface ProjectCardProps {
   project: Project;
@@ -20,26 +19,6 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
   isDragging = false,
 }) => {
   const [copying, setCopying] = useState<string | null>(null);
-  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null);
-  const [bridgeLoading, setBridgeLoading] = useState(false);
-
-  const isRemote = project.config.mode === 'remote';
-
-  // Poll bridge status for remote projects
-  useEffect(() => {
-    if (!isRemote) return;
-
-    const poll = async () => {
-      try {
-        const s = await bridgeApi.getStatus(project.id);
-        setBridgeStatus(s);
-      } catch {}
-    };
-
-    poll();
-    const interval = setInterval(poll, 3000);
-    return () => clearInterval(interval);
-  }, [project.id, isRemote]);
 
   const formatPath = (path: string) => {
     // Shorten long paths for display
@@ -55,12 +34,10 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
   const getModeLabel = () => {
     if (project.config.mode === 'claude') return 'Claude账号';
     if (project.config.mode === 'codex') return 'Codex账号';
-    if (project.config.mode === 'remote') return '远程桥接';
     return '自定义模型';
   };
 
   const getModeLabelClass = () => {
-    if (project.config.mode === 'remote') return 'bg-[#7c3aed] text-white';
     return 'bg-[#3a3a3a] text-[#999999]';
   };
 
@@ -87,43 +64,6 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
     }
   };
 
-  const handleBridgeStart = async () => {
-    setBridgeLoading(true);
-    try {
-      await bridgeApi.start(project.id);
-      await new Promise((r) => setTimeout(r, 1500));
-      const s = await bridgeApi.getStatus(project.id);
-      setBridgeStatus(s);
-    } catch (err: any) {
-      alert(`启动失败: ${err}`);
-    } finally {
-      setBridgeLoading(false);
-    }
-  };
-
-  const handleBridgeStop = async () => {
-    setBridgeLoading(true);
-    try {
-      await bridgeApi.stop(project.id);
-      const s = await bridgeApi.getStatus(project.id);
-      setBridgeStatus(s);
-    } catch (err: any) {
-      alert(`停止失败: ${err}`);
-    } finally {
-      setBridgeLoading(false);
-    }
-  };
-
-  const getBridgeStatusIndicator = () => {
-    if (!bridgeStatus || !bridgeStatus.running) {
-      return <span className="inline-block w-2 h-2 rounded-full bg-gray-500" title="未启动" />;
-    }
-    if (bridgeStatus.agent_ok && bridgeStatus.client_connected) {
-      return <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" title="已连接" />;
-    }
-    return <span className="inline-block w-2 h-2 rounded-full bg-yellow-500 animate-pulse" title="连接中" />;
-  };
-
   return (
     <div className={`bg-[#2a2a2a] border rounded-lg p-4 transition-colors ${
       isDragging
@@ -141,7 +81,6 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
               置顶
             </span>
           )}
-          {isRemote && getBridgeStatusIndicator()}
           <span className={`px-2 py-0.5 text-[10px] rounded whitespace-nowrap ${getModeLabelClass()}`}>
             {getModeLabel()}
           </span>
@@ -174,65 +113,39 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
 
       {/* Buttons row */}
       <div className="flex items-center gap-2" data-onboarding={project.is_default ? "launch-buttons" : undefined}>
-        {isRemote ? (
-          // Remote mode: bridge start/stop buttons
-          <>
-            {!bridgeStatus?.running ? (
-              <button
-                onClick={handleBridgeStart}
-                disabled={bridgeLoading}
-                className="px-3 py-1.5 text-[12px] bg-[#10b981] hover:bg-[#059669] disabled:opacity-50 text-white rounded transition-colors"
-              >
-                {bridgeLoading ? '处理中...' : '启动桥接'}
-              </button>
-            ) : (
-              <button
-                onClick={handleBridgeStop}
-                disabled={bridgeLoading}
-                className="px-3 py-1.5 text-[12px] bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white rounded transition-colors"
-              >
-                {bridgeLoading ? '处理中...' : '停止桥接'}
-              </button>
-            )}
-          </>
-        ) : (
-          // Non-remote mode: original launch buttons
+        <button
+          onClick={() => onLaunch(project.id)}
+          className="px-3 py-1.5 text-[12px] bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded transition-colors"
+        >
+          启动
+        </button>
+
+        {/* Copy buttons based on platform */}
+        {platform === 'windows' ? (
           <>
             <button
-              onClick={() => onLaunch(project.id)}
-              className="px-3 py-1.5 text-[12px] bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded transition-colors"
+              onClick={() => handleCopyCommand('ps')}
+              className="px-3 py-1.5 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded transition-colors"
+              disabled={copying === 'ps'}
             >
-              启动
+              {copying === 'ps' ? '已复制' : '复制PS'}
             </button>
-
-            {/* Copy buttons based on platform */}
-            {platform === 'windows' ? (
-              <>
-                <button
-                  onClick={() => handleCopyCommand('ps')}
-                  className="px-3 py-1.5 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded transition-colors"
-                  disabled={copying === 'ps'}
-                >
-                  {copying === 'ps' ? '已复制' : '复制PS'}
-                </button>
-                <button
-                  onClick={() => handleCopyCommand('cmd')}
-                  className="px-3 py-1.5 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded transition-colors"
-                  disabled={copying === 'cmd'}
-                >
-                  {copying === 'cmd' ? '已复制' : '复制CMD'}
-                </button>
-              </>
-            ) : (
-              <button
-                onClick={() => handleCopyCommand('bash')}
-                className="px-3 py-1.5 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded transition-colors"
-                disabled={copying === 'bash'}
-              >
-                {copying === 'bash' ? '已复制' : '复制Bash'}
-              </button>
-            )}
+            <button
+              onClick={() => handleCopyCommand('cmd')}
+              className="px-3 py-1.5 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded transition-colors"
+              disabled={copying === 'cmd'}
+            >
+              {copying === 'cmd' ? '已复制' : '复制CMD'}
+            </button>
           </>
+        ) : (
+          <button
+            onClick={() => handleCopyCommand('bash')}
+            className="px-3 py-1.5 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded transition-colors"
+            disabled={copying === 'bash'}
+          >
+            {copying === 'bash' ? '已复制' : '复制Bash'}
+          </button>
         )}
       </div>
     </div>

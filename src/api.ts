@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { DependencyStatus, AppConfig } from './types';
-import type { Project, ProjectConfig, ProjectOrderItem, PinnedOrderItem, BridgeStatus } from './types/project';
+import type { Project, ProjectConfig, ProjectOrderItem, PinnedOrderItem, InstallStatus, HealthStatus, MobotServiceStatus } from './types/project';
 
 export const api = {
   // 依赖检测
@@ -53,21 +53,10 @@ export const api = {
 
 // Project management API
 export const projectApi = {
-  // Get all projects
   getAll: () => invoke<Project[]>('get_projects'),
-
-  // Get a single project by ID
   get: (id: string) => invoke<Project>('get_project', { id }),
-
-  // Create a new project
   create: (name: string, workingDirectory: string, config: ProjectConfig) =>
-    invoke<Project>('create_project', {
-      name,
-      workingDirectory,
-      config,
-    }),
-
-  // Update an existing project
+    invoke<Project>('create_project', { name, workingDirectory, config }),
   update: (
     id: string,
     name?: string,
@@ -75,73 +64,44 @@ export const projectApi = {
     config?: ProjectConfig,
     isPinned?: boolean
   ) =>
-    invoke<Project>('update_project', {
-      id,
-      name,
-      workingDirectory,
-      config,
-      isPinned,
-    }),
-
-  // Delete a project
+    invoke<Project>('update_project', { id, name, workingDirectory, config, isPinned }),
   delete: (id: string) => invoke<void>('delete_project', { id }),
-
-  // Launch a project
   launch: (id: string) => invoke<void>('launch_project', { id }),
-
-  // Generate commands for a project
   generatePowershellCommand: (id: string) =>
     invoke<string>('generate_project_powershell_command', { id }),
   generateCmdCommand: (id: string) =>
     invoke<string>('generate_project_cmd_command', { id }),
   generateBashCommand: (id: string) =>
     invoke<string>('generate_project_bash_command', { id }),
-
-  // Update sort order for non-pinned projects (batch)
   updateProjectsOrder: (orders: ProjectOrderItem[]) =>
     invoke<void>('update_projects_order', { orders }),
-
-  // Update pinned_at for pinned projects (batch)
   updatePinnedOrder: (orders: PinnedOrderItem[]) =>
     invoke<void>('update_pinned_order', { orders }),
-
-  // Toggle project pinned status
   togglePinned: (id: string, isPinned: boolean) =>
     invoke<Project>('toggle_project_pinned', { id, isPinned }),
 };
 
-// Bridge management API
-export const bridgeApi = {
-  start: (id: string) => invoke<void>('start_bridge', { id }),
-  stop: (id: string) => invoke<void>('stop_bridge', { id }),
-  getStatus: (id: string) => invoke<BridgeStatus>('get_bridge_status', { id }),
-  getLogs: (id: string, maxLines?: number) =>
-    invoke<string[]>('get_bridge_logs', { id, maxLines }),
-  restart: (id: string) => invoke<void>('restart_bridge', { id }),
-  checkDeps: () => invoke<void>('check_bridge_deps'),
-  prepareEnv: () => invoke<void>('prepare_bridge_env'),
+// Mobot bridge management API
+export const mobotApi = {
+  detectInstallation: () => invoke<InstallStatus>('detect_mobot_installation'),
+  install: () => invoke<string>('install_mobot_bridge'),
+  detectPython: () => invoke<string | null>('detect_python'),
+  installDeps: (bridgePath: string, python: string) =>
+    invoke<void>('install_mobot_deps', { bridgePath, python }),
+  startService: (bridgePath: string, python: string, port: number) =>
+    invoke<number>('start_mobot_service', { bridgePath, python, port }),
+  stopService: () => invoke<void>('stop_mobot_service'),
+  checkHealth: (port: number) => invoke<HealthStatus>('check_mobot_health', { port }),
+  getStatus: (port: number) => invoke<MobotServiceStatus>('get_mobot_status', { port }),
+  getLogs: (maxLines?: number) => invoke<string[]>('get_mobot_logs', { maxLines }),
   getHostname: () => invoke<string>('get_hostname'),
   getUsername: () => invoke<string>('get_username'),
-  getOrCreateKey: (username: string) => invoke<string>('bridge_get_or_create_key', { username }),
 };
 
 // Claude login check API
 export const claudeLoginApi = {
   checkLogin: () => invoke<boolean>('check_claude_login'),
   launchForLogin: (proxy?: string) => invoke<void>('launch_claude_for_login', { proxy }),
-};
-
-// Remote config API
-export const remoteApi = {
-  loadConfig: () => invoke<ProjectConfig>('load_remote_config'),
-  saveConfig: (config: ProjectConfig) => invoke<void>('save_remote_config', { config }),
-  startBridge: () => invoke<void>('start_remote_bridge'),
-};
-
-// Agent config API
-export const agentConfigApi = {
-  openFile: (name: string) => invoke<void>('open_agent_config_file', { name }),
-  openFolder: (name: string) => invoke<void>('open_agent_config_folder', { name }),
 };
 
 // Dialog API

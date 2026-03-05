@@ -8,17 +8,9 @@ export interface ProjectConfig {
   codex_api_key: string;
   custom_cli: 'claude' | 'codex';
 
-  // Remote bridge fields
-  bridge_server_url: string;
-  bridge_bind_key: string;
-  bridge_client_id: string;
-  bridge_agent_port: number;
-  bridge_agent_timeout: number;
-  bridge_proxy: string;
-  bridge_reconnect_interval: number;
-  bridge_heartbeat_interval: number;
-  bridge_agent_mode: 'claude' | 'custom';
-  bridge_max_turns: number;
+  // Mobot bridge fields (simplified)
+  mobot_bridge_path: string | null;
+  mobot_bridge_port: number;
 }
 
 export interface Project {
@@ -58,12 +50,25 @@ export interface PinnedOrderItem {
   pinned_at: number;
 }
 
-export interface BridgeStatus {
+// Mobot bridge types
+export type InstallStatus =
+  | 'NotInstalled'
+  | { Installed: { path: string } }
+  | { Running: { path: string; port: number } };
+
+export interface HealthStatus {
+  healthy: boolean;
+  details: string;
+}
+
+export interface MobotServiceStatus {
+  installed: boolean;
   running: boolean;
-  agent_ok: boolean;
-  client_connected: boolean;
+  pid: number | null;
+  port: number;
+  install_path: string | null;
+  healthy: boolean;
   started_at: number | null;
-  agent_port: number | null;
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
@@ -75,14 +80,6 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   skip_permissions: true,
   codex_api_key: '',
   custom_cli: 'claude',
-  bridge_server_url: 'ws://172.21.11.82:80/bridge',
-  bridge_bind_key: '',
-  bridge_client_id: '',
-  bridge_agent_port: 5000,
-  bridge_agent_timeout: 1800,
-  bridge_proxy: '',
-  bridge_reconnect_interval: 5,
-  bridge_heartbeat_interval: 30,
-  bridge_agent_mode: 'claude',
-  bridge_max_turns: 3,
+  mobot_bridge_path: null,
+  mobot_bridge_port: 8000,
 };
