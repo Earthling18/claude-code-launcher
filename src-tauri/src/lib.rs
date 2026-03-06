@@ -8,6 +8,18 @@ pub fn run() {
     // don't think they're running inside a nested Claude Code session.
     std::env::remove_var("CLAUDECODE");
 
+    // Ensure localhost/127.0.0.1 bypasses HTTP proxy (WebView2 reads env vars)
+    let no_proxy = std::env::var("NO_PROXY").unwrap_or_default();
+    if !no_proxy.contains("127.0.0.1") {
+        let new_val = if no_proxy.is_empty() {
+            "127.0.0.1,localhost".to_string()
+        } else {
+            format!("{},127.0.0.1,localhost", no_proxy)
+        };
+        std::env::set_var("NO_PROXY", &new_val);
+        std::env::set_var("no_proxy", &new_val);
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
