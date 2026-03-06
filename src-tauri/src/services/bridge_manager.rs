@@ -164,7 +164,7 @@ impl BridgeManager {
         }
 
         // Clean __pycache__ directories to avoid .pyc magic number mismatch
-        // (e.g. switching from system Python 3.12 to embedded Python 3.11)
+        // (e.g. switching from a different system Python to embedded Python 3.12)
         // NOTE: only clean __pycache__ dirs, NOT loose .pyc files — app/ uses .pyc as source
         fn clean_pycache(dir: &Path) {
             if let Ok(entries) = std::fs::read_dir(dir) {
@@ -215,6 +215,28 @@ impl BridgeManager {
             "mobot-bridge source not found in resources. Checked: {:?}",
             candidates.iter().map(|p| p.display().to_string()).collect::<Vec<_>>()
         ))
+    }
+
+    /// Find the Tauri resource directory containing bridge source files.
+    /// Used to repair files that may be overwritten by hot-update.
+    fn find_resource_dir() -> Option<PathBuf> {
+        // Try exe directory (installed) and dev mode
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(exe_dir) = exe.parent() {
+                let candidates = [
+                    exe_dir.join("resources").join("bridge"),
+                    exe_dir.join("bridge"),
+                    // Dev mode
+                    Path::new(env!("CARGO_MANIFEST_DIR")).join("resources").join("bridge"),
+                ];
+                for candidate in &candidates {
+                    if candidate.join("start.py").exists() {
+                        return Some(candidate.clone());
+                    }
+                }
+            }
+        }
+        None
     }
 
     /// Check if dependencies are installed (marker file exists)
@@ -483,6 +505,25 @@ impl BridgeManager {
 
         if !start_py.exists() {
             return Err(format!("start.py not found at {}", start_py.display()));
+        }
+
+        // Repair font file if missing (hot-update may overwrite app/static/)
+        let font_file = bridge_dir.join("app").join("static").join("config").join("material-symbols-rounded.woff2");
+        let font_css = bridge_dir.join("app").join("static").join("config").join("material-symbols.css");
+        if !font_file.exists() || !font_css.exists() {
+            // Try to copy from Tauri resource directory
+            if let Some(res_dir) = Self::find_resource_dir() {
+                let src_font = res_dir.join("app").join("static").join("config").join("material-symbols-rounded.woff2");
+                let src_css = res_dir.join("app").join("static").join("config").join("material-symbols.css");
+                if src_font.exists() && !font_file.exists() {
+                    let _ = std::fs::copy(&src_font, &font_file);
+                    log::info!("Repaired missing font file: {}", font_file.display());
+                }
+                if src_css.exists() && !font_css.exists() {
+                    let _ = std::fs::copy(&src_css, &font_css);
+                    log::info!("Repaired missing font CSS: {}", font_css.display());
+                }
+            }
         }
 
         // Stop existing service if running
