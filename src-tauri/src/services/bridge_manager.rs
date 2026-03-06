@@ -163,9 +163,10 @@ impl BridgeManager {
             let _ = std::fs::remove_dir_all(&lib_dir);
         }
 
-        // Clean .pyc files and __pycache__ directories to avoid magic number mismatch
+        // Clean __pycache__ directories to avoid .pyc magic number mismatch
         // (e.g. switching from system Python 3.12 to embedded Python 3.11)
-        fn clean_pyc(dir: &Path) {
+        // NOTE: only clean __pycache__ dirs, NOT loose .pyc files — app/ uses .pyc as source
+        fn clean_pycache(dir: &Path) {
             if let Ok(entries) = std::fs::read_dir(dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
@@ -173,16 +174,14 @@ impl BridgeManager {
                         if path.file_name().map(|n| n == "__pycache__").unwrap_or(false) {
                             let _ = std::fs::remove_dir_all(&path);
                         } else {
-                            clean_pyc(&path);
+                            clean_pycache(&path);
                         }
-                    } else if path.extension().map(|e| e == "pyc").unwrap_or(false) {
-                        let _ = std::fs::remove_file(&path);
                     }
                 }
             }
         }
-        log::info!("Cleaning .pyc files and __pycache__ directories...");
-        clean_pyc(&mobot_dir);
+        log::info!("Cleaning __pycache__ directories...");
+        clean_pycache(&mobot_dir);
 
         // Write version marker from VERSION file, or fallback
         let version_marker = mobot_dir.join(".mobot_version");
