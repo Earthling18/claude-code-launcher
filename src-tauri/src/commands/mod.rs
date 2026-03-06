@@ -378,8 +378,8 @@ pub async fn detect_python() -> Option<String> {
 }
 
 #[tauri::command]
-pub async fn install_mobot_deps(bridge_path: String, python: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || BridgeManager::install_dependencies(&bridge_path, &python))
+pub async fn install_mobot_deps(app_handle: tauri::AppHandle, bridge_path: String, python: String) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || BridgeManager::install_dependencies(&bridge_path, &python, Some(&app_handle)))
         .await
         .map_err(|e| format!("Task error: {}", e))?
 }

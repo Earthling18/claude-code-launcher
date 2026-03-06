@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import { mobotApi } from '../api';
 
 type StepStatus = 'pending' | 'running' | 'done' | 'error';
@@ -75,10 +76,20 @@ export const MobotSetupWizard: React.FC<MobotSetupWizardProps> = ({
       // Step 2: Install dependencies
       setCurrentStep(2);
       updateStep(2, { status: 'running' });
-      addLog('正在安装 Python 依赖包，请稍候...');
+      addLog('正在安装 Python 依赖包...');
 
-      // installDeps returns the python path to use (venv python on macOS/Linux)
-      const servicePython = await mobotApi.installDeps(installPath, pythonAfterInstall);
+      // Listen for real-time progress events from Rust backend
+      const unlisten = await listen<string>('mobot-deps-progress', (event) => {
+        addLog(event.payload);
+      });
+
+      let servicePython: string;
+      try {
+        // installDeps returns the python path to use (venv python on macOS/Linux)
+        servicePython = await mobotApi.installDeps(installPath, pythonAfterInstall);
+      } finally {
+        unlisten();
+      }
       updateStep(2, { status: 'done' });
       addLog('依赖安装完成');
 

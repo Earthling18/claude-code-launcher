@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 use std::io::{BufRead, BufReader, Read as IoRead};
+use tauri::Emitter;
 
 use once_cell::sync::Lazy;
 
@@ -382,22 +383,33 @@ impl BridgeManager {
         }
     }
 
+    /// Emit a progress event to the frontend (if app_handle is provided)
+    fn emit_progress(app_handle: Option<&tauri::AppHandle>, msg: &str) {
+        log::info!("[deps] {}", msg);
+        if let Some(handle) = app_handle {
+            let _ = handle.emit("mobot-deps-progress", msg);
+        }
+    }
+
     /// Install Python dependencies.
     /// Priority: offline wheels > online pip (via venv on macOS/Linux)
     /// Returns the python executable path to use for running the service
-    pub fn install_dependencies(bridge_path: &str, python: &str) -> Result<String, String> {
+    pub fn install_dependencies(bridge_path: &str, python: &str, app_handle: Option<&tauri::AppHandle>) -> Result<String, String> {
         let bridge_dir = Path::new(bridge_path);
-        let wheels_dir = bridge_dir.join("wheels");
         let req_file = bridge_dir.join("requirements.txt");
 
-        // Check if we have offline wheels available
-        let has_wheels = wheels_dir.exists()
-            && std::fs::read_dir(&wheels_dir)
-                .map(|mut d| d.next().is_some())
-                .unwrap_or(false);
+        // Check if we have offline wheels available (Windows only — wheels contain .pyd binaries)
+        #[cfg(windows)]
+        {
+            let wheels_dir = bridge_dir.join("wheels");
+            let has_wheels = wheels_dir.exists()
+                && std::fs::read_dir(&wheels_dir)
+                    .map(|mut d| d.next().is_some())
+                    .unwrap_or(false);
 
-        if has_wheels {
-            return Self::install_from_wheels(bridge_dir, python, &wheels_dir);
+            if has_wheels {
+                return Self::install_from_wheels(bridge_dir, python, &wheels_dir, app_handle);
+            }
         }
 
         if !req_file.exists() {
@@ -407,7 +419,7 @@ impl BridgeManager {
             ));
         }
 
-        log::info!("Installing mobot-bridge dependencies (online)...");
+        Self::emit_progress(app_handle, "开始在线安装依赖...");
 
         #[cfg(not(windows))]
         let pip_python = {
@@ -417,7 +429,7 @@ impl BridgeManager {
             let venv_pip = venv_dir.join("bin").join("pip");
 
             if !venv_python.exists() {
-                log::info!("Creating venv at {}", venv_dir.display());
+                Self::emit_progress(app_handle, "创建 Python 虚拟环境...");
                 let output = Command::new(python)
                     .args(["-m", "venv", &venv_dir.to_string_lossy()])
                     .output()
@@ -429,12 +441,12 @@ impl BridgeManager {
                 }
             }
 
-            // Upgrade pip first
+            Self::emit_progress(app_handle, "升级 pip...");
             let _ = Command::new(venv_python.to_string_lossy().to_string())
                 .args(["-m", "pip", "install", "--upgrade", "pip"])
                 .output();
 
-            // Install deps using venv pip
+            Self::emit_progress(app_handle, "正在通过 pip 安装依赖包，可能需要几分钟...");
             let output = Command::new(venv_pip.to_string_lossy().to_string())
                 .args(["install", "-r", &req_file.to_string_lossy()])
                 .current_dir(bridge_dir)
@@ -451,11 +463,13 @@ impl BridgeManager {
                 ));
             }
 
+            Self::emit_progress(app_handle, "pip 安装完成");
             venv_python.to_string_lossy().to_string()
         };
 
         #[cfg(windows)]
         let pip_python = {
+            Self::emit_progress(app_handle, "正在通过 pip 安装依赖包，可能需要几分钟...");
             let mut cmd = Command::new(python);
             cmd.args(["-m", "pip", "install", "-r", &req_file.to_string_lossy()])
                 .current_dir(bridge_dir);
@@ -478,6 +492,7 @@ impl BridgeManager {
                 ));
             }
 
+            Self::emit_progress(app_handle, "pip 安装完成");
             python.to_string()
         };
 
@@ -485,12 +500,13 @@ impl BridgeManager {
         let marker = bridge_dir.join(".deps_installed");
         let _ = std::fs::write(&marker, "ok");
 
-        log::info!("mobot-bridge dependencies installed successfully");
+        Self::emit_progress(app_handle, "依赖安装完成 ✓");
         Ok(pip_python)
     }
 
     /// Install dependencies from offline wheels directory by extracting them to lib/
-    fn install_from_wheels(bridge_dir: &Path, python: &str, wheels_dir: &Path) -> Result<String, String> {
+    #[cfg(windows)]
+    fn install_from_wheels(bridge_dir: &Path, python: &str, wheels_dir: &Path, app_handle: Option<&tauri::AppHandle>) -> Result<String, String> {
         let lib_dir = bridge_dir.join("lib");
 
         // Skip if lib/ already has content (already extracted)
@@ -499,40 +515,49 @@ impl BridgeManager {
                 .map(|mut d| d.next().is_some())
                 .unwrap_or(false);
             if has_content {
-                log::info!("lib/ directory already populated, skipping wheel extraction");
+                Self::emit_progress(app_handle, "离线依赖已就绪，跳过解压");
                 let marker = bridge_dir.join(".deps_installed");
                 let _ = std::fs::write(&marker, "ok");
                 return Ok(python.to_string());
             }
         }
 
-        log::info!("Extracting wheels to lib/ directory...");
+        Self::emit_progress(app_handle, "正在解压离线依赖包...");
 
         // Create lib/ directory
         std::fs::create_dir_all(&lib_dir)
             .map_err(|e| format!("Failed to create lib/ directory: {}", e))?;
 
+        // Count total wheels for progress
+        let wheel_files: Vec<_> = std::fs::read_dir(wheels_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().extension().map(|ext| ext == "whl").unwrap_or(false))
+            .collect();
+        let total = wheel_files.len();
+
         // Extract each .whl file (wheels are just zip files)
-        if let Ok(entries) = std::fs::read_dir(wheels_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().map(|e| e == "whl").unwrap_or(false) {
-                    let file = std::fs::File::open(&path)
-                        .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
-                    let mut archive = zip::ZipArchive::new(file)
-                        .map_err(|e| format!("Failed to read wheel {}: {}", path.display(), e))?;
-                    archive.extract(&lib_dir)
-                        .map_err(|e| format!("Failed to extract {}: {}", path.display(), e))?;
-                    log::info!("Extracted: {}", path.file_name().unwrap_or_default().to_string_lossy());
-                }
-            }
+        for (i, entry) in wheel_files.iter().enumerate() {
+            let path = entry.path();
+            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            // Extract package name from wheel filename (e.g. "pydantic-2.5.0-cp312-..." -> "pydantic")
+            let pkg_name = name.split('-').next().unwrap_or(&name);
+            Self::emit_progress(app_handle, &format!("解压依赖 ({}/{}) {}...", i + 1, total, pkg_name));
+
+            let file = std::fs::File::open(&path)
+                .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
+            let mut archive = zip::ZipArchive::new(file)
+                .map_err(|e| format!("Failed to read wheel {}: {}", path.display(), e))?;
+            archive.extract(&lib_dir)
+                .map_err(|e| format!("Failed to extract {}: {}", path.display(), e))?;
         }
 
         // Write install marker
         let marker = bridge_dir.join(".deps_installed");
         let _ = std::fs::write(&marker, "ok");
 
-        log::info!("mobot-bridge dependencies extracted from wheels successfully");
+        Self::emit_progress(app_handle, &format!("离线依赖解压完成，共 {} 个包 ✓", total));
         Ok(python.to_string())
     }
 
