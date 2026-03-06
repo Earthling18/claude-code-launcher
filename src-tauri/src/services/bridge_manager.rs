@@ -545,24 +545,8 @@ impl BridgeManager {
             return Err(format!("start.py not found at {}", start_py.display()));
         }
 
-        // Repair font file if missing (hot-update may overwrite app/static/)
-        let font_file = bridge_dir.join("app").join("static").join("config").join("material-symbols-rounded.woff2");
-        let font_css = bridge_dir.join("app").join("static").join("config").join("material-symbols.css");
-        if !font_file.exists() || !font_css.exists() {
-            // Try to copy from Tauri resource directory
-            if let Some(res_dir) = Self::find_resource_dir() {
-                let src_font = res_dir.join("app").join("static").join("config").join("material-symbols-rounded.woff2");
-                let src_css = res_dir.join("app").join("static").join("config").join("material-symbols.css");
-                if src_font.exists() && !font_file.exists() {
-                    let _ = std::fs::copy(&src_font, &font_file);
-                    log::info!("Repaired missing font file: {}", font_file.display());
-                }
-                if src_css.exists() && !font_css.exists() {
-                    let _ = std::fs::copy(&src_css, &font_css);
-                    log::info!("Repaired missing font CSS: {}", font_css.display());
-                }
-            }
-        }
+        // Repair font files if missing
+        Self::repair_fonts_if_needed();
 
         // Stop existing service if running
         let _ = Self::stop_service();
@@ -696,6 +680,29 @@ impl BridgeManager {
     }
 
     /// Check mobot-bridge health via GET /health
+    /// Repair font files if missing (hot-update overwrites app/static/ without bundled fonts)
+    /// Called from start_service() and periodically from check_health()
+    fn repair_fonts_if_needed() {
+        let mobot_dir = Self::get_mobot_dir();
+        let font_file = mobot_dir.join("app").join("static").join("config").join("material-symbols-rounded.woff2");
+        let font_css = mobot_dir.join("app").join("static").join("config").join("material-symbols.css");
+        if font_file.exists() && font_css.exists() {
+            return;
+        }
+        if let Some(res_dir) = Self::find_resource_dir() {
+            let src_font = res_dir.join("app").join("static").join("config").join("material-symbols-rounded.woff2");
+            let src_css = res_dir.join("app").join("static").join("config").join("material-symbols.css");
+            if src_font.exists() && !font_file.exists() {
+                let _ = std::fs::copy(&src_font, &font_file);
+                log::info!("Repaired missing font file: {}", font_file.display());
+            }
+            if src_css.exists() && !font_css.exists() {
+                let _ = std::fs::copy(&src_css, &font_css);
+                log::info!("Repaired missing font CSS: {}", font_css.display());
+            }
+        }
+    }
+
     pub fn check_health(port: u16) -> HealthStatus {
         let url = format!("http://127.0.0.1:{}/health", port);
 
@@ -705,10 +712,14 @@ impl BridgeManager {
             .build()
         {
             Ok(client) => match client.get(&url).send() {
-                Ok(resp) if resp.status().is_success() => HealthStatus {
-                    healthy: true,
-                    details: resp.text().unwrap_or_default(),
-                },
+                Ok(resp) if resp.status().is_success() => {
+                    // Check font files periodically (hot-update may remove them without restarting)
+                    Self::repair_fonts_if_needed();
+                    HealthStatus {
+                        healthy: true,
+                        details: resp.text().unwrap_or_default(),
+                    }
+                }
                 Ok(resp) => HealthStatus {
                     healthy: false,
                     details: format!("HTTP {}", resp.status()),
