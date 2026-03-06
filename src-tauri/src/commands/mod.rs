@@ -1,5 +1,6 @@
 use crate::services::*;
 use crate::services::bridge_manager::{InstallStatus, HealthStatus, MobotServiceStatus};
+use crate::services::cc_config_checker::{ConfigScanResult, ProjectInfo, CleanTarget};
 use crate::models::{Project, ProjectConfig, CreateProjectInput, UpdateProjectInput, ProjectOrderItem, PinnedOrderItem};
 use std::collections::HashMap;
 use tauri::Manager;
@@ -455,6 +456,28 @@ pub fn launch_claude_for_login(proxy: Option<String>) -> Result<(), String> {
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| "~".to_string());
     Launcher::launch_with_config_and_dir(config, Some(home_dir))
+}
+
+// ============ CC Config Checker Commands ============
+
+#[tauri::command]
+pub fn scan_cc_config(projects: Vec<ProjectInfo>) -> ConfigScanResult {
+    CcConfigChecker::scan_all(&projects)
+}
+
+#[tauri::command]
+pub fn clean_cc_config_field(file_path: String, key: String) -> Result<(), String> {
+    CcConfigChecker::clean_field(&file_path, &key)
+}
+
+#[tauri::command]
+pub fn clean_cc_config_all(targets: Vec<CleanTarget>) -> Result<u32, String> {
+    CcConfigChecker::clean_all(&targets)
+}
+
+#[tauri::command]
+pub fn open_cc_config_file(file_path: String) -> Result<(), String> {
+    CcConfigChecker::open_file(&file_path)
 }
 
 // ============ Utility Commands ============

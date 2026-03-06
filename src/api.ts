@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { DependencyStatus, AppConfig } from './types';
-import type { Project, ProjectConfig, ProjectOrderItem, PinnedOrderItem, InstallStatus, HealthStatus, MobotServiceStatus } from './types/project';
+import type { Project, ProjectConfig, ProjectOrderItem, PinnedOrderItem, InstallStatus, HealthStatus, MobotServiceStatus, ConfigScanResult } from './types/project';
 
 export const api = {
   // 依赖检测
@@ -99,6 +99,18 @@ export const mobotApi = {
   getHostname: () => invoke<string>('get_hostname'),
   getUsername: () => invoke<string>('get_username'),
   isUpdating: () => invoke<boolean>('is_mobot_updating'),
+};
+
+// CC config checker API
+export const ccConfigApi = {
+  scan: (projects: { name: string; working_directory: string }[]) =>
+    invoke<ConfigScanResult>('scan_cc_config', { projects }),
+  cleanField: (filePath: string, key: string) =>
+    invoke<void>('clean_cc_config_field', { filePath, key }),
+  cleanAll: (targets: { file_path: string; key: string }[]) =>
+    invoke<number>('clean_cc_config_all', { targets }),
+  openFile: (filePath: string) =>
+    invoke<void>('open_cc_config_file', { filePath }),
 };
 
 // Claude login check API

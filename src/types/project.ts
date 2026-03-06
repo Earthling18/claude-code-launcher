@@ -71,6 +71,19 @@ export interface MobotServiceStatus {
   started_at: number | null;
 }
 
+// CC config checker types
+export interface ConfigConflict {
+  source: string;
+  file_path: string | null;
+  key: string;
+  value: string;
+  can_clean: boolean;
+}
+
+export interface ConfigScanResult {
+  conflicts: ConfigConflict[];
+}
+
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   mode: 'claude',
   proxy: '',

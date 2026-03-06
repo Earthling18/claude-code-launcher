@@ -97,6 +97,11 @@ pub fn run() {
             // Claude login check commands
             commands::check_claude_login,
             commands::launch_claude_for_login,
+            // CC config checker commands
+            commands::scan_cc_config,
+            commands::clean_cc_config_field,
+            commands::clean_cc_config_all,
+            commands::open_cc_config_file,
             // Utility commands
             commands::get_hostname,
             commands::get_username,

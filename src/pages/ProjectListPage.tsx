@@ -272,7 +272,7 @@ export const ProjectListPage: React.FC = () => {
       <div className="flex-1 overflow-auto">
         <div className="max-w-full p-4">
           {/* 依赖检测面板 — 返回用户静默检测 */}
-          <DependencyFrame />
+          <DependencyFrame projects={projects} platform={platform} />
 
           {/* 项目列表面板 */}
           <div className="px-5 py-3">
