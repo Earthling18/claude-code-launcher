@@ -320,10 +320,36 @@ pub fn set_onboarding_completed() -> Result<(), String> {
 // ============ Mobot Bridge Management Commands ============
 
 #[tauri::command]
-pub async fn detect_mobot_installation() -> InstallStatus {
-    tokio::task::spawn_blocking(BridgeManager::detect_installation)
+pub async fn detect_mobot_installation(app_handle: tauri::AppHandle) -> InstallStatus {
+    let status = tokio::task::spawn_blocking(BridgeManager::detect_installation)
         .await
-        .unwrap_or(InstallStatus::NotInstalled)
+        .unwrap_or(InstallStatus::NotInstalled);
+
+    // If installed, compare installed version with bundled version
+    // to force re-install when app is upgraded (e.g. master -> mobot branch)
+    if !matches!(status, InstallStatus::NotInstalled) {
+        if let Ok(resource_dir) = app_handle.path().resource_dir() {
+            let resource_dir_str = resource_dir.to_string_lossy();
+            let resource_dir_clean = resource_dir_str.strip_prefix(r"\\?\").unwrap_or(&resource_dir_str);
+            if let Ok(src) = BridgeManager::find_bridge_source_pub(resource_dir_clean) {
+                let bundled_version = std::fs::read_to_string(src.join("VERSION"))
+                    .unwrap_or_default().trim().to_string();
+                let installed_version = std::fs::read_to_string(
+                    BridgeManager::get_mobot_dir().join(".mobot_version")
+                ).unwrap_or_default().trim().to_string();
+
+                if !bundled_version.is_empty() && bundled_version != installed_version {
+                    log::info!(
+                        "Version mismatch: installed={}, bundled={} — forcing re-install",
+                        installed_version, bundled_version
+                    );
+                    return InstallStatus::NotInstalled;
+                }
+            }
+        }
+    }
+
+    status
 }
 
 #[tauri::command]

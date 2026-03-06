@@ -154,6 +154,18 @@ impl BridgeManager {
         std::fs::create_dir_all(&mobot_dir)
             .map_err(|e| format!("Failed to create mobot-bridge directory: {}", e))?;
 
+        // Clean directories that must be replaced entirely (version-sensitive binaries)
+        let python_embed_dir = mobot_dir.join("python-embed");
+        if python_embed_dir.is_dir() {
+            log::info!("Cleaning old python-embed/ for fresh install");
+            let _ = std::fs::remove_dir_all(&python_embed_dir);
+        }
+        let lib_dir = mobot_dir.join("lib");
+        if lib_dir.is_dir() {
+            log::info!("Cleaning old lib/ for fresh wheel extraction");
+            let _ = std::fs::remove_dir_all(&lib_dir);
+        }
+
         // Copy all files from source to target
         Self::copy_dir_recursive(&bridge_src, &mobot_dir)?;
 
@@ -184,13 +196,6 @@ impl BridgeManager {
             log::info!("Cleared .deps_installed marker to force dependency re-install");
         }
 
-        // Clean old lib/ so wheels get re-extracted with updated packages
-        let lib_dir = mobot_dir.join("lib");
-        if lib_dir.is_dir() {
-            log::info!("Cleaning old lib/ directory for fresh wheel extraction");
-            let _ = std::fs::remove_dir_all(&lib_dir);
-        }
-
         // Clean __pycache__ directories to avoid .pyc magic number mismatch
         // (e.g. switching from a different system Python to embedded Python 3.12)
         // NOTE: only clean __pycache__ dirs, NOT loose .pyc files — app/ uses .pyc as source
@@ -219,6 +224,11 @@ impl BridgeManager {
 
         log::info!("mobot-bridge installed successfully");
         Ok(mobot_dir.to_string_lossy().to_string())
+    }
+
+    /// Public wrapper for find_bridge_source (used by version check in commands)
+    pub fn find_bridge_source_pub(resource_dir: &str) -> Result<PathBuf, String> {
+        Self::find_bridge_source(resource_dir)
     }
 
     /// Find the bridge source directory in resources
