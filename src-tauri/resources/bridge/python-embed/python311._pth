@@ -1,0 +1,8 @@
+python311.zip
+.
+..
+../lib
+../lib/win32
+../lib/win32/lib
+../lib/pywin32_system32
+import site

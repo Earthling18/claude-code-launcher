@@ -138,6 +138,7 @@ export const DependencyFrame = () => {
   // Check if any issues exist
   const hasIssues = Object.values(deps).some(d => d.status && (!d.status.installed || d.status.update_available));
   const allChecked = Object.values(deps).every(d => d.status !== null);
+  const isInstalling = Object.values(deps).some(d => d.loading);
 
   // Don't show anything while initial check is running (no previous data)
   if (!allChecked && !checking) {
@@ -153,7 +154,9 @@ export const DependencyFrame = () => {
       <div className="px-5 py-1" data-onboarding="dependencies">
         <div className="flex items-center justify-between py-1">
           <div className="flex items-center gap-2">
-            {checking
+            {isInstalling
+              ? <span className="text-[10px] text-[#3b82f6]">⏳ 安装中...</span>
+              : checking
               ? <span className="text-[10px] text-[#999999]">⏳ 检测中...</span>
               : hasIssues
               ? <span className="text-[10px] text-yellow-500">⚠ 有更新可用</span>
@@ -199,7 +202,7 @@ export const DependencyFrame = () => {
               disabled={checking}
               className="px-3 py-1 text-[10px] bg-[#666666] hover:bg-[#555555] text-white rounded disabled:opacity-50"
             >
-              {checking ? '检测中...' : '检查更新'}
+              {isInstalling ? '安装中...' : checking ? '检测中...' : '检查更新'}
             </button>
             <button
               onClick={() => setExpanded(false)}

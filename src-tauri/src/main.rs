@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    claude_code_launcher_tauri_lib::run()
+    mobot_launcher_tauri_lib::run()
 }

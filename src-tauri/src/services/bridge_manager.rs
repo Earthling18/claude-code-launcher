@@ -48,16 +48,37 @@ const MAX_LOG_LINES: usize = 500;
 static MOBOT_PROCESS: Lazy<Mutex<Option<MobotProcess>>> = Lazy::new(|| Mutex::new(None));
 static BRIDGE_CLIENT_PROCESS: Lazy<Mutex<Option<Child>>> = Lazy::new(|| Mutex::new(None));
 static BRIDGE_CLIENT_STARTING: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
+static BRIDGE_CLIENT_LAST_FAIL: Lazy<Mutex<Option<std::time::Instant>>> = Lazy::new(|| Mutex::new(None));
 
 pub struct BridgeManager;
 
 impl BridgeManager {
-    /// Get the mobot-bridge install directory: ~/.config/claude-launcher/mobot-bridge/
+    /// Get the mobot-bridge install directory: ~/.config/mobot-launcher/mobot-bridge/
+    /// Migrates from old "claude-launcher" path if it exists.
     pub fn get_mobot_dir() -> PathBuf {
-        dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("claude-launcher")
-            .join("mobot-bridge")
+        let config_dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
+        let new_root = config_dir.join("mobot-launcher");
+        let old_root = config_dir.join("claude-launcher");
+
+        // Migrate: rename old directory to new if old exists and new doesn't
+        if old_root.exists() && !new_root.exists() {
+            log::info!(
+                "Migrating data directory: {} -> {}",
+                old_root.display(),
+                new_root.display()
+            );
+            if let Err(e) = std::fs::rename(&old_root, &new_root) {
+                log::error!("Migration failed (will use old path): {}", e);
+                return old_root.join("mobot-bridge");
+            }
+            // Force re-install after migration so new files get copied over
+            let mobot_dir = new_root.join("mobot-bridge");
+            let _ = std::fs::remove_file(mobot_dir.join(".mobot_version"));
+            let _ = std::fs::remove_file(mobot_dir.join(".deps_installed"));
+            log::info!("Cleared markers after migration to force re-install");
+        }
+
+        new_root.join("mobot-bridge")
     }
 
     /// Detect mobot-bridge installation status.
@@ -119,7 +140,7 @@ impl BridgeManager {
         }
 
         // Clean up legacy files that no longer exist in new version
-        let legacy_dirs = ["defaults", "python-embed", "wheels"];
+        let legacy_dirs = ["defaults"];
         for dir_name in &legacy_dirs {
             let legacy_dir = mobot_dir.join(dir_name);
             if legacy_dir.is_dir() {
@@ -133,6 +154,13 @@ impl BridgeManager {
         if deps_marker.exists() {
             let _ = std::fs::remove_file(&deps_marker);
             log::info!("Cleared .deps_installed marker to force dependency re-install");
+        }
+
+        // Clean old lib/ so wheels get re-extracted with updated packages
+        let lib_dir = mobot_dir.join("lib");
+        if lib_dir.is_dir() {
+            log::info!("Cleaning old lib/ directory for fresh wheel extraction");
+            let _ = std::fs::remove_dir_all(&lib_dir);
         }
 
         // Write version marker from VERSION file, or fallback
@@ -175,10 +203,31 @@ impl BridgeManager {
         marker.exists()
     }
 
-    /// Detect Python >= 3.10. Prefers venv python in mobot-bridge dir if available.
+    /// Detect Python >= 3.10. Priority: embedded python > venv > system python.
     pub fn detect_python() -> Option<String> {
-        // First check if mobot-bridge has a venv with python already
         let mobot_dir = Self::get_mobot_dir();
+
+        // First check for bundled python-embed (fully offline, no system Python needed)
+        #[cfg(windows)]
+        {
+            // python-embed stores python.exe as python.bin to avoid SmartScreen issues
+            let embed_python = mobot_dir.join("python-embed").join("python.exe");
+            let embed_python_bin = mobot_dir.join("python-embed").join("python.bin");
+            if embed_python.exists() {
+                log::info!("Using embedded Python: {}", embed_python.display());
+                return Some(embed_python.to_string_lossy().to_string());
+            }
+            if embed_python_bin.exists() {
+                // Rename python.bin -> python.exe for use
+                let exe_path = mobot_dir.join("python-embed").join("python.exe");
+                if std::fs::rename(&embed_python_bin, &exe_path).is_ok() {
+                    log::info!("Using embedded Python (renamed .bin -> .exe): {}", exe_path.display());
+                    return Some(exe_path.to_string_lossy().to_string());
+                }
+            }
+        }
+
+        // Then check venv
         #[cfg(not(windows))]
         {
             let venv_python = mobot_dir.join("venv").join("bin").join("python");
@@ -198,6 +247,7 @@ impl BridgeManager {
             }
         }
 
+        // Fall back to system Python
         #[cfg(windows)]
         {
             let candidates = ["py", "python3", "python"];
@@ -245,11 +295,23 @@ impl BridgeManager {
         }
     }
 
-    /// Install Python dependencies using pip (via venv on macOS/Linux)
+    /// Install Python dependencies.
+    /// Priority: offline wheels > online pip (via venv on macOS/Linux)
     /// Returns the python executable path to use for running the service
     pub fn install_dependencies(bridge_path: &str, python: &str) -> Result<String, String> {
         let bridge_dir = Path::new(bridge_path);
+        let wheels_dir = bridge_dir.join("wheels");
         let req_file = bridge_dir.join("requirements.txt");
+
+        // Check if we have offline wheels available
+        let has_wheels = wheels_dir.exists()
+            && std::fs::read_dir(&wheels_dir)
+                .map(|mut d| d.next().is_some())
+                .unwrap_or(false);
+
+        if has_wheels {
+            return Self::install_from_wheels(bridge_dir, python, &wheels_dir);
+        }
 
         if !req_file.exists() {
             return Err(format!(
@@ -258,7 +320,7 @@ impl BridgeManager {
             ));
         }
 
-        log::info!("Installing mobot-bridge dependencies...");
+        log::info!("Installing mobot-bridge dependencies (online)...");
 
         #[cfg(not(windows))]
         let pip_python = {
@@ -271,10 +333,6 @@ impl BridgeManager {
                 log::info!("Creating venv at {}", venv_dir.display());
                 let output = Command::new(python)
                     .args(["-m", "venv", &venv_dir.to_string_lossy()])
-                    .env("HTTP_PROXY", "")
-                    .env("HTTPS_PROXY", "")
-                    .env("http_proxy", "")
-                    .env("https_proxy", "")
                     .output()
                     .map_err(|e| format!("Failed to create venv: {}", e))?;
 
@@ -284,29 +342,15 @@ impl BridgeManager {
                 }
             }
 
-            // Upgrade pip first (clear proxy/SSL to avoid interference)
+            // Upgrade pip first
             let _ = Command::new(venv_python.to_string_lossy().to_string())
                 .args(["-m", "pip", "install", "--upgrade", "pip"])
-                .env("HTTP_PROXY", "")
-                .env("HTTPS_PROXY", "")
-                .env("http_proxy", "")
-                .env("https_proxy", "")
-                .env("SSL_CERT_FILE", "")
-                .env("REQUESTS_CA_BUNDLE", "")
-                .env("CURL_CA_BUNDLE", "")
                 .output();
 
             // Install deps using venv pip
             let output = Command::new(venv_pip.to_string_lossy().to_string())
                 .args(["install", "-r", &req_file.to_string_lossy()])
                 .current_dir(bridge_dir)
-                .env("HTTP_PROXY", "")
-                .env("HTTPS_PROXY", "")
-                .env("http_proxy", "")
-                .env("https_proxy", "")
-                .env("SSL_CERT_FILE", "")
-                .env("REQUESTS_CA_BUNDLE", "")
-                .env("CURL_CA_BUNDLE", "")
                 .output()
                 .map_err(|e| format!("Failed to run pip install: {}", e))?;
 
@@ -328,8 +372,6 @@ impl BridgeManager {
             let mut cmd = Command::new(python);
             cmd.args(["-m", "pip", "install", "-r", &req_file.to_string_lossy()])
                 .current_dir(bridge_dir);
-            cmd.env("HTTP_PROXY", "");
-            cmd.env("HTTPS_PROXY", "");
             {
                 use std::os::windows::process::CommandExt;
                 cmd.creation_flags(0x08000000);
@@ -360,6 +402,53 @@ impl BridgeManager {
         Ok(pip_python)
     }
 
+    /// Install dependencies from offline wheels directory by extracting them to lib/
+    fn install_from_wheels(bridge_dir: &Path, python: &str, wheels_dir: &Path) -> Result<String, String> {
+        let lib_dir = bridge_dir.join("lib");
+
+        // Skip if lib/ already has content (already extracted)
+        if lib_dir.exists() {
+            let has_content = std::fs::read_dir(&lib_dir)
+                .map(|mut d| d.next().is_some())
+                .unwrap_or(false);
+            if has_content {
+                log::info!("lib/ directory already populated, skipping wheel extraction");
+                let marker = bridge_dir.join(".deps_installed");
+                let _ = std::fs::write(&marker, "ok");
+                return Ok(python.to_string());
+            }
+        }
+
+        log::info!("Extracting wheels to lib/ directory...");
+
+        // Create lib/ directory
+        std::fs::create_dir_all(&lib_dir)
+            .map_err(|e| format!("Failed to create lib/ directory: {}", e))?;
+
+        // Extract each .whl file (wheels are just zip files)
+        if let Ok(entries) = std::fs::read_dir(wheels_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map(|e| e == "whl").unwrap_or(false) {
+                    let file = std::fs::File::open(&path)
+                        .map_err(|e| format!("Failed to open {}: {}", path.display(), e))?;
+                    let mut archive = zip::ZipArchive::new(file)
+                        .map_err(|e| format!("Failed to read wheel {}: {}", path.display(), e))?;
+                    archive.extract(&lib_dir)
+                        .map_err(|e| format!("Failed to extract {}: {}", path.display(), e))?;
+                    log::info!("Extracted: {}", path.file_name().unwrap_or_default().to_string_lossy());
+                }
+            }
+        }
+
+        // Write install marker
+        let marker = bridge_dir.join(".deps_installed");
+        let _ = std::fs::write(&marker, "ok");
+
+        log::info!("mobot-bridge dependencies extracted from wheels successfully");
+        Ok(python.to_string())
+    }
+
     /// Start mobot-bridge service
     pub fn start_service(bridge_path: &str, python: &str, port: u16) -> Result<u32, String> {
         let bridge_dir = Path::new(bridge_path);
@@ -388,6 +477,24 @@ impl BridgeManager {
             .env("WECOM_HOST", "127.0.0.1")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+
+        // Set PYTHONPATH: project root (for app/ imports) + lib/ (for wheel packages)
+        // Embedded python with ._pth doesn't auto-add cwd to sys.path
+        let lib_dir = bridge_dir.join("lib");
+        let mut pythonpath = bridge_dir.to_string_lossy().to_string();
+        if lib_dir.exists() {
+            let sep = if cfg!(windows) { ";" } else { ":" };
+            pythonpath = format!("{}{}{}", pythonpath, sep, lib_dir.to_string_lossy());
+        }
+        cmd.env("PYTHONPATH", &pythonpath);
+
+        // pywin32 needs its DLLs (pywintypes311.dll) on PATH
+        let pywin32_sys32 = lib_dir.join("pywin32_system32");
+        if pywin32_sys32.exists() {
+            let current_path = std::env::var("PATH").unwrap_or_default();
+            let sep = if cfg!(windows) { ";" } else { ":" };
+            cmd.env("PATH", format!("{}{}{}", pywin32_sys32.to_string_lossy(), sep, current_path));
+        }
 
         // Note: Do NOT clear proxy vars for Agent service — it needs proxy
         // to reach Anthropic API. Agent reads proxy from .env and manages it.
@@ -717,6 +824,24 @@ impl BridgeManager {
                     .env("PYTHONUTF8", "1")
                     .stdout(Stdio::null());
 
+                // Set PYTHONPATH: project root + lib/ for embedded python
+                let project_root = bridge_dir.parent().unwrap_or(&bridge_dir);
+                let lib_dir = project_root.join("lib");
+                let mut pythonpath = project_root.to_string_lossy().to_string();
+                if lib_dir.exists() {
+                    let sep = if cfg!(windows) { ";" } else { ":" };
+            pythonpath = format!("{}{}{}", pythonpath, sep, lib_dir.to_string_lossy());
+                }
+                cmd.env("PYTHONPATH", &pythonpath);
+
+                // pywin32 DLLs
+                let pywin32_sys32 = lib_dir.join("pywin32_system32");
+                if pywin32_sys32.exists() {
+                    let current_path = std::env::var("PATH").unwrap_or_default();
+                    let sep = if cfg!(windows) { ";" } else { ":" };
+                    cmd.env("PATH", format!("{}{}{}", pywin32_sys32.to_string_lossy(), sep, current_path));
+                }
+
                 match stderr_file {
                     Ok(f) => { cmd.stderr(Stdio::from(f)); }
                     Err(_) => { cmd.stderr(Stdio::null()); }
@@ -742,9 +867,17 @@ impl BridgeManager {
                         if let Ok(mut lock) = BRIDGE_CLIENT_PROCESS.lock() {
                             *lock = Some(child);
                         }
+                        // Clear failure cooldown on successful start
+                        if let Ok(mut last_fail) = BRIDGE_CLIENT_LAST_FAIL.lock() {
+                            *last_fail = None;
+                        }
                     }
                     Err(e) => {
                         log::error!("Failed to start bridge client: {}", e);
+                        // Record failure to prevent rapid retry
+                        if let Ok(mut last_fail) = BRIDGE_CLIENT_LAST_FAIL.lock() {
+                            *last_fail = Some(std::time::Instant::now());
+                        }
                     }
                 }
 
@@ -756,12 +889,21 @@ impl BridgeManager {
         });
     }
 
-    /// Ensure bridge client is running; restart if dead
+    /// Ensure bridge client is running; restart if dead (with 60s cooldown to avoid spam)
     fn ensure_bridge_client(bridge_path: &str, python: &str) {
         // Prevent concurrent starts
         if let Ok(starting) = BRIDGE_CLIENT_STARTING.lock() {
             if *starting {
                 return;
+            }
+        }
+
+        // Cooldown: don't retry within 60s of last failure
+        if let Ok(last_fail) = BRIDGE_CLIENT_LAST_FAIL.lock() {
+            if let Some(t) = *last_fail {
+                if t.elapsed() < std::time::Duration::from_secs(60) {
+                    return;
+                }
             }
         }
 
@@ -774,6 +916,10 @@ impl BridgeManager {
                 if lock.is_some() {
                     log::info!("Bridge client process died, restarting...");
                     *lock = None;
+                    // Record failure time
+                    if let Ok(mut last_fail) = BRIDGE_CLIENT_LAST_FAIL.lock() {
+                        *last_fail = Some(std::time::Instant::now());
+                    }
                 }
                 drop(lock);
                 Self::start_bridge_client(bridge_path, python);

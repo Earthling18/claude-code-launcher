@@ -34,5 +34,9 @@ lark-oapi>=1.0.0
 # 进程管理
 psutil>=5.9.0
 
+# Bridge Client (bridge_clientv3.py)
+aiohttp>=3.9.0
+websockets>=12.0
+
 # 其他
 python-dotenv>=1.0.0

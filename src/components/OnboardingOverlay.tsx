@@ -11,7 +11,7 @@ interface OnboardingStep {
 const ONBOARDING_STEPS: OnboardingStep[] = [
   {
     id: 'welcome',
-    title: '欢迎使用 Claude Code 启动器',
+    title: '欢迎使用 Mobot Launcher',
     description: '这是一个帮助您管理和启动 Claude Code 项目的工具。接下来让我们快速了解主要功能。',
     position: 'center',
   },
