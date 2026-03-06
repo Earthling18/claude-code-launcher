@@ -1,0 +1,484 @@
+"""
+用户会话管理器 - 管理用户的消息队列和 SDK 任务
+
+v2.7 优化：
+- 使用 Streaming Input 方案：消息在同一 ClaudeSDKClient 连接中顺序处理
+- 无需中断机制，新消息自然排队等待当前消息处理完成
+- 多轮对话上下文通过同一连接自动保持
+- 零内存泄漏：连接随 UserSession 生命周期管理
+"""
+import asyncio
+import logging
+import os
+import platform
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from claude_agent_sdk import ClaudeSDKClient, ClaudeAgentOptions
+
+from app.config import settings
+from app.core.query_parser import ParsedQuery
+from app.core.progress_pusher import ProgressPusher
+
+logger = logging.getLogger(__name__)
+
+
+def _log_stderr(line: str) -> None:
+    """记录 CLI 的 stderr 输出"""
+    if not line or not line.strip():
+        return
+    line_lower = line.lower()
+    if "prompt is too long" in line_lower or "context" in line_lower:
+        logger.warning(f"[CLI STDERR] Context limit warning: {line}")
+    elif "error" in line_lower or "failed" in line_lower:
+        logger.warning(f"[CLI STDERR] Error: {line}")
+    else:
+        logger.debug(f"[CLI STDERR] {line}")
+
+
+@dataclass
+class UserSessionContext:
+    """用户会话上下文"""
+    user_id: str
+    session_id: str
+    user_name: Optional[str] = None
+    user_token: Optional[str] = None
+    conversation_id: Optional[str] = None
+    group_chat_name: Optional[str] = None
+    workspace: Optional[Path] = None
+    conversation_type: Optional[str] = None  # 企微会话类型：'GROUP' 或 'PRIVATE'
+
+
+class UserSession:
+    """
+    用户会话：管理消息队列和 SDK 长连接
+
+    v2.7 架构（Streaming Input 方案）：
+    1. 首条消息到达 → 创建 ClaudeSDKClient 连接，启动处理循环
+    2. 消息在同一连接中顺序处理（query → receive_response）
+    3. 后续消息入队等待，当前消息完成后自动处理下一条
+    4. 多轮对话上下文在同一连接中自动保持
+    5. 会话超时 → 关闭连接
+
+    关键特性：
+    - 无中断机制：新消息不会中断当前处理，而是排队等待
+    - 零内存泄漏：连接随 UserSession 生命周期管理
+    - 上下文保持：同一连接中的多次 query() 共享对话历史
+    """
+
+    # 消息队列超时（秒）：超时后结束消息流
+    MESSAGE_QUEUE_TIMEOUT = 300  # 5 分钟
+
+    def __init__(self, user_id: str, context: UserSessionContext):
+        self.user_id = user_id
+        self.context = context
+        self.message_queue: asyncio.Queue[ParsedQuery] = asyncio.Queue()
+        self.sdk_task: Optional[asyncio.Task] = None
+        self.pusher: Optional[ProgressPusher] = None
+        self._running = False
+        self._created_at = time.time()
+        self._last_activity = time.time()
+
+        # 处理函数（由外部注入，用于文件处理等）
+        self._process_func: Optional[Callable] = None
+
+        # v2.7: SDK 长连接（内聚到 UserSession）
+        self._client: Optional[ClaudeSDKClient] = None
+        self._is_connected = False
+        self._connection_lock = asyncio.Lock()  # 保护连接操作
+
+    @property
+    def is_running(self) -> bool:
+        """检查 SDK 任务是否正在运行"""
+        return self._running and self.sdk_task is not None and not self.sdk_task.done()
+
+    @property
+    def age_seconds(self) -> float:
+        """会话存在时间（秒）"""
+        return time.time() - self._created_at
+
+    @property
+    def idle_seconds(self) -> float:
+        """空闲时间（秒）"""
+        return time.time() - self._last_activity
+
+    def set_process_func(self, func: Callable):
+        """设置处理函数"""
+        self._process_func = func
+
+    def _build_sdk_options(self) -> ClaudeAgentOptions:
+        """构建 SDK 选项"""
+        from app.core.agent_service import agent_service
+
+        project_root = Path(__file__).parent.parent.parent.resolve()
+
+        options_kwargs = {
+            "model": settings.claude_model,
+            "system_prompt": agent_service._build_system_prompt(
+                workspace_path=str(self.context.workspace),
+                conversation_id=self.context.conversation_id,
+                is_group=self._is_group(),
+            ),
+            "allowed_tools": agent_service.allowed_tools,
+            "cwd": str(project_root),
+            "setting_sources": ["user", "project"],
+            "max_buffer_size": 50 * 1024 * 1024,  # 50MB
+            "stderr": _log_stderr,
+        }
+
+        if settings.claude_cli_path:
+            options_kwargs["cli_path"] = settings.claude_cli_path
+
+        options = ClaudeAgentOptions(**options_kwargs)
+
+        # MCP 配置
+        options.mcp_servers = agent_service._build_mcp_servers(self.context.workspace)
+
+        return options
+
+    def _is_group(self) -> bool:
+        """判断是否群聊"""
+        conv_type = self.context.conversation_type
+        return conv_type == "GROUP" if conv_type else bool(self.context.group_chat_name)
+
+    async def _ensure_connection(self) -> bool:
+        """
+        确保 SDK 连接存在
+
+        Returns:
+            True 如果连接成功，False 如果失败
+        """
+        async with self._connection_lock:
+            if self._is_connected and self._client is not None:
+                return True
+
+            try:
+                options = self._build_sdk_options()
+                self._client = ClaudeSDKClient(options=options)
+                await self._client.__aenter__()
+                self._is_connected = True
+                logger.info(f"[SESSION] User {self.user_id}: SDK connection established")
+                return True
+            except Exception as e:
+                logger.error(f"[SESSION] User {self.user_id}: SDK connection failed: {e}")
+                self._is_connected = False
+                self._client = None
+                return False
+
+    async def _close_connection(self):
+        """关闭 SDK 连接"""
+        async with self._connection_lock:
+            if self._is_connected and self._client is not None:
+                try:
+                    await self._client.__aexit__(None, None, None)
+                    logger.info(f"[SESSION] User {self.user_id}: SDK connection closed")
+                except Exception as e:
+                    logger.error(f"[SESSION] User {self.user_id}: SDK close error: {e}")
+                finally:
+                    self._is_connected = False
+                    self._client = None
+
+    async def add_message(self, parsed: ParsedQuery) -> bool:
+        """
+        添加消息到队列
+
+        v2.7 改进：
+        - 消息入队后自然等待处理
+        - 无中断机制，当前消息完成后自动处理下一条
+
+        Args:
+            parsed: 解析后的请求
+
+        Returns:
+            True 如果启动了新任务，False 如果追加到现有任务
+        """
+        self._last_activity = time.time()
+        await self.message_queue.put(parsed)
+        logger.info(f"[SESSION] User {self.user_id}: Message added to queue (queue_size={self.message_queue.qsize()})")
+
+        if not self._running:
+            # 首条消息：启动 SDK 任务
+            self._running = True
+            self.sdk_task = asyncio.create_task(self._run_sdk_task())
+            logger.info(f"[SESSION] User {self.user_id}: SDK task started")
+            return True
+        else:
+            # 后续消息：入队等待（无中断）
+            logger.info(f"[SESSION] User {self.user_id}: Message queued, waiting for current task")
+            return False
+
+    async def _get_next_message(self) -> Optional[ParsedQuery]:
+        """
+        从队列获取下一条消息
+
+        Returns:
+            ParsedQuery 或 None（超时）
+        """
+        try:
+            parsed = await asyncio.wait_for(
+                self.message_queue.get(),
+                timeout=self.MESSAGE_QUEUE_TIMEOUT
+            )
+            return parsed
+        except asyncio.TimeoutError:
+            logger.info(f"[SESSION] User {self.user_id}: No new messages, timeout after {self.MESSAGE_QUEUE_TIMEOUT}s")
+            return None
+
+    async def _run_sdk_task(self):
+        """运行 SDK 任务循环"""
+        logger.info(f"[SESSION] User {self.user_id}: SDK task loop started")
+
+        try:
+            # 建立 SDK 连接
+            connected = await self._ensure_connection()
+            if not connected:
+                logger.error(f"[SESSION] User {self.user_id}: Failed to establish SDK connection")
+                return
+
+            while self._running:
+                # 获取下一条消息
+                parsed = await self._get_next_message()
+                if parsed is None:
+                    # 超时，结束会话
+                    logger.info(f"[SESSION] User {self.user_id}: Ending session due to timeout")
+                    break
+
+                # 处理消息
+                await self._process_single_message(parsed)
+
+                # 检查队列是否还有消息
+                if self.message_queue.empty():
+                    # 短暂等待，看是否有新消息到来
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.sleep(2.0),  # 等待 2 秒
+                            timeout=2.0
+                        )
+                    except asyncio.CancelledError:
+                        break
+
+                    if self.message_queue.empty():
+                        # 队列仍为空，继续循环等待新消息
+                        logger.info(f"[SESSION] User {self.user_id}: Queue empty, waiting for next message")
+
+        except asyncio.CancelledError:
+            logger.info(f"[SESSION] User {self.user_id}: SDK task cancelled")
+        except Exception as e:
+            logger.error(f"[SESSION] User {self.user_id}: SDK task error: {e}")
+            import traceback
+            logger.error(f"[SESSION] Traceback:\n{traceback.format_exc()}")
+            if self.pusher:
+                await self.pusher.send_error()
+        finally:
+            self._running = False
+            await self._close_connection()
+            if self.pusher:
+                await self.pusher.stop()
+            logger.info(f"[SESSION] User {self.user_id}: SDK task loop ended")
+
+    async def _process_single_message(self, parsed: ParsedQuery):
+        """
+        处理单条消息（使用长连接）
+
+        v2.7 改进：
+        - 使用同一 ClaudeSDKClient 连接
+        - 多轮对话上下文自动保持
+        - 无中断机制
+
+        Args:
+            parsed: 解析后的请求
+        """
+        logger.info(f"[SESSION] User {self.user_id}: Processing message: text='{parsed.text[:50] if parsed.text else 'EMPTY'}...', files={len(parsed.files)}")
+
+        # 创建进度推送器
+        is_group = self._is_group()
+
+        logger.info(
+            f"[PUSHER CONTEXT] conversation_id={self.context.conversation_id}, "
+            f"conversation_type={self.context.conversation_type}, is_group={is_group}"
+        )
+
+        pusher_context = {
+            "conversation_id": self.context.conversation_id,
+            "user_name": self.context.user_name,
+            "group_chat_name": self.context.group_chat_name,
+            "is_group": is_group,
+        }
+        self.pusher = ProgressPusher(pusher_context)
+        await self.pusher.start()
+
+        try:
+            # 调用处理函数（处理文件下载等）
+            if self._process_func:
+                result = await self._process_func(
+                    user_id=self.user_id,
+                    parsed=parsed,
+                    session_id=self.context.session_id,
+                    user_name=self.context.user_name,
+                    user_token=self.context.user_token,
+                    pusher=self.pusher,
+                    conversation_id=self.context.conversation_id,
+                    group_chat_name=self.context.group_chat_name,
+                    conversation_type=self.context.conversation_type,
+                    # v2.7: 传递 SDK 客户端，让处理函数使用长连接
+                    sdk_client=self._client,
+                )
+
+                # SDK 处理完成后停止 pusher 的推送循环
+                await self.pusher.stop_push_loop()
+
+                # 发送最终结果
+                if result and hasattr(result, "message_list") and result.message_list:
+                    await self.pusher.send_final_result(result.message_list)
+                else:
+                    logger.warning(f"[SESSION] User {self.user_id}: Empty result")
+
+        except asyncio.CancelledError:
+            logger.info(f"[SESSION] User {self.user_id}: Processing cancelled")
+        except Exception as e:
+            logger.error(f"[SESSION] User {self.user_id}: Processing error: {e}")
+            import traceback
+            logger.error(f"[SESSION] Traceback:\n{traceback.format_exc()}")
+            await self.pusher.send_error()
+
+        finally:
+            await self.pusher.stop()
+            self.pusher = None
+
+    async def stop(self):
+        """停止会话"""
+        self._running = False
+
+        if self.sdk_task:
+            self.sdk_task.cancel()
+            try:
+                await self.sdk_task
+            except asyncio.CancelledError:
+                pass
+            self.sdk_task = None
+
+        await self._close_connection()
+
+        if self.pusher:
+            await self.pusher.stop()
+            self.pusher = None
+
+        logger.info(f"[SESSION] User {self.user_id}: Session stopped")
+
+
+class UserSessionManager:
+    """
+    用户会话管理器
+
+    维护 per-user 的 UserSession，支持：
+    - 首条消息创建会话
+    - 后续消息追加到会话
+    - 会话超时清理
+    """
+
+    # 会话超时（秒）：超过此时间无活动则清理
+    SESSION_TIMEOUT = 1800  # 30 分钟
+
+    def __init__(self):
+        self._sessions: Dict[str, UserSession] = {}
+        self._global_lock = asyncio.Lock()
+        self._cleanup_task: Optional[asyncio.Task] = None
+
+    async def start(self):
+        """启动管理器"""
+        self._cleanup_task = asyncio.create_task(self._cleanup_loop())
+        logger.info("[SESSION_MGR] Started")
+
+    async def stop(self):
+        """停止管理器"""
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+
+        # 停止所有会话
+        async with self._global_lock:
+            for session in self._sessions.values():
+                await session.stop()
+            self._sessions.clear()
+
+        logger.info("[SESSION_MGR] Stopped")
+
+    async def get_or_create_session(
+        self,
+        user_id: str,
+        context: UserSessionContext,
+        process_func: Callable,
+    ) -> Tuple[UserSession, bool]:
+        """
+        获取或创建用户会话
+
+        Args:
+            user_id: 用户 ID
+            context: 会话上下文
+            process_func: 处理函数
+
+        Returns:
+            (UserSession, is_new) - 会话对象和是否新创建
+        """
+        async with self._global_lock:
+            # 检查现有会话
+            if user_id in self._sessions:
+                session = self._sessions[user_id]
+                # 检查会话是否仍在运行
+                if session.is_running:
+                    # 复用时更新上下文（修复私聊/群聊切换问题）
+                    session.context = context
+                    logger.info(f"[SESSION_MGR] User {user_id}: Reusing existing session (context updated)")
+                    return session, False
+                else:
+                    # 会话已结束，创建新会话
+                    logger.info(f"[SESSION_MGR] User {user_id}: Previous session ended, creating new")
+
+            # 创建新会话
+            session = UserSession(user_id, context)
+            session.set_process_func(process_func)
+            self._sessions[user_id] = session
+            logger.info(f"[SESSION_MGR] User {user_id}: New session created")
+            return session, True
+
+    async def remove_session(self, user_id: str):
+        """移除会话"""
+        async with self._global_lock:
+            if user_id in self._sessions:
+                session = self._sessions.pop(user_id)
+                await session.stop()
+                logger.info(f"[SESSION_MGR] User {user_id}: Session removed")
+
+    async def _cleanup_loop(self):
+        """定期清理超时会话"""
+        while True:
+            try:
+                await asyncio.sleep(60)  # 每分钟检查一次
+
+                async with self._global_lock:
+                    to_remove = []
+                    for user_id, session in self._sessions.items():
+                        if session.idle_seconds > self.SESSION_TIMEOUT and not session.is_running:
+                            to_remove.append(user_id)
+
+                    for user_id in to_remove:
+                        session = self._sessions.pop(user_id)
+                        await session.stop()
+                        logger.info(f"[SESSION_MGR] User {user_id}: Session cleaned up (idle={session.idle_seconds:.0f}s)")
+
+                    if to_remove:
+                        logger.info(f"[SESSION_MGR] Cleaned up {len(to_remove)} sessions, remaining={len(self._sessions)}")
+
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(f"[SESSION_MGR] Cleanup error: {e}")
+
+
+# 全局实例
+user_session_manager = UserSessionManager()
