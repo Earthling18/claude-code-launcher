@@ -69,13 +69,16 @@ export const MobotSetupWizard: React.FC<MobotSetupWizardProps> = ({
       updateStep(1, { status: 'done' });
       addLog(`mobot-bridge 已安装到: ${installPath}`);
 
+      // Re-detect python after install (install may have cleaned and re-copied python-embed/)
+      const pythonAfterInstall = await mobotApi.detectPython() || python;
+
       // Step 2: Install dependencies
       setCurrentStep(2);
       updateStep(2, { status: 'running' });
       addLog('正在安装 Python 依赖包，请稍候...');
 
       // installDeps returns the python path to use (venv python on macOS/Linux)
-      const servicePython = await mobotApi.installDeps(installPath, python);
+      const servicePython = await mobotApi.installDeps(installPath, pythonAfterInstall);
       updateStep(2, { status: 'done' });
       addLog('依赖安装完成');
 
