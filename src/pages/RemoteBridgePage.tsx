@@ -26,6 +26,7 @@ export const RemoteBridgePage: React.FC = () => {
   const pollRef = useRef<number | null>(null);
   const lastAutoStartRef = useRef<number>(0);
   const hasEverLoaded = useRef(false);
+  const iframeMountedAt = useRef<number>(0);
 
   useEffect(() => {
     getCurrentWindow().maximize().catch(() => {});
@@ -149,6 +150,20 @@ export const RemoteBridgePage: React.FC = () => {
     }
   };
 
+
+  // Auto-dismiss loading overlay after iframe mounts (don't wait for onLoad)
+  useEffect(() => {
+    if ((status?.healthy || hasEverLoaded.current) && !iframeLoaded && !iframeError) {
+      if (!iframeMountedAt.current) {
+        iframeMountedAt.current = Date.now();
+      }
+      const timer = setTimeout(() => {
+        setIframeLoaded(true);
+        hasEverLoaded.current = true;
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [status?.healthy, iframeLoaded, iframeError]);
 
   // Poll logs when visible
   useEffect(() => {
