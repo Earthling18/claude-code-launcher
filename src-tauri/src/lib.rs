@@ -81,6 +81,7 @@ pub fn run() {
             commands::check_mobot_health,
             commands::get_mobot_status,
             commands::get_mobot_logs,
+            commands::is_mobot_updating,
             // Claude login check commands
             commands::check_claude_login,
             commands::launch_claude_for_login,

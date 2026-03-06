@@ -39,12 +39,15 @@ struct MobotProcess {
     port: u16,
     started_at: u64,
     install_path: String,
+    python_path: String,
     logs: std::collections::VecDeque<String>,
 }
 
 const MAX_LOG_LINES: usize = 500;
 
 static MOBOT_PROCESS: Lazy<Mutex<Option<MobotProcess>>> = Lazy::new(|| Mutex::new(None));
+static BRIDGE_CLIENT_PROCESS: Lazy<Mutex<Option<Child>>> = Lazy::new(|| Mutex::new(None));
+static BRIDGE_CLIENT_STARTING: Lazy<Mutex<bool>> = Lazy::new(|| Mutex::new(false));
 
 pub struct BridgeManager;
 
@@ -113,6 +116,23 @@ impl BridgeManager {
         let mcp_example = mobot_dir.join("mcp.json.example");
         if mcp_example.exists() {
             let _ = std::fs::rename(&mcp_example, mobot_dir.join(".mcp.json.example"));
+        }
+
+        // Clean up legacy files that no longer exist in new version
+        let legacy_dirs = ["defaults", "python-embed", "wheels"];
+        for dir_name in &legacy_dirs {
+            let legacy_dir = mobot_dir.join(dir_name);
+            if legacy_dir.is_dir() {
+                log::info!("Removing legacy directory: {}", legacy_dir.display());
+                let _ = std::fs::remove_dir_all(&legacy_dir);
+            }
+        }
+
+        // Force re-install dependencies (requirements may have changed)
+        let deps_marker = mobot_dir.join(".deps_installed");
+        if deps_marker.exists() {
+            let _ = std::fs::remove_file(&deps_marker);
+            log::info!("Cleared .deps_installed marker to force dependency re-install");
         }
 
         // Write version marker from VERSION file, or fallback
@@ -369,11 +389,8 @@ impl BridgeManager {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
-        // Clear proxy vars
-        cmd.env("HTTP_PROXY", "");
-        cmd.env("HTTPS_PROXY", "");
-        cmd.env("http_proxy", "");
-        cmd.env("https_proxy", "");
+        // Note: Do NOT clear proxy vars for Agent service — it needs proxy
+        // to reach Anthropic API. Agent reads proxy from .env and manages it.
 
         #[cfg(windows)]
         {
@@ -398,6 +415,7 @@ impl BridgeManager {
             port,
             started_at: now,
             install_path: bridge_path.to_string(),
+            python_path: python.to_string(),
             logs: std::collections::VecDeque::with_capacity(MAX_LOG_LINES),
         };
 
@@ -410,11 +428,17 @@ impl BridgeManager {
         // Start log collection
         Self::start_log_collection();
 
+        // Start bridge client (bridge_clientv3.py) as a separate process
+        Self::start_bridge_client(bridge_path, python);
+
         Ok(pid)
     }
 
-    /// Stop mobot-bridge service
+    /// Stop mobot-bridge service (both Agent and Bridge Client)
     pub fn stop_service() -> Result<(), String> {
+        // Stop bridge client first
+        Self::stop_bridge_client();
+
         let mut proc_lock = MOBOT_PROCESS
             .lock()
             .map_err(|e| format!("Lock error: {}", e))?;
@@ -514,6 +538,12 @@ impl BridgeManager {
 
         if let Some(ref process) = *proc_lock {
             let health = Self::check_health(process.port);
+
+            // Auto-restart bridge client if service is healthy but client died
+            if health.healthy {
+                Self::ensure_bridge_client(&process.install_path, &process.python_path);
+            }
+
             MobotServiceStatus {
                 installed: true,
                 running: true,
@@ -557,6 +587,9 @@ impl BridgeManager {
 
     /// Stop all processes (called on app exit)
     pub fn stop_all() {
+        // Stop bridge client
+        Self::stop_bridge_client();
+
         let mut proc_lock = match MOBOT_PROCESS.lock() {
             Ok(p) => p,
             Err(_) => return,
@@ -593,7 +626,171 @@ impl BridgeManager {
             .to_lowercase()
     }
 
+    /// Check if mobot-bridge is currently updating (restart_helper.py or update.py running)
+    pub fn is_updating() -> bool {
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            // Check for update.py or restart_helper.py in process list
+            if let Ok(output) = Command::new("cmd")
+                .args(&["/c", "tasklist /FI \"IMAGENAME eq python*\" /FO CSV /NH"])
+                .creation_flags(CREATE_NO_WINDOW)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .output()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout).to_lowercase();
+                // Also check via wmic for command line args
+                if let Ok(wmic_out) = Command::new("cmd")
+                    .args(&["/c", "wmic process where \"name like '%python%'\" get commandline /format:list"])
+                    .creation_flags(CREATE_NO_WINDOW)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::null())
+                    .output()
+                {
+                    let cmdlines = String::from_utf8_lossy(&wmic_out.stdout).to_lowercase();
+                    if cmdlines.contains("update.py") || cmdlines.contains("restart_helper.py") {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+
+        #[cfg(not(windows))]
+        {
+            if let Ok(output) = Command::new("sh")
+                .args(&["-c", "ps aux | grep -E 'update\\.py|restart_helper\\.py' | grep -v grep"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .output()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                return !stdout.trim().is_empty();
+            }
+            false
+        }
+    }
+
     // ==================== Private helpers ====================
+
+    /// Start bridge_clientv3.py as a separate process
+    fn start_bridge_client(bridge_path: &str, python: &str) {
+        let bridge_dir = Path::new(bridge_path).join("bridge");
+        let script = bridge_dir.join("bridge_clientv3.py");
+
+        if !script.exists() {
+            log::info!("Bridge client script not found at {}, skipping", script.display());
+            return;
+        }
+
+        // Wait a bit for the Agent service to be ready
+        std::thread::spawn({
+            let python = python.to_string();
+            let bridge_dir = bridge_dir.clone();
+            let script = script.clone();
+            move || {
+                // Mark as starting to prevent concurrent launches
+                if let Ok(mut starting) = BRIDGE_CLIENT_STARTING.lock() {
+                    *starting = true;
+                }
+
+                // Wait for Agent to start listening before launching bridge client
+                std::thread::sleep(std::time::Duration::from_secs(5));
+
+                log::info!("Starting bridge client: {}", script.display());
+
+                // Redirect stderr to a log file so we can diagnose crashes
+                let stderr_log = bridge_dir.join("bridge_client_stderr.log");
+                let stderr_file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(&stderr_log);
+
+                let mut cmd = Command::new(&python);
+                cmd.arg("-u")
+                    .arg(script.to_string_lossy().to_string())
+                    .current_dir(&bridge_dir)
+                    .env("PYTHONUNBUFFERED", "1")
+                    .env("PYTHONIOENCODING", "utf-8")
+                    .env("PYTHONUTF8", "1")
+                    .stdout(Stdio::null());
+
+                match stderr_file {
+                    Ok(f) => { cmd.stderr(Stdio::from(f)); }
+                    Err(_) => { cmd.stderr(Stdio::null()); }
+                }
+
+                // Bridge must NOT use proxy
+                cmd.env_remove("HTTP_PROXY");
+                cmd.env_remove("HTTPS_PROXY");
+                cmd.env_remove("ALL_PROXY");
+                cmd.env_remove("http_proxy");
+                cmd.env_remove("https_proxy");
+                cmd.env_remove("all_proxy");
+
+                #[cfg(windows)]
+                {
+                    use std::os::windows::process::CommandExt;
+                    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+                }
+
+                match cmd.spawn() {
+                    Ok(child) => {
+                        log::info!("Bridge client started, pid={}", child.id());
+                        if let Ok(mut lock) = BRIDGE_CLIENT_PROCESS.lock() {
+                            *lock = Some(child);
+                        }
+                    }
+                    Err(e) => {
+                        log::error!("Failed to start bridge client: {}", e);
+                    }
+                }
+
+                // Clear starting flag
+                if let Ok(mut starting) = BRIDGE_CLIENT_STARTING.lock() {
+                    *starting = false;
+                }
+            }
+        });
+    }
+
+    /// Ensure bridge client is running; restart if dead
+    fn ensure_bridge_client(bridge_path: &str, python: &str) {
+        // Prevent concurrent starts
+        if let Ok(starting) = BRIDGE_CLIENT_STARTING.lock() {
+            if *starting {
+                return;
+            }
+        }
+
+        if let Ok(mut lock) = BRIDGE_CLIENT_PROCESS.lock() {
+            let alive = match *lock {
+                Some(ref mut child) => child.try_wait().ok().flatten().is_none(),
+                None => false,
+            };
+            if !alive {
+                if lock.is_some() {
+                    log::info!("Bridge client process died, restarting...");
+                    *lock = None;
+                }
+                drop(lock);
+                Self::start_bridge_client(bridge_path, python);
+            }
+        }
+    }
+
+    /// Stop the bridge client process
+    fn stop_bridge_client() {
+        if let Ok(mut lock) = BRIDGE_CLIENT_PROCESS.lock() {
+            if let Some(ref mut child) = *lock {
+                log::info!("Stopping bridge client, pid={}", child.id());
+                Self::kill_child(child);
+            }
+            *lock = None;
+        }
+    }
 
     fn try_graceful_shutdown(port: u16) -> bool {
         let url = format!("http://127.0.0.1:{}/api/config/shutdown", port);

@@ -1,393 +1,247 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { api } from '../api';
 import type { DependencyStatus } from '../types';
 
-// Read cache once for initial state to avoid flicker on re-mount
-const getInitialCache = () => {
-  try {
-    const cached = sessionStorage.getItem('dependencyStatus');
-    if (cached) return JSON.parse(cached);
-  } catch (_) {}
-  return null;
-};
-
 export const DependencyFrame = () => {
-  const initialCache = getInitialCache();
-  const [nodejsStatus, setNodejsStatus] = useState<DependencyStatus | null>(initialCache?.nodejs || null);
-  const [claudeStatus, setClaudeStatus] = useState<DependencyStatus | null>(initialCache?.claude || null);
-  const [gitbashStatus, setGitbashStatus] = useState<DependencyStatus | null>(initialCache?.gitbash || null);
-  const [codexStatus, setCodexStatus] = useState<DependencyStatus | null>(initialCache?.codex || null);
-  const [nodejsLoading, setNodejsLoading] = useState(false);
-  const [claudeLoading, setClaudeLoading] = useState(false);
-  const [gitbashLoading, setGitbashLoading] = useState(false);
-  const [codexLoading, setCodexLoading] = useState(false);
+  const [deps, setDeps] = useState<Record<string, { status: DependencyStatus | null; loading: boolean }>>({
+    nodejs: { status: null, loading: false },
+    git: { status: null, loading: false },
+    claude: { status: null, loading: false },
+    codex: { status: null, loading: false },
+  });
+  const [checking, setChecking] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const hasChecked = useRef(false);
 
-  // 首次无缓存时自动检测
+  const depConfig: Record<string, { label: string; checkFn: () => Promise<DependencyStatus>; installFn: () => Promise<unknown>; updateFn: () => Promise<unknown>; checkUpdateFn: () => Promise<DependencyStatus> }> = {
+    nodejs: { label: 'Node.js', checkFn: api.checkNodejs, installFn: api.installNodejs, updateFn: api.updateNodejs, checkUpdateFn: api.checkNodejsWithUpdate },
+    git: { label: 'Git', checkFn: api.checkGitbash, installFn: api.installGitbash, updateFn: api.updateGitbash, checkUpdateFn: api.checkGitbashWithUpdate },
+    claude: { label: 'Claude Code', checkFn: api.checkClaude, installFn: api.installClaude, updateFn: api.updateClaude, checkUpdateFn: api.checkClaudeWithUpdate },
+    codex: { label: 'Codex', checkFn: api.checkCodex, installFn: api.installCodex, updateFn: api.updateCodex, checkUpdateFn: api.checkCodexWithUpdate },
+  };
+
+  // Parallel silent check on mount
   useEffect(() => {
-    if (initialCache) return;
-    setTimeout(() => {
-      checkInstallationOnly();
-    }, 100);
+    if (hasChecked.current) return;
+    hasChecked.current = true;
+
+    // Use cached results if available
+    try {
+      const cached = sessionStorage.getItem('dependencyStatus');
+      if (cached) {
+        const c = JSON.parse(cached);
+        setDeps({
+          nodejs: { status: c.nodejs || null, loading: false },
+          git: { status: c.gitbash || null, loading: false },
+          claude: { status: c.claude || null, loading: false },
+          codex: { status: c.codex || null, loading: false },
+        });
+        return;
+      }
+    } catch (_) {}
+
+    runParallelCheck();
   }, []);
 
-  const checkInstallationOnly = async () => {
+  const runParallelCheck = async () => {
+    setChecking(true);
     try {
-      const nodeResult = await api.checkNodejs();
-      await new Promise(resolve => setTimeout(resolve, 200));
-      setNodejsStatus(nodeResult);
+      const [nodeResult, gitResult, claudeResult, codexResult] = await Promise.all([
+        api.checkNodejs().catch(() => null),
+        api.checkGitbash().catch(() => null),
+        api.checkClaude().catch(() => null),
+        api.checkCodex().catch(() => null),
+      ]);
 
-      const claudeResult = await api.checkClaude();
-      await new Promise(resolve => setTimeout(resolve, 200));
-      setClaudeStatus(claudeResult);
+      const newDeps = {
+        nodejs: { status: nodeResult, loading: false },
+        git: { status: gitResult, loading: false },
+        claude: { status: claudeResult, loading: false },
+        codex: { status: codexResult, loading: false },
+      };
+      setDeps(newDeps);
 
-      const gitbashResult = await api.checkGitbash();
-      await new Promise(resolve => setTimeout(resolve, 200));
-      setGitbashStatus(gitbashResult);
+      // Auto-expand only if something is missing (not for updates)
+      const hasMissing = [nodeResult, gitResult, claudeResult, codexResult].some(r => r && !r.installed);
+      if (hasMissing) setExpanded(true);
 
-      const codexResult = await api.checkCodex();
-      await new Promise(resolve => setTimeout(resolve, 200));
-      setCodexStatus(codexResult);
-
-      // 缓存检测结果到 sessionStorage
       sessionStorage.setItem('dependencyStatus', JSON.stringify({
         nodejs: nodeResult,
+        gitbash: gitResult,
         claude: claudeResult,
-        gitbash: gitbashResult,
         codex: codexResult,
       }));
     } catch (error) {
       console.error('检测失败:', error);
+    } finally {
+      setChecking(false);
     }
   };
 
   const checkWithUpdates = async () => {
-    // 清除缓存，重新检测
     sessionStorage.removeItem('dependencyStatus');
-    setNodejsStatus(null);
-    setClaudeStatus(null);
-    setGitbashStatus(null);
-    setCodexStatus(null);
-
+    setChecking(true);
     try {
       await api.refreshSystemPath();
+      const [nodeResult, gitResult, claudeResult, codexResult] = await Promise.all([
+        api.checkNodejsWithUpdate().catch(() => null),
+        api.checkGitbashWithUpdate().catch(() => null),
+        api.checkClaudeWithUpdate().catch(() => null),
+        api.checkCodexWithUpdate().catch(() => null),
+      ]);
 
-      const nodeResult = await api.checkNodejsWithUpdate();
-      await new Promise(resolve => setTimeout(resolve, 200));
-      setNodejsStatus(nodeResult);
+      const newDeps = {
+        nodejs: { status: nodeResult, loading: false },
+        git: { status: gitResult, loading: false },
+        claude: { status: claudeResult, loading: false },
+        codex: { status: codexResult, loading: false },
+      };
+      setDeps(newDeps);
 
-      const claudeResult = await api.checkClaudeWithUpdate();
-      await new Promise(resolve => setTimeout(resolve, 200));
-      setClaudeStatus(claudeResult);
-
-      const gitbashResult = await api.checkGitbashWithUpdate();
-      await new Promise(resolve => setTimeout(resolve, 200));
-      setGitbashStatus(gitbashResult);
-
-      const codexResult = await api.checkCodexWithUpdate();
-      await new Promise(resolve => setTimeout(resolve, 200));
-      setCodexStatus(codexResult);
+      sessionStorage.setItem('dependencyStatus', JSON.stringify({
+        nodejs: nodeResult,
+        gitbash: gitResult,
+        claude: claudeResult,
+        codex: codexResult,
+      }));
     } catch (error) {
       console.error('检测失败:', error);
+    } finally {
+      setChecking(false);
     }
   };
 
-  const handleInstallNodejs = async () => {
-    setNodejsLoading(true);
+  const handleAction = async (key: string, action: 'install' | 'update') => {
+    const config = depConfig[key];
+    setDeps(prev => ({ ...prev, [key]: { ...prev[key], loading: true } }));
     try {
-      await api.installNodejs();
-      // 安装窗口会自动打开,等待完成后重新检测
-      setTimeout(() => {
-        checkInstallationOnly();
-        setNodejsLoading(false);
+      if (action === 'install') {
+        await config.installFn();
+      } else {
+        await config.updateFn();
+      }
+      // Re-check after action
+      setTimeout(async () => {
+        try {
+          const result = await config.checkFn();
+          setDeps(prev => ({ ...prev, [key]: { status: result, loading: false } }));
+        } catch {
+          setDeps(prev => ({ ...prev, [key]: { ...prev[key], loading: false } }));
+        }
       }, 2000);
     } catch (error: any) {
-      alert(`安装失败: ${error}`);
-      setNodejsLoading(false);
+      alert(`操作失败: ${error}`);
+      setDeps(prev => ({ ...prev, [key]: { ...prev[key], loading: false } }));
     }
   };
 
-  const handleUpdateNodejs = async () => {
-    setNodejsLoading(true);
-    try {
-      await api.updateNodejs();
-      setTimeout(() => {
-        checkInstallationOnly();
-        setNodejsLoading(false);
-      }, 2000);
-    } catch (error: any) {
-      alert(`更新失败: ${error}`);
-      setNodejsLoading(false);
-    }
-  };
+  // Check if any issues exist
+  const hasIssues = Object.values(deps).some(d => d.status && (!d.status.installed || d.status.update_available));
+  const allChecked = Object.values(deps).every(d => d.status !== null);
 
-  const handleInstallClaude = async () => {
-    setClaudeLoading(true);
-    try {
-      await api.installClaude();
-      setTimeout(() => {
-        checkInstallationOnly();
-        setClaudeLoading(false);
-      }, 2000);
-    } catch (error: any) {
-      alert(`安装失败: ${error}`);
-      setClaudeLoading(false);
-    }
-  };
-
-  const handleUpdateClaude = async () => {
-    setClaudeLoading(true);
-    try {
-      await api.updateClaude();
-      setTimeout(() => {
-        checkInstallationOnly();
-        setClaudeLoading(false);
-      }, 2000);
-    } catch (error: any) {
-      alert(`更新失败: ${error}`);
-      setClaudeLoading(false);
-    }
-  };
-
-  const handleInstallGitbash = async () => {
-    setGitbashLoading(true);
-    try {
-      await api.installGitbash();
-      setTimeout(() => {
-        checkInstallationOnly();
-        setGitbashLoading(false);
-      }, 2000);
-    } catch (error: any) {
-      alert(`安装失败: ${error}`);
-      setGitbashLoading(false);
-    }
-  };
-
-  const handleUpdateGitbash = async () => {
-    setGitbashLoading(true);
-    try {
-      await api.updateGitbash();
-      setTimeout(() => {
-        checkInstallationOnly();
-        setGitbashLoading(false);
-      }, 2000);
-    } catch (error: any) {
-      alert(`更新失败: ${error}`);
-      setGitbashLoading(false);
-    }
-  };
-
-  const handleInstallCodex = async () => {
-    setCodexLoading(true);
-    try {
-      await api.installCodex();
-      setTimeout(() => {
-        checkInstallationOnly();
-        setCodexLoading(false);
-      }, 2000);
-    } catch (error: any) {
-      alert(`安装失败: ${error}`);
-      setCodexLoading(false);
-    }
-  };
-
-  const handleUpdateCodex = async () => {
-    setCodexLoading(true);
-    try {
-      await api.updateCodex();
-      setTimeout(() => {
-        checkInstallationOnly();
-        setCodexLoading(false);
-      }, 2000);
-    } catch (error: any) {
-      alert(`更新失败: ${error}`);
-      setCodexLoading(false);
-    }
-  };
-
-  const renderStatus = (status: DependencyStatus | null) => {
-    if (!status) {
-      return <span className="text-[#999999] text-[10px]">⏳</span>;
-    }
-
-    if (!status.installed) {
-      return <span className="text-error text-[10px]">✗</span>;
-    }
-
-    if (status.update_available && status.latest_version) {
-      return (
-        <span className="text-warning text-[10px]">
-          ⚠ {status.version} → {status.latest_version}
-        </span>
-      );
-    }
-
-    return <span className="text-success text-[10px]">✓ {status.version}</span>;
-  };
-
-  const renderNodejsButton = () => {
-    if (!nodejsStatus || nodejsLoading) {
-      return null;
-    }
-
-    if (!nodejsStatus.installed) {
-      return (
-        <button
-          onClick={handleInstallNodejs}
-          disabled={nodejsLoading}
-          className="px-3 py-1 text-[10px] bg-primary hover:bg-primary-hover rounded text-white"
-        >
-          {nodejsLoading ? '安装中...' : '安装'}
-        </button>
-      );
-    }
-
-    if (nodejsStatus.update_available) {
-      return (
-        <button
-          onClick={handleUpdateNodejs}
-          disabled={nodejsLoading}
-          className="px-3 py-1 text-[10px] bg-primary hover:bg-primary-hover rounded text-white"
-        >
-          {nodejsLoading ? '更新中...' : '更新'}
-        </button>
-      );
-    }
-
+  // Don't show anything while initial check is running (no previous data)
+  if (!allChecked && !checking) {
     return null;
-  };
-
-  const renderClaudeButton = () => {
-    if (!claudeStatus || claudeLoading) {
-      return null;
-    }
-
-    if (!claudeStatus.installed) {
-      return (
-        <button
-          onClick={handleInstallClaude}
-          disabled={claudeLoading}
-          className="px-3 py-1 text-[10px] bg-primary hover:bg-primary-hover rounded text-white"
-        >
-          {claudeLoading ? '安装中...' : '安装'}
-        </button>
-      );
-    }
-
-    if (claudeStatus.update_available) {
-      return (
-        <button
-          onClick={handleUpdateClaude}
-          disabled={claudeLoading}
-          className="px-3 py-1 text-[10px] bg-primary hover:bg-primary-hover rounded text-white"
-        >
-          {claudeLoading ? '更新中...' : '更新'}
-        </button>
-      );
-    }
-
+  }
+  if (!allChecked && checking && !Object.values(deps).some(d => d.status !== null)) {
     return null;
-  };
+  }
 
-  const renderGitbashButton = () => {
-    if (!gitbashStatus || gitbashLoading) {
-      return null;
-    }
+  // Collapsed — show minimal bar
+  if (!expanded) {
+    return (
+      <div className="px-5 py-1" data-onboarding="dependencies">
+        <div className="flex items-center justify-between py-1">
+          <div className="flex items-center gap-2">
+            {checking
+              ? <span className="text-[10px] text-[#999999]">⏳ 检测中...</span>
+              : hasIssues
+              ? <span className="text-[10px] text-yellow-500">⚠ 有更新可用</span>
+              : <span className="text-[10px] text-[#10b981]">✓ 依赖就绪</span>
+            }
+            {Object.entries(deps).map(([key, d]) => (
+              <span key={key} className="text-[10px] text-[#666666]">
+                {depConfig[key].label} {d.status?.version}
+              </span>
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={checkWithUpdates}
+              disabled={checking}
+              className="text-[10px] text-[#666666] hover:text-white transition-colors disabled:opacity-50"
+            >
+              检查更新
+            </button>
+            <button
+              onClick={() => setExpanded(true)}
+              className="text-[10px] text-[#666666] hover:text-white transition-colors"
+            >
+              详情
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
-    if (!gitbashStatus.installed) {
-      return (
-        <button
-          onClick={handleInstallGitbash}
-          disabled={gitbashLoading}
-          className="px-3 py-1 text-[10px] bg-primary hover:bg-primary-hover rounded text-white"
-        >
-          {gitbashLoading ? '安装中...' : '安装'}
-        </button>
-      );
-    }
-
-    if (gitbashStatus.update_available) {
-      return (
-        <button
-          onClick={handleUpdateGitbash}
-          disabled={gitbashLoading}
-          className="px-3 py-1 text-[10px] bg-primary hover:bg-primary-hover rounded text-white"
-        >
-          {gitbashLoading ? '更新中...' : '更新'}
-        </button>
-      );
-    }
-
-    return null;
-  };
-
-  const renderCodexButton = () => {
-    if (!codexStatus || codexLoading) {
-      return null;
-    }
-
-    if (!codexStatus.installed) {
-      return (
-        <button
-          onClick={handleInstallCodex}
-          disabled={codexLoading}
-          className="px-3 py-1 text-[10px] bg-primary hover:bg-primary-hover rounded text-white"
-        >
-          {codexLoading ? '安装中...' : '安装'}
-        </button>
-      );
-    }
-
-    if (codexStatus.update_available) {
-      return (
-        <button
-          onClick={handleUpdateCodex}
-          disabled={codexLoading}
-          className="px-3 py-1 text-[10px] bg-primary hover:bg-primary-hover rounded text-white"
-        >
-          {codexLoading ? '更新中...' : '更新'}
-        </button>
-      );
-    }
-
-    return null;
-  };
-
+  // Has issues or expanded — show full panel
   return (
     <div className="px-5 py-2" data-onboarding="dependencies">
       <div className="card-frame">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-base font-bold">系统依赖(先装node)</h2>
-          <button
-            onClick={checkWithUpdates}
-            className="px-4 py-1 text-[10px] bg-[#666666] hover:bg-[#555555] text-white rounded"
-          >
-            检查更新
-          </button>
+          <h2 className="text-[13px] font-bold">
+            {hasIssues ? '⚠ 依赖需要处理' : '系统依赖'}
+          </h2>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={checkWithUpdates}
+              disabled={checking}
+              className="px-3 py-1 text-[10px] bg-[#666666] hover:bg-[#555555] text-white rounded disabled:opacity-50"
+            >
+              {checking ? '检测中...' : '检查更新'}
+            </button>
+            <button
+              onClick={() => setExpanded(false)}
+              className="text-[10px] text-[#666666] hover:text-white transition-colors"
+            >
+              收起
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex items-center gap-2">
-            <span className="text-[10px]">Node.js:</span>
-            {renderStatus(nodejsStatus)}
-            {renderNodejsButton()}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-[10px]">Git:</span>
-            {renderStatus(gitbashStatus)}
-            {renderGitbashButton()}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-[10px]">Claude Code:</span>
-            {renderStatus(claudeStatus)}
-            {renderClaudeButton()}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-[10px]">Codex:</span>
-            {renderStatus(codexStatus)}
-            {renderCodexButton()}
-          </div>
+          {Object.entries(deps).map(([key, d]) => {
+            const config = depConfig[key];
+            return (
+              <div key={key} className="flex items-center gap-2">
+                <span className="text-[10px]">{config.label}:</span>
+                {!d.status ? (
+                  <span className="text-[#999999] text-[10px]">⏳</span>
+                ) : !d.status.installed ? (
+                  <>
+                    <span className="text-red-500 text-[10px]">✗</span>
+                    {!d.loading && (
+                      <button onClick={() => handleAction(key, 'install')} className="px-3 py-1 text-[10px] bg-[#3b82f6] hover:bg-[#2563eb] rounded text-white">
+                        安装
+                      </button>
+                    )}
+                  </>
+                ) : d.status.update_available ? (
+                  <>
+                    <span className="text-yellow-500 text-[10px]">⚠ {d.status.version} → {d.status.latest_version}</span>
+                    {!d.loading && (
+                      <button onClick={() => handleAction(key, 'update')} className="px-3 py-1 text-[10px] bg-[#3b82f6] hover:bg-[#2563eb] rounded text-white">
+                        更新
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <span className="text-[#10b981] text-[10px]">✓ {d.status.version}</span>
+                )}
+                {d.loading && <span className="text-[10px] text-[#999999]">处理中...</span>}
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>

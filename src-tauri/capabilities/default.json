@@ -9,6 +9,8 @@
     "dialog:default",
     "clipboard-manager:allow-write-text",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    "core:window:allow-maximize",
+    "core:window:allow-unmaximize"
   ]
 }

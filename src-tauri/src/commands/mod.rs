@@ -397,6 +397,13 @@ pub async fn get_mobot_logs(max_lines: Option<usize>) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[tauri::command]
+pub async fn is_mobot_updating() -> bool {
+    tokio::task::spawn_blocking(BridgeManager::is_updating)
+        .await
+        .unwrap_or(false)
+}
+
 // ============ Claude Login Check Commands ============
 
 #[tauri::command]

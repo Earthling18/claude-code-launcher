@@ -121,6 +121,9 @@ class BridgeConfig:
     reconnect_interval: int = 5
     heartbeat_interval: int = 30
 
+    # 能力声明 (支持旧格式 str 和新格式 dict 混合)
+    capabilities: list = None
+
     # 配置文件路径，from_file() 时自动设置
     config_path: str = ""
 
@@ -128,6 +131,8 @@ class BridgeConfig:
         if not self.client_id:
             # 使用持久化的客户端 ID
             self.client_id = get_or_create_client_id()
+        if self.capabilities is None:
+            self.capabilities = ["chat", "agent"]
 
     @classmethod
     def from_file(cls, path: str) -> "BridgeConfig":
@@ -153,6 +158,7 @@ class BridgeConfig:
             openai_model=client_cfg.get("openai_model", "gpt-4o"),
             reconnect_interval=client_cfg.get("reconnect_interval", 5),
             heartbeat_interval=client_cfg.get("heartbeat_interval", 30),
+            capabilities=client_cfg.get("capabilities"),
         )
         cfg.config_path = path
         return cfg
@@ -755,7 +761,7 @@ class BridgeClient:
                 "type": "register",
                 "client_id": self.config.client_id,
                 "platform": platform.system(),
-                "capabilities": ["chat", "agent", "tools", "browser"],
+                "capabilities": self.config.capabilities,
                 "backend_type": self.config.backend_type,
             }
             if self.config.server_token:
@@ -1790,9 +1796,10 @@ def _kill_old_bridge_process():
             # Windows: 用 tasklist 检查进程是否存在
             result = subprocess.run(
                 ["tasklist", "/FI", f"PID eq {old_pid}", "/NH"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, timeout=5,
             )
-            if str(old_pid) in result.stdout:
+            stdout_text = (result.stdout or b"").decode("utf-8", errors="replace")
+            if str(old_pid) in stdout_text:
                 subprocess.run(
                     ["taskkill", "/F", "/PID", str(old_pid)],
                     capture_output=True, timeout=10,

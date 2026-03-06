@@ -1,7 +1,13 @@
 import { useNavigate } from 'react-router-dom';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 export const ModeSelectPage: React.FC = () => {
   const navigate = useNavigate();
+
+  const goRemote = () => {
+    navigate('/remote');
+    try { getCurrentWindow().maximize().catch(() => {}); } catch {}
+  };
 
   return (
     <div className="h-screen bg-[#212121] text-[#DCE4EE] flex items-center justify-center">
@@ -31,7 +37,7 @@ export const ModeSelectPage: React.FC = () => {
 
           {/* 远程使用 */}
           <button
-            onClick={() => navigate('/remote')}
+            onClick={goRemote}
             className="group flex flex-col items-center gap-4 p-8 bg-[#2a2a2a] border border-[#3a3a3a] rounded-xl hover:border-[#10b981] hover:bg-[#2a3a2f] transition-all duration-200 cursor-pointer w-52"
           >
             <div className="text-[40px]">

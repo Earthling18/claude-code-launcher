@@ -341,11 +341,19 @@ class ClaudeAgentService:
         # 写入 settings.local.json 覆盖，防止用户 ~/.claude/settings.json 干扰 Agent 配置
         self._write_settings_overrides()
 
-        # key 模式：内部代理不走公司代理，设置 NO_PROXY（必须在 _setup_proxy 之后，避免被清除）
-        if settings.claude_auth_mode == "key" and settings.claude_api_base and "172.21.11.82" in settings.claude_api_base:
-            os.environ["NO_PROXY"] = "172.21.11.82,localhost,127.0.0.1"
-            os.environ["no_proxy"] = "172.21.11.82,localhost,127.0.0.1"
-            logger.info("[PROXY] NO_PROXY = 172.21.11.82,localhost,127.0.0.1 (key mode, internal proxy)")
+        # 配了代理时，内网地址不走代理（bridge server、localhost）
+        if settings.claude_http_proxy or settings.claude_https_proxy:
+            no_proxy = os.environ.get("NO_PROXY", "")
+            internal_hosts = "172.21.11.82,localhost,127.0.0.1"
+            if no_proxy:
+                # 合并已有的 NO_PROXY
+                existing = set(h.strip() for h in no_proxy.split(",") if h.strip())
+                for h in internal_hosts.split(","):
+                    existing.add(h)
+                internal_hosts = ",".join(sorted(existing))
+            os.environ["NO_PROXY"] = internal_hosts
+            os.environ["no_proxy"] = internal_hosts
+            logger.info(f"[PROXY] NO_PROXY = {internal_hosts}")
 
         # 模块版本水印（区分"文件被替换但版本错误"和"文件未被替换"）
         logger.info(f"[AGENT] Module build: {_MODULE_BUILD}, file: {__file__}")
@@ -546,6 +554,21 @@ class ClaudeAgentService:
         if settings.claude_auth_mode == "key" and settings.claude_api_base:
             override["apiUrl"] = settings.claude_api_base
         return json.dumps(override)
+
+    def _build_sdk_env(self) -> dict:
+        """构建传递给 ClaudeAgentOptions.env 的环境变量
+
+        key 模式：显式注入 ANTHROPIC_BASE_URL 和 ANTHROPIC_API_KEY，
+        防止用户 ~/.claude/settings.json 的 env 块覆盖。
+        """
+        env = {}
+        if settings.claude_auth_mode == "key":
+            if settings.claude_api_key:
+                env["ANTHROPIC_API_KEY"] = settings.claude_api_key
+                env["ANTHROPIC_AUTH_TOKEN"] = settings.claude_api_key
+            if settings.claude_api_base:
+                env["ANTHROPIC_BASE_URL"] = settings.claude_api_base
+        return env
 
     def _log_diagnostics(self):
         """启动诊断：输出运行环境关键信息，用于排查部署兼容问题"""
@@ -789,17 +812,30 @@ class ClaudeAgentService:
                         if val:
                             display_val = val[:8] + "..." if key == "apiKey" and len(val) > 8 else val
                             conflicts.append(f"{key}={display_val}")
+                    # 检查 env 块中的 ANTHROPIC_* 变量（CLI 会应用这些覆盖 API 地址）
+                    env_block = data.get("env", {})
+                    for key in ("ANTHROPIC_BASE_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+                        val = env_block.get(key)
+                        if val:
+                            display_val = val[:20] + "..." if len(val) > 20 else val
+                            conflicts.append(f"env.{key}={display_val}")
+                    has_sdk_env = bool(self._build_sdk_env())
                     if conflicts:
+                        overrides = []
                         if has_settings_override:
-                            detail = f"Has: {', '.join(conflicts)} -- overridden by --settings inline JSON"
-                            fix = "已通过 --settings 内联 JSON 覆盖，不影响 Agent"
+                            overrides.append("--settings inline JSON")
+                        if has_sdk_env:
+                            overrides.append("ClaudeAgentOptions.env")
+                        if overrides:
+                            detail = f"Has: {', '.join(conflicts)} -- overridden by {' + '.join(overrides)}"
+                            fix = f"已通过 {' + '.join(overrides)} 覆盖，不影响 Agent"
                         else:
                             detail = f"Has: {', '.join(conflicts)} -- isolated by setting_sources"
                             fix = "已被 setting_sources 隔离，不影响 Agent。如仍怀疑干扰，临时重命名 ~/.claude/settings.json 验证"
                         _add("User settings.json", "WARN", detail, fix)
                         logger.warning(f"[ISOLATION] [WARN] User ~/.claude/settings.json has: {', '.join(conflicts)}")
-                        if has_settings_override:
-                            logger.info("[ISOLATION]   INFO: 已通过 --settings 内联覆盖，不影响 Agent")
+                        if overrides:
+                            logger.info(f"[ISOLATION]   INFO: 已通过 {' + '.join(overrides)} 覆盖，不影响 Agent")
                         else:
                             logger.warning("[ISOLATION]   FIX: 已被 setting_sources 隔离。如仍怀疑干扰，临时重命名 ~/.claude/settings.json 验证")
                     else:
@@ -1144,6 +1180,7 @@ class ClaudeAgentService:
         os.environ["CLAUDE_USER_WORKSPACE"] = str(session.workspace)
 
         # 构建选项参数
+        sdk_env = self._build_sdk_env()
         options_kwargs = {
             "model": self.model,
             "system_prompt": system_prompt,
@@ -1154,6 +1191,8 @@ class ClaudeAgentService:
             "max_buffer_size": 50 * 1024 * 1024,  # 50MB，支持大文件处理
             "stderr": _log_stderr,  # 捕获 CLI stderr 输出（包含 "Prompt is too long" 等警告）
         }
+        if sdk_env:
+            options_kwargs["env"] = sdk_env
 
         # --settings 内联覆盖（防止用户 ~/.claude/settings.json 干扰 apiUrl/model）
         settings_override = self._build_settings_override()
@@ -1320,6 +1359,7 @@ class ClaudeAgentService:
         )
 
         # 构建选项参数
+        sdk_env = self._build_sdk_env()
         options_kwargs = {
             "model": self.model,
             "system_prompt": system_prompt,
@@ -1330,6 +1370,8 @@ class ClaudeAgentService:
             "max_buffer_size": 50 * 1024 * 1024,  # 50MB，支持大文件处理
             "stderr": _log_stderr,  # 捕获 CLI stderr 输出（包含 "Prompt is too long" 等警告）
         }
+        if sdk_env:
+            options_kwargs["env"] = sdk_env
 
         # --settings 内联覆盖（防止用户 ~/.claude/settings.json 干扰 apiUrl/model）
         settings_override = self._build_settings_override()

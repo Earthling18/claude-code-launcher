@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     file_cache_timeout_seconds: float = 300.0  # 文件缓存超时（秒）
 
     # sendMsg 主动推送配置
-    sendmsg_api_url: str = ""  # sendMsg MCP 服务地址
+    sendmsg_api_url: str = "http://172.21.193.224:31003/plugin-b2aa-sendmsg/mcp"  # sendMsg MCP 服务地址
     sendmsg_auth_key: str = ""  # 授权 key
     sendmsg_dep_user_id: str = ""  # 数字员工 ID
 

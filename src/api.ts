@@ -98,6 +98,7 @@ export const mobotApi = {
   getLogs: (maxLines?: number) => invoke<string[]>('get_mobot_logs', { maxLines }),
   getHostname: () => invoke<string>('get_hostname'),
   getUsername: () => invoke<string>('get_username'),
+  isUpdating: () => invoke<boolean>('is_mobot_updating'),
 };
 
 // Claude login check API

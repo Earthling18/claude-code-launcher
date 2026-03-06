@@ -5,6 +5,25 @@ use regex::Regex;
 #[cfg(target_os = "macos")]
 use std::env;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+/// CREATE_NO_WINDOW flag for Windows — prevents console window flash
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+/// On Windows, configure a Command to hide the console window.
+/// On other platforms, this is a no-op.
+#[cfg(windows)]
+fn hide_window(cmd: &mut Command) -> &mut Command {
+    cmd.creation_flags(CREATE_NO_WINDOW)
+}
+
+#[cfg(not(windows))]
+fn hide_window(cmd: &mut Command) -> &mut Command {
+    cmd
+}
+
 /// Get extended PATH for macOS that includes common installation locations
 /// This is needed because GUI apps don't inherit shell PATH from .zshrc/.bash_profile
 #[cfg(target_os = "macos")]
@@ -135,9 +154,12 @@ impl DependencyChecker {
 
         // 跨平台检测 claude
         #[cfg(windows)]
-        let output = Command::new("cmd")
-            .args(&["/c", "claude", "--version"])
-            .output();
+        let output = {
+            let mut cmd = Command::new("cmd");
+            cmd.args(&["/c", "claude", "--version"]);
+            hide_window(&mut cmd);
+            cmd.output()
+        };
 
         #[cfg(target_os = "macos")]
         let output = {
@@ -190,36 +212,29 @@ impl DependencyChecker {
                 }
             }
             _ => {
-                // claude --version failed. Check if the npm package is installed
-                // but the symlink/shim is missing, and auto-repair if so.
+                // claude --version failed. Auto-repair: reinstall if npm is available.
                 #[cfg(windows)]
                 {
-                    use std::os::windows::process::CommandExt;
-                    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-                    // Check if npm itself is available
-                    let npm_available = Command::new("cmd")
-                        .args(&["/c", "where", "npm"])
-                        .creation_flags(CREATE_NO_WINDOW)
-                        .output()
+                    let mut where_cmd = Command::new("cmd");
+                    where_cmd.args(&["/c", "where", "npm"]);
+                    hide_window(&mut where_cmd);
+                    let npm_available = where_cmd.output()
                         .map(|o| o.status.success())
                         .unwrap_or(false);
 
                     if npm_available {
-                        // claude not found but npm is available — reinstall to repair
                         eprintln!("[check_claude] Windows: claude not found, attempting reinstall...");
-                        let _ = Command::new("cmd")
-                            .args(&["/c", "npm", "install", "-g", "@anthropic-ai/claude-code"])
-                            .creation_flags(CREATE_NO_WINDOW)
-                            .output();
+                        let mut install_cmd = Command::new("cmd");
+                        install_cmd.args(&["/c", "npm", "install", "-g", "@anthropic-ai/claude-code"]);
+                        hide_window(&mut install_cmd);
+                        let _ = install_cmd.output();
 
                         Self::refresh_system_path();
 
-                        // Retry version check after repair
-                        let retry = Command::new("cmd")
-                            .args(&["/c", "claude", "--version"])
-                            .creation_flags(CREATE_NO_WINDOW)
-                            .output();
+                        let mut retry_cmd = Command::new("cmd");
+                        retry_cmd.args(&["/c", "claude", "--version"]);
+                        hide_window(&mut retry_cmd);
+                        let retry = retry_cmd.output();
 
                         if let Ok(out) = retry {
                             if out.status.success() {
@@ -244,14 +259,8 @@ impl DependencyChecker {
 
                 #[cfg(target_os = "macos")]
                 {
-                    // On macOS, if claude command is missing, attempt auto-repair.
-                    // This handles both cases:
-                    // 1. npm package exists but symlink is broken
-                    // 2. npm package was corrupted/removed by a failed auto-update
-                    // In both cases, npm install -g will fix it.
                     let extended_path = get_macos_extended_path();
 
-                    // Check if npm itself is available
                     let npm_available = Command::new("sh")
                         .args(&["-c", &format!("PATH='{}' which npm", extended_path)])
                         .output()
@@ -264,7 +273,6 @@ impl DependencyChecker {
                             .args(&["-c", &format!("PATH='{}' npm install -g @anthropic-ai/claude-code", extended_path)])
                             .output();
 
-                        // Retry version check after repair
                         let retry = Command::new("sh")
                             .args(&["-c", &format!("PATH='{}' claude --version", extended_path)])
                             .output();
@@ -307,9 +315,12 @@ impl DependencyChecker {
         Self::refresh_system_path();
 
         #[cfg(windows)]
-        let output = Command::new("cmd")
-            .args(&["/c", "codex", "--version"])
-            .output();
+        let output = {
+            let mut cmd = Command::new("cmd");
+            cmd.args(&["/c", "codex", "--version"]);
+            hide_window(&mut cmd);
+            cmd.output()
+        };
 
         #[cfg(target_os = "macos")]
         let output = {
@@ -354,32 +365,29 @@ impl DependencyChecker {
                 }
             }
             _ => {
-                // codex --version failed. Attempt auto-repair if npm is available.
+                // codex --version failed. Auto-repair: reinstall if npm is available.
                 #[cfg(windows)]
                 {
-                    use std::os::windows::process::CommandExt;
-                    const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-                    let npm_available = Command::new("cmd")
-                        .args(&["/c", "where", "npm"])
-                        .creation_flags(CREATE_NO_WINDOW)
-                        .output()
+                    let mut where_cmd = Command::new("cmd");
+                    where_cmd.args(&["/c", "where", "npm"]);
+                    hide_window(&mut where_cmd);
+                    let npm_available = where_cmd.output()
                         .map(|o| o.status.success())
                         .unwrap_or(false);
 
                     if npm_available {
                         eprintln!("[check_codex] Windows: codex not found, attempting reinstall...");
-                        let _ = Command::new("cmd")
-                            .args(&["/c", "npm", "install", "-g", "@openai/codex"])
-                            .creation_flags(CREATE_NO_WINDOW)
-                            .output();
+                        let mut install_cmd = Command::new("cmd");
+                        install_cmd.args(&["/c", "npm", "install", "-g", "@openai/codex"]);
+                        hide_window(&mut install_cmd);
+                        let _ = install_cmd.output();
 
                         Self::refresh_system_path();
 
-                        let retry = Command::new("cmd")
-                            .args(&["/c", "codex", "--version"])
-                            .creation_flags(CREATE_NO_WINDOW)
-                            .output();
+                        let mut retry_cmd = Command::new("cmd");
+                        retry_cmd.args(&["/c", "codex", "--version"]);
+                        hide_window(&mut retry_cmd);
+                        let retry = retry_cmd.output();
 
                         if let Ok(out) = retry {
                             if out.status.success() {
@@ -465,9 +473,10 @@ impl DependencyChecker {
         pattern: &str,
         min_version: Option<&str>,
     ) -> DependencyStatus {
-        let output = Command::new(command)
-            .args(args)
-            .output();
+        let mut cmd = Command::new(command);
+        cmd.args(args);
+        hide_window(&mut cmd);
+        let output = cmd.output();
 
         match output {
             Ok(out) if out.status.success() => {
@@ -617,10 +626,11 @@ impl DependencyChecker {
         {
             // Windows: 使用 winget 检查最新版本
             for attempt in 0..3 {
-                if let Ok(output) = tokio::process::Command::new("winget")
-                    .args(&["show", "OpenJS.NodeJS.LTS"])
-                    .output()
-                    .await
+                let mut cmd = tokio::process::Command::new("winget");
+                cmd.args(&["show", "OpenJS.NodeJS.LTS"]);
+                #[cfg(windows)]
+                cmd.creation_flags(CREATE_NO_WINDOW);
+                if let Ok(output) = cmd.output().await
                 {
                     if output.status.success() {
                         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -710,10 +720,11 @@ impl DependencyChecker {
         {
             // Windows: 使用 winget 检查最新版本
             for attempt in 0..3 {
-                if let Ok(output) = tokio::process::Command::new("winget")
-                    .args(&["show", "Git.Git"])
-                    .output()
-                    .await
+                let mut cmd = tokio::process::Command::new("winget");
+                cmd.args(&["show", "Git.Git"]);
+                #[cfg(windows)]
+                cmd.creation_flags(CREATE_NO_WINDOW);
+                if let Ok(output) = cmd.output().await
                 {
                     if output.status.success() {
                         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -795,10 +806,24 @@ impl DependencyChecker {
         let registry_entries: Vec<&str> = registry_path.split(';').collect();
         let original_entries: Vec<&str> = original_path.split(';').collect();
 
-        let mut new_entries = Vec::new();
-        for entry in registry_entries {
-            if !entry.is_empty() && !original_entries.contains(&entry) {
-                new_entries.push(entry);
+        let mut new_entries: Vec<String> = Vec::new();
+        for entry in &registry_entries {
+            if !entry.is_empty() && !original_entries.iter().any(|e| e.eq_ignore_ascii_case(entry)) {
+                new_entries.push(entry.to_string());
+            }
+        }
+
+        // Also ensure npm global bin dir is in PATH
+        // (npm installs claude/codex here but GUI apps may not have it)
+        if let Some(home) = dirs::home_dir() {
+            let npm_global = home.join(r"AppData\Roaming\npm");
+            if npm_global.exists() {
+                let npm_str = npm_global.to_string_lossy().to_string();
+                if !new_entries.iter().any(|e| e.eq_ignore_ascii_case(&npm_str))
+                    && !original_entries.iter().any(|e| e.eq_ignore_ascii_case(&npm_str))
+                {
+                    new_entries.push(npm_str);
+                }
             }
         }
 
@@ -809,24 +834,5 @@ impl DependencyChecker {
         };
 
         env::set_var("PATH", new_path);
-
-        let current_path = env::var("PATH").unwrap_or_default();
-        let path_preview = if current_path.len() > 200 {
-            format!("{}...", &current_path[..200])
-        } else {
-            current_path.clone()
-        };
-        eprintln!("[DEBUG] 当前 PATH (前200字符): {}", path_preview);
-
-        let nodejs_paths = vec![
-            r"C:\Program Files\nodejs",
-            r"C:\Program Files (x86)\nodejs",
-        ];
-
-        for path in nodejs_paths {
-            if std::path::Path::new(path).exists() {
-                println!("检测到Node.js路径: {}", path);
-            }
-        }
     }
 }

@@ -169,6 +169,7 @@ class UserSession:
         # --settings 内联覆盖（防止用户 ~/.claude/settings.json 干扰 apiUrl/model）
         settings_override = agent_service._build_settings_override()
 
+        sdk_env = agent_service._build_sdk_env()
         options_kwargs = {
             "model": settings.claude_model,
             "system_prompt": agent_service._build_system_prompt(
@@ -185,6 +186,8 @@ class UserSession:
             "max_buffer_size": 50 * 1024 * 1024,  # 50MB
             "stderr": _log_stderr,
         }
+        if sdk_env:
+            options_kwargs["env"] = sdk_env
         if settings_override:
             options_kwargs["settings"] = settings_override
 

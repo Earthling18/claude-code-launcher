@@ -29,6 +29,30 @@ client:
   # HTTP 请求超时 (秒)
   http_agent_timeout: 300
 
+  # OpenAI 兼容 API 配置 (backend_type = "openai" 或 "both" 时使用)
+  # 支持 OpenAI、Azure OpenAI、Ollama、vLLM 等兼容接口
+  # openai_api_url: "https://api.openai.com/v1/chat/completions"
+  # openai_api_key: ""
+  # openai_model: "gpt-4o"
+
+  # 能力声明 (用于 LLM 编排器自动分发任务)
+  # 支持旧格式 (字符串) 和新格式 (对象) 混合
+  # 留空则使用默认值 ["chat", "agent"]
+  # capabilities:
+  #   - name: "code_review"
+  #     description: "审查代码质量，支持 Python/Go/JS"
+  #     parameters:
+  #       type: object
+  #       properties:
+  #         message:
+  #           type: string
+  #           description: "要审查的代码或需求描述"
+  #       required: ["message"]
+  #   - name: "web_search"
+  #     description: "搜索互联网，返回相关信息"
+  #   - "chat"  # 旧格式仍兼容
+  #   - "帮用户查询天气、航班、酒店信息，支持自然语言提问"  # 纯文本描述
+
   # 重连间隔 (秒)
   reconnect_interval: 5
 
