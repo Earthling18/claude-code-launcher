@@ -163,6 +163,27 @@ impl BridgeManager {
             let _ = std::fs::remove_dir_all(&lib_dir);
         }
 
+        // Clean .pyc files and __pycache__ directories to avoid magic number mismatch
+        // (e.g. switching from system Python 3.12 to embedded Python 3.11)
+        fn clean_pyc(dir: &Path) {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        if path.file_name().map(|n| n == "__pycache__").unwrap_or(false) {
+                            let _ = std::fs::remove_dir_all(&path);
+                        } else {
+                            clean_pyc(&path);
+                        }
+                    } else if path.extension().map(|e| e == "pyc").unwrap_or(false) {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+            }
+        }
+        log::info!("Cleaning .pyc files and __pycache__ directories...");
+        clean_pyc(&mobot_dir);
+
         // Write version marker from VERSION file, or fallback
         let version_marker = mobot_dir.join(".mobot_version");
         let version = std::fs::read_to_string(mobot_dir.join("VERSION"))
@@ -218,11 +239,18 @@ impl BridgeManager {
                 return Some(embed_python.to_string_lossy().to_string());
             }
             if embed_python_bin.exists() {
-                // Rename python.bin -> python.exe for use
+                // Try rename python.bin -> python.exe for use
                 let exe_path = mobot_dir.join("python-embed").join("python.exe");
-                if std::fs::rename(&embed_python_bin, &exe_path).is_ok() {
-                    log::info!("Using embedded Python (renamed .bin -> .exe): {}", exe_path.display());
-                    return Some(exe_path.to_string_lossy().to_string());
+                match std::fs::rename(&embed_python_bin, &exe_path) {
+                    Ok(_) => {
+                        log::info!("Using embedded Python (renamed .bin -> .exe): {}", exe_path.display());
+                        return Some(exe_path.to_string_lossy().to_string());
+                    }
+                    Err(e) => {
+                        // Rename failed (permissions etc.), use python.bin directly
+                        log::warn!("Failed to rename python.bin -> python.exe: {}, using python.bin directly", e);
+                        return Some(embed_python_bin.to_string_lossy().to_string());
+                    }
                 }
             }
         }
