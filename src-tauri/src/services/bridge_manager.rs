@@ -112,6 +112,34 @@ impl BridgeManager {
     pub fn install_mobot_bridge(resource_dir: &str) -> Result<String, String> {
         let resource_dir = resource_dir.strip_prefix(r"\\?\").unwrap_or(resource_dir);
 
+        // Stop any running bridge service first to release file locks (e.g. libcrypto-3.dll)
+        log::info!("Stopping any running bridge service before install...");
+        Self::stop_all();
+        // Also kill any orphaned python processes using the bridge directory
+        #[cfg(windows)]
+        {
+            let mobot_dir = Self::get_mobot_dir();
+            let mobot_str = mobot_dir.to_string_lossy().to_string();
+            if let Ok(output) = Command::new("wmic")
+                .args(["process", "where", &format!("CommandLine like '%{}%'", mobot_str.replace('\\', "\\\\")), "get", "ProcessId"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .output()
+            {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                for line in stdout.lines() {
+                    if let Ok(pid) = line.trim().parse::<u32>() {
+                        log::info!("Killing orphaned bridge process: PID={}", pid);
+                        let _ = Command::new("taskkill")
+                            .args(["/F", "/PID", &pid.to_string()])
+                            .output();
+                    }
+                }
+            }
+        }
+        // Brief pause to allow file handles to be released
+        std::thread::sleep(std::time::Duration::from_millis(500));
+
         // Find bridge source in resources
         let bridge_src = Self::find_bridge_source(resource_dir)?;
         let mobot_dir = Self::get_mobot_dir();
