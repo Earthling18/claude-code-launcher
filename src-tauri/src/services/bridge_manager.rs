@@ -1168,10 +1168,16 @@ impl BridgeManager {
             if src_path.is_dir() {
                 Self::copy_dir_recursive(&src_path, &dst_path)?;
             } else {
-                // Always overwrite during install (ensures updates are applied)
-                std::fs::copy(&src_path, &dst_path).map_err(|e| {
-                    format!("Failed to copy {}: {}", src_path.display(), e)
-                })?;
+                // Try to overwrite; if file is locked (os error 32), skip if same size
+                if let Err(e) = std::fs::copy(&src_path, &dst_path) {
+                    let src_size = std::fs::metadata(&src_path).map(|m| m.len()).unwrap_or(0);
+                    let dst_size = std::fs::metadata(&dst_path).map(|m| m.len()).unwrap_or(u64::MAX);
+                    if dst_path.exists() && src_size == dst_size {
+                        log::warn!("Skipping locked file (same size): {}", dst_path.display());
+                    } else {
+                        return Err(format!("Failed to copy {}: {}", src_path.display(), e));
+                    }
+                }
             }
         }
         Ok(())
