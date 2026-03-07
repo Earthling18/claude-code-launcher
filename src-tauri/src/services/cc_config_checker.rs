@@ -301,7 +301,8 @@ impl CcConfigChecker {
                 // MCP misplaced check (only for settings.json, not settings.local.json)
                 if *filename == "settings.json" {
                     if let Some(keys) = Self::check_mcp_misplaced(&file_path_str) {
-                        let target = base.join(".mcp.json").to_string_lossy().to_string();
+                        // Project-level .mcp.json goes in project root, not .claude/
+                        let target = Path::new(&project.working_directory).join(".mcp.json").to_string_lossy().to_string();
                         mcp_misplaced.push(McpMisplaced {
                             file_path: file_path_str.clone(),
                             target_path: target,
