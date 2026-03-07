@@ -85,6 +85,7 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
 
   const cleanableConflicts = conflicts.filter(c => c.can_clean);
   const totalIssues = conflicts.length + bomFiles.length + mcpMisplaced.length;
+  // All MCP issues are fixable: can_fix=true → migrate, can_fix=false → remove mcpServers
   const totalFixable = cleanableConflicts.length + bomFiles.length + mcpMisplaced.length;
 
   const handleCleanField = async (filePath: string, key: string) => {
@@ -116,7 +117,13 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
       }
       // Fix MCP misplaced
       for (const mcp of mcpMisplaced) {
-        await ccConfigApi.fixMcpMisplaced(mcp.file_path, mcp.target_path);
+        if (mcp.can_fix) {
+          // Project-level: migrate to .mcp.json
+          await ccConfigApi.fixMcpMisplaced(mcp.file_path, mcp.target_path);
+        } else {
+          // Global: just remove mcpServers from settings.json
+          await ccConfigApi.removeMcpServers(mcp.file_path);
+        }
         fixed++;
       }
       alert(`已修复 ${fixed} 项问题`);
@@ -143,6 +150,15 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
       await doScan();
     } catch (err: any) {
       alert(`修复失败: ${err}`);
+    }
+  };
+
+  const handleRemoveMcp = async (filePath: string) => {
+    try {
+      await ccConfigApi.removeMcpServers(filePath);
+      await doScan();
+    } catch (err: any) {
+      alert(`清理失败: ${err}`);
     }
   };
 
@@ -296,16 +312,28 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
                       >
                         打开
                       </button>
-                      <button
-                        onClick={() => handleFixMcp(mcp.file_path, mcp.target_path)}
-                        className="text-[10px] text-[#3b82f6] hover:text-[#60a5fa] transition-colors"
-                      >
-                        迁移到 .mcp.json
-                      </button>
+                      {mcp.can_fix ? (
+                        <button
+                          onClick={() => handleFixMcp(mcp.file_path, mcp.target_path)}
+                          className="text-[10px] text-[#3b82f6] hover:text-[#60a5fa] transition-colors"
+                        >
+                          迁移到 .mcp.json
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleRemoveMcp(mcp.file_path)}
+                          className="text-[10px] text-[#ef4444] hover:text-[#f87171] transition-colors"
+                        >
+                          清理
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="text-[10px] text-[#666666]">
-                    mcpServers ({mcp.keys.join(', ')}) 应放在 .mcp.json 中才能被 Claude Code 加载
+                    {mcp.can_fix
+                      ? `mcpServers (${mcp.keys.join(', ')}) 应放在项目根目录 .mcp.json 中才能被 Claude Code 加载`
+                      : `mcpServers (${mcp.keys.join(', ')}) 不应放在 settings.json 中，清理后请用 claude mcp add --scope user 重新添加`
+                    }
                   </div>
                 </div>
               ))}

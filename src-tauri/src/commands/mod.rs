@@ -490,6 +490,11 @@ pub fn fix_cc_mcp_misplaced(file_path: String, target_path: String) -> Result<()
     CcConfigChecker::fix_mcp_misplaced(&file_path, &target_path)
 }
 
+#[tauri::command]
+pub fn remove_cc_mcp_servers(file_path: String) -> Result<(), String> {
+    CcConfigChecker::remove_mcp_servers(&file_path)
+}
+
 // ============ Utility Commands ============
 
 #[tauri::command]

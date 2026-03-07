@@ -115,6 +115,8 @@ export const ccConfigApi = {
     invoke<void>('fix_cc_config_bom', { filePath }),
   fixMcpMisplaced: (filePath: string, targetPath: string) =>
     invoke<void>('fix_cc_mcp_misplaced', { filePath, targetPath }),
+  removeMcpServers: (filePath: string) =>
+    invoke<void>('remove_cc_mcp_servers', { filePath }),
 };
 
 // Claude login check API

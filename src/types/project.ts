@@ -88,6 +88,7 @@ export interface McpMisplaced {
   file_path: string;
   target_path: string;
   keys: string[];
+  can_fix: boolean;
 }
 
 export interface ConfigScanResult {

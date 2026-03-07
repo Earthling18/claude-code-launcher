@@ -30,6 +30,7 @@ pub struct McpMisplaced {
     pub file_path: String,
     pub target_path: String,
     pub keys: Vec<String>,
+    pub can_fix: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -250,13 +251,14 @@ impl CcConfigChecker {
                     bom_files.push(BomFileIssue { file_path: global_path_str.clone() });
                 }
 
-                // MCP misplaced check
+                // MCP misplaced check — global settings.json should not have mcpServers
+                // User should run `claude mcp add --scope user` instead; we only warn, no auto-fix
                 if let Some(keys) = Self::check_mcp_misplaced(&global_path_str) {
-                    let target = claude_dir.join(".mcp.json").to_string_lossy().to_string();
                     mcp_misplaced.push(McpMisplaced {
                         file_path: global_path_str.clone(),
-                        target_path: target,
+                        target_path: String::new(),
                         keys,
+                        can_fix: false,
                     });
                 }
             }
@@ -265,6 +267,15 @@ impl CcConfigChecker {
             let global_local = claude_dir.join("settings.local.json");
             if global_local.exists() {
                 let path_str = global_local.to_string_lossy().to_string();
+                if Self::check_bom(&path_str) {
+                    bom_files.push(BomFileIssue { file_path: path_str });
+                }
+            }
+
+            // Also check ~/.claude.json for BOM
+            let global_mcp = home.join(".claude.json");
+            if global_mcp.exists() {
+                let path_str = global_mcp.to_string_lossy().to_string();
                 if Self::check_bom(&path_str) {
                     bom_files.push(BomFileIssue { file_path: path_str });
                 }
@@ -307,6 +318,7 @@ impl CcConfigChecker {
                             file_path: file_path_str.clone(),
                             target_path: target,
                             keys,
+                            can_fix: true,
                         });
                     }
                 }
@@ -363,6 +375,27 @@ impl CcConfigChecker {
             std::fs::write(file_path, &bytes[3..])
                 .map_err(|e| format!("Failed to write {}: {}", file_path, e))?;
         }
+        Ok(())
+    }
+
+    /// Remove mcpServers key from a settings.json file (no migration, just delete)
+    /// Used for global ~/.claude/settings.json where we can't auto-migrate to ~/.claude.json
+    pub fn remove_mcp_servers(file_path: &str) -> Result<(), String> {
+        let content = std::fs::read_to_string(file_path)
+            .map_err(|e| format!("Failed to read {}: {}", file_path, e))?;
+        let content_clean = content.strip_prefix('\u{feff}').unwrap_or(&content);
+        let mut json: serde_json::Value = serde_json::from_str(content_clean)
+            .map_err(|e| format!("Failed to parse {}: {}", file_path, e))?;
+
+        if let Some(obj) = json.as_object_mut() {
+            obj.remove("mcpServers");
+        }
+
+        let output = serde_json::to_string_pretty(&json)
+            .map_err(|e| format!("Failed to serialize JSON: {}", e))?;
+        std::fs::write(file_path, output)
+            .map_err(|e| format!("Failed to write {}: {}", file_path, e))?;
+
         Ok(())
     }
 
