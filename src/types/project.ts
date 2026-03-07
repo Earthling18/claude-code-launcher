@@ -80,8 +80,20 @@ export interface ConfigConflict {
   can_clean: boolean;
 }
 
+export interface BomFileIssue {
+  file_path: string;
+}
+
+export interface McpMisplaced {
+  file_path: string;
+  target_path: string;
+  keys: string[];
+}
+
 export interface ConfigScanResult {
   conflicts: ConfigConflict[];
+  bom_files: BomFileIssue[];
+  mcp_misplaced: McpMisplaced[];
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {

@@ -480,6 +480,16 @@ pub fn open_cc_config_file(file_path: String) -> Result<(), String> {
     CcConfigChecker::open_file(&file_path)
 }
 
+#[tauri::command]
+pub fn fix_cc_config_bom(file_path: String) -> Result<(), String> {
+    CcConfigChecker::fix_bom(&file_path)
+}
+
+#[tauri::command]
+pub fn fix_cc_mcp_misplaced(file_path: String, target_path: String) -> Result<(), String> {
+    CcConfigChecker::fix_mcp_misplaced(&file_path, &target_path)
+}
+
 // ============ Utility Commands ============
 
 #[tauri::command]

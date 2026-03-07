@@ -111,6 +111,10 @@ export const ccConfigApi = {
     invoke<number>('clean_cc_config_all', { targets }),
   openFile: (filePath: string) =>
     invoke<void>('open_cc_config_file', { filePath }),
+  fixBom: (filePath: string) =>
+    invoke<void>('fix_cc_config_bom', { filePath }),
+  fixMcpMisplaced: (filePath: string, targetPath: string) =>
+    invoke<void>('fix_cc_mcp_misplaced', { filePath, targetPath }),
 };
 
 // Claude login check API

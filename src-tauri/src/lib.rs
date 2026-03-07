@@ -102,6 +102,8 @@ pub fn run() {
             commands::clean_cc_config_field,
             commands::clean_cc_config_all,
             commands::open_cc_config_file,
+            commands::fix_cc_config_bom,
+            commands::fix_cc_mcp_misplaced,
             // Utility commands
             commands::get_hostname,
             commands::get_username,
