@@ -76,8 +76,8 @@ class Settings(BaseSettings):
 
     # sendMsg 主动推送配置
     sendmsg_api_url: str = "http://172.21.193.224:31003/plugin-b2aa-sendmsg/mcp"  # sendMsg MCP 服务地址
-    sendmsg_auth_key: str = ""  # 授权 key
-    sendmsg_dep_user_id: str = ""  # 数字员工 ID
+    sendmsg_auth_key: str = "13f64987826f0779ae3568a8d1c3f377"  # 授权 key
+    sendmsg_dep_user_id: str = "alin"  # 数字员工 ID
 
     # 异步超时配置
     async_timeout_seconds: float = 0  # 0=禁用异步，>0=超时后切异步推送
