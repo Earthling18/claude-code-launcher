@@ -528,11 +528,41 @@ async def _channel_monitor(feishu_enabled: bool, bridge_enabled: bool):
             logger.debug(f"[CHANNEL_MONITOR] Error: {e}")
 
 
+def _seed_env_defaults():
+    """Persist code-level defaults to .env so hot-updates don't erase them.
+
+    Only writes keys that are NOT already present in the .env file,
+    so user-modified values are never overwritten.
+    """
+    from app.services.config_manager import config_manager
+
+    # Defaults that should survive hot-update (key → code default value)
+    # env_prefix is WECOM_ for Settings fields
+    DEFAULTS = {
+        "WECOM_COS_API_BASE": settings.cos_api_base,
+        "WECOM_SENDMSG_API_URL": settings.sendmsg_api_url,
+        "WECOM_SENDMSG_AUTH_KEY": settings.sendmsg_auth_key,
+        "WECOM_SENDMSG_DEP_USER_ID": settings.sendmsg_dep_user_id,
+    }
+
+    existing = config_manager.read_env()
+    to_write = {k: v for k, v in DEFAULTS.items() if k not in existing and v}
+
+    if to_write:
+        config_manager.write_env(to_write)
+        logger.info(f"[SEED] Persisted {len(to_write)} default(s) to .env: {list(to_write.keys())}")
+    else:
+        logger.debug("[SEED] All defaults already in .env, nothing to seed")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
     # 启动时
     logger.info("Starting application...")
+
+    # Seed code defaults into .env (protects against hot-update wiping defaults)
+    _seed_env_defaults()
 
     # 初始化 Agent CWD 隔离目录（必须在会话管理器启动前）
     _init_agent_root()
