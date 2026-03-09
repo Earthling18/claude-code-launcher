@@ -811,20 +811,28 @@ impl BridgeManager {
                     started_at: Some(process.started_at),
                 }
             } else {
+                // Process exited — but a new one may have been started externally
+                let health = Self::check_health(process.port);
                 MobotServiceStatus {
                     installed: true,
-                    running: false,
+                    running: health.healthy,
                     pid: None,
                     port: process.port,
                     install_path: Some(process.install_path.clone()),
-                    healthy: false,
+                    healthy: health.healthy,
                     started_at: None,
                 }
             }
         } else {
+            // No tracked process — but service may have been started externally
+            // (e.g. by restart_helper after hot-update). Check port health.
+            let health = if installed { Self::check_health(port) } else {
+                HealthStatus { healthy: false, details: String::new() }
+            };
+
             MobotServiceStatus {
                 installed,
-                running: false,
+                running: health.healthy,
                 pid: None,
                 port,
                 install_path: if installed {
@@ -832,7 +840,7 @@ impl BridgeManager {
                 } else {
                     None
                 },
-                healthy: false,
+                healthy: health.healthy,
                 started_at: None,
             }
         }
