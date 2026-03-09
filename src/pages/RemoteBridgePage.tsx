@@ -88,6 +88,15 @@ export const RemoteBridgePage: React.FC = () => {
         const s = await mobotApi.getStatus(port);
         setStatus(s);
         if (!s.running) {
+          // Service not tracked by Tauri — but it may have been restarted
+          // externally (e.g. by restart_helper after hot-update). Check port.
+          try {
+            const health = await mobotApi.checkHealth(port);
+            if (health?.healthy) {
+              setViewState('running');
+              return; // keep polling, service is alive
+            }
+          } catch {}
           if (pollRef.current) clearInterval(pollRef.current);
           // Skip auto-restart if mobot is updating itself
           try {
