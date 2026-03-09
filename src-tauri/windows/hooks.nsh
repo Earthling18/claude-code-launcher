@@ -37,7 +37,7 @@ Var MigratedFromOld
 ; For normal Mobot→Mobot updates, don't touch shortcuts (respect user preference).
 !macro NSIS_HOOK_POSTINSTALL
   StrCmp $MigratedFromOld "1" 0 skip_shortcuts
-    CreateShortCut "$DESKTOP\Mobot Launcher.lnk" "$INSTDIR\Mobot Launcher.exe"
-    CreateShortCut "$SMPROGRAMS\Mobot Launcher.lnk" "$INSTDIR\Mobot Launcher.exe"
+    CreateShortCut "$DESKTOP\Mobot Launcher.lnk" "$INSTDIR\mobot-launcher-tauri.exe"
+    CreateShortCut "$SMPROGRAMS\Mobot Launcher.lnk" "$INSTDIR\mobot-launcher-tauri.exe"
   skip_shortcuts:
 !macroend
