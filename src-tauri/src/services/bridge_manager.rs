@@ -766,7 +766,7 @@ impl BridgeManager {
         let mobot_dir = Self::get_mobot_dir();
         let installed = mobot_dir.join("start.py").exists();
 
-        let proc_lock = match MOBOT_PROCESS.lock() {
+        let mut proc_lock = match MOBOT_PROCESS.lock() {
             Ok(p) => p,
             Err(_) => {
                 return MobotServiceStatus {
@@ -785,22 +785,41 @@ impl BridgeManager {
             }
         };
 
-        if let Some(ref process) = *proc_lock {
-            let health = Self::check_health(process.port);
+        if let Some(ref mut process) = *proc_lock {
+            // Check if the process is actually still alive
+            let still_alive = match process.child.try_wait() {
+                Ok(None) => true,      // still running
+                Ok(Some(_)) => false,  // exited
+                Err(_) => false,       // error checking = assume dead
+            };
 
-            // Auto-restart bridge client if service is healthy but client died
-            if health.healthy {
-                Self::ensure_bridge_client(&process.install_path, &process.python_path);
-            }
+            if still_alive {
+                let health = Self::check_health(process.port);
 
-            MobotServiceStatus {
-                installed: true,
-                running: true,
-                pid: Some(process.child.id()),
-                port: process.port,
-                install_path: Some(process.install_path.clone()),
-                healthy: health.healthy,
-                started_at: Some(process.started_at),
+                // Auto-restart bridge client if service is healthy but client died
+                if health.healthy {
+                    Self::ensure_bridge_client(&process.install_path, &process.python_path);
+                }
+
+                MobotServiceStatus {
+                    installed: true,
+                    running: true,
+                    pid: Some(process.child.id()),
+                    port: process.port,
+                    install_path: Some(process.install_path.clone()),
+                    healthy: health.healthy,
+                    started_at: Some(process.started_at),
+                }
+            } else {
+                MobotServiceStatus {
+                    installed: true,
+                    running: false,
+                    pid: None,
+                    port: process.port,
+                    install_path: Some(process.install_path.clone()),
+                    healthy: false,
+                    started_at: None,
+                }
             }
         } else {
             MobotServiceStatus {
