@@ -206,7 +206,7 @@ export const RemoteBridgePage: React.FC = () => {
       <div className="flex-shrink-0 px-6 py-3 border-b border-[#3a3a3a]">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <ModeSwitch active="remote" />
+            <ModeSwitch active="remote" disabled={viewState === 'not_installed' || loading} />
             <h2 className="text-base font-bold">Mobot Bridge</h2>
           </div>
 
@@ -215,7 +215,7 @@ export const RemoteBridgePage: React.FC = () => {
               {getStatusIndicator()}
               <span className="text-[12px]">
                 {viewState === 'installed_stopped'
-                  ? (loading ? '正在启动...' : '未运行')
+                  ? (loading ? '正在启动...' : error ? '启动失败' : '未运行')
                   : status?.healthy ? '运行中' : status?.running ? '启动中...' : '未运行'}
               </span>
               {viewState === 'running' && (
@@ -225,6 +225,15 @@ export const RemoteBridgePage: React.FC = () => {
                   className="text-[11px] text-[#666666] hover:text-white transition-colors ml-1"
                 >
                   {showLogs ? '隐藏日志' : '日志'}
+                </button>
+              )}
+              {(error || (viewState === 'installed_stopped' && !loading)) && (
+                <button
+                  type="button"
+                  onClick={() => setViewState('not_installed')}
+                  className="text-[11px] text-[#f59e0b] hover:text-[#fbbf24] transition-colors ml-1"
+                >
+                  重装依赖
                 </button>
               )}
             </div>
