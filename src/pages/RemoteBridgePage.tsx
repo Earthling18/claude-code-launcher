@@ -61,6 +61,15 @@ export const RemoteBridgePage: React.FC = () => {
         }
         if ('Installed' in installStatus) {
           setBridgePath(installStatus.Installed.path);
+          // Check if service is already running on the port (e.g. restarted by restart_helper)
+          try {
+            const health = await mobotApi.checkHealth(port);
+            if (health?.healthy) {
+              setViewState('running');
+              startPolling();
+              return;
+            }
+          } catch {}
           // Detect python and auto-start
           const python = await mobotApi.detectPython();
           if (python) {
