@@ -1,10 +1,11 @@
 ; NSIS hook: silently uninstall old "Claude Code Launcher" before installing new "Mobot Launcher"
 ; This ensures users upgrading from the old name don't end up with two programs.
+; Note: Cannot use LogicLib (${If}/${EndIf}) as Tauri's NSIS template does not include it.
 
 !macro NSIS_HOOK_PREINSTALL
   ; Check if old "Claude Code Launcher" is installed (current user)
   ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Claude Code Launcher" "UninstallString"
-  ${If} $0 != ""
+  StrCmp $0 "" old_not_found
     DetailPrint "Found old Claude Code Launcher installation, removing..."
     ; Run the old uninstaller silently
     ExecWait '"$0" /S _?=$LOCALAPPDATA\Claude Code Launcher'
@@ -12,5 +13,5 @@
     RMDir /r "$LOCALAPPDATA\Claude Code Launcher"
     ; Remove registry entry in case uninstaller didn't clean up
     DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Claude Code Launcher"
-  ${EndIf}
+  old_not_found:
 !macroend

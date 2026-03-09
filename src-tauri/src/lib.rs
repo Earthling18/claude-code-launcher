@@ -32,11 +32,16 @@ pub fn run() {
             // macOS: remove old "Claude Code Launcher.app" after rename migration
             #[cfg(target_os = "macos")]
             {
-                let old_app = std::path::Path::new("/Applications/Claude Code Launcher.app");
-                if old_app.exists() {
-                    log::info!("Found old Claude Code Launcher.app, removing...");
-                    if let Err(e) = std::fs::remove_dir_all(old_app) {
-                        log::warn!("Failed to remove old app bundle: {}", e);
+                let mut paths = vec![std::path::PathBuf::from("/Applications/Claude Code Launcher.app")];
+                if let Some(home) = dirs::home_dir() {
+                    paths.push(home.join("Applications/Claude Code Launcher.app"));
+                }
+                for old_app in &paths {
+                    if old_app.exists() {
+                        log::info!("Found old app bundle: {}, removing...", old_app.display());
+                        if let Err(e) = std::fs::remove_dir_all(old_app) {
+                            log::warn!("Failed to remove old app bundle {}: {}", old_app.display(), e);
+                        }
                     }
                 }
             }
