@@ -137,6 +137,16 @@ export const RemoteBridgePage: React.FC = () => {
     try {
       await mobotApi.startService(path, python, port);
       await new Promise((r) => setTimeout(r, 2000));
+      // Verify service is actually running after startup
+      const s = await mobotApi.getStatus(port);
+      if (!s.running) {
+        // Process exited immediately (e.g. missing dependencies)
+        const recentLogs = await mobotApi.getLogs(10).catch(() => [] as string[]);
+        const errorHint = recentLogs.find(l => /error|traceback|no module/i.test(l));
+        setError(errorHint || '服务启动后立即退出，请尝试重装依赖');
+        setViewState('installed_stopped');
+        return;
+      }
       setIframeLoaded(false);
       hasEverLoaded.current = false;
       setIframeError(false);
