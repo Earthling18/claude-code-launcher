@@ -71,9 +71,24 @@ pub struct ConfigStorage;
 
 impl ConfigStorage {
     fn get_config_path() -> Result<PathBuf, String> {
-        let config_dir = dirs::config_dir()
-            .ok_or("无法获取配置目录")?
-            .join("ClaudeCodeLauncher");
+        let base = dirs::config_dir()
+            .ok_or("无法获取配置目录")?;
+        let new_dir = base.join("MobotLauncher");
+        let old_dir = base.join("ClaudeCodeLauncher");
+
+        // Migrate: rename old config directory to new if old exists and new doesn't
+        if old_dir.exists() && !new_dir.exists() {
+            log::info!(
+                "Migrating config directory: {} -> {}",
+                old_dir.display(),
+                new_dir.display()
+            );
+            if let Err(e) = fs::rename(&old_dir, &new_dir) {
+                log::error!("Config migration failed (will use old path): {}", e);
+            }
+        }
+
+        let config_dir = if new_dir.exists() { new_dir } else if old_dir.exists() { old_dir } else { new_dir };
 
         if !config_dir.exists() {
             fs::create_dir_all(&config_dir)

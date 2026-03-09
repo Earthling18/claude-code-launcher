@@ -28,6 +28,19 @@ pub fn run() {
         .setup(|app| {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+
+            // macOS: remove old "Claude Code Launcher.app" after rename migration
+            #[cfg(target_os = "macos")]
+            {
+                let old_app = std::path::Path::new("/Applications/Claude Code Launcher.app");
+                if old_app.exists() {
+                    log::info!("Found old Claude Code Launcher.app, removing...");
+                    if let Err(e) = std::fs::remove_dir_all(old_app) {
+                        log::warn!("Failed to remove old app bundle: {}", e);
+                    }
+                }
+            }
+
             Ok(())
         })
         .on_window_event(|_window, event| {
