@@ -123,6 +123,7 @@ export const RemoteBridgePage: React.FC = () => {
   const handleSetupComplete = (installPath: string, python: string) => {
     setBridgePath(installPath);
     setPythonPath(python);
+    setError(null);
     setIframeLoaded(false);
     hasEverLoaded.current = false;
     setIframeError(false);
@@ -237,20 +238,11 @@ export const RemoteBridgePage: React.FC = () => {
                   {showLogs ? '隐藏日志' : '日志'}
                 </button>
               )}
-              {(error || (viewState === 'installed_stopped' && !loading)) && (
-                <button
-                  type="button"
-                  onClick={() => setViewState('not_installed')}
-                  className="text-[11px] text-[#f59e0b] hover:text-[#fbbf24] transition-colors ml-1"
-                >
-                  重装依赖
-                </button>
-              )}
             </div>
           )}
         </div>
 
-        {error && (
+        {error && viewState !== 'running' && (
           <p className="text-[11px] text-red-400 mt-2">{error}</p>
         )}
       </div>
@@ -282,10 +274,10 @@ export const RemoteBridgePage: React.FC = () => {
                 <>
                   <p className="text-[14px] text-red-400">{error}</p>
                   <button
-                    onClick={() => autoStart(bridgePath, pythonPath)}
-                    className="px-4 py-1.5 text-[12px] bg-[#10b981] hover:bg-[#059669] text-white rounded-lg transition-colors"
+                    onClick={() => setViewState('not_installed')}
+                    className="px-4 py-1.5 text-[12px] bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded-lg transition-colors"
                   >
-                    重试
+                    重装
                   </button>
                 </>
               ) : (
