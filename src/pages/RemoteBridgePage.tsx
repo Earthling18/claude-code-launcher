@@ -27,6 +27,8 @@ export const RemoteBridgePage: React.FC = () => {
   const lastAutoStartRef = useRef<number>(0);
   const hasEverLoaded = useRef(false);
   const iframeMountedAt = useRef<number>(0);
+  const consecutiveFailures = useRef(0);
+  const MAX_FAILURES_BEFORE_STOP = 5; // 5 × 3s = 15s grace period for hot-update restart
 
   useEffect(() => {
     getCurrentWindow().maximize().catch(() => {});
@@ -55,6 +57,8 @@ export const RemoteBridgePage: React.FC = () => {
       if (typeof installStatus === 'object') {
         if ('Running' in installStatus) {
           setBridgePath(installStatus.Running.path);
+          // Pre-cache python path for potential auto-restart after hot-update
+          mobotApi.detectPython().then(p => { if (p) setPythonPath(p); }).catch(() => {});
           setViewState('running');
           startPolling();
           return;
@@ -65,6 +69,8 @@ export const RemoteBridgePage: React.FC = () => {
           try {
             const health = await mobotApi.checkHealth(port);
             if (health?.healthy) {
+              // Pre-cache python path for potential auto-restart after hot-update
+              mobotApi.detectPython().then(p => { if (p) setPythonPath(p); }).catch(() => {});
               setViewState('running');
               startPolling();
               return;
@@ -102,22 +108,28 @@ export const RemoteBridgePage: React.FC = () => {
           try {
             const health = await mobotApi.checkHealth(port);
             if (health?.healthy) {
+              consecutiveFailures.current = 0;
               setViewState('running');
               return; // keep polling, service is alive
             }
           } catch {}
-          if (pollRef.current) clearInterval(pollRef.current);
           // Skip auto-restart if mobot is updating itself
           try {
             const updating = await mobotApi.isUpdating();
             if (updating) {
-              // Service is updating — don't interfere, just keep polling
-              if (!pollRef.current) {
-                pollRef.current = window.setInterval(poll, 3000);
-              }
-              return;
+              consecutiveFailures.current = 0;
+              return; // keep polling, update in progress
             }
           } catch {}
+          // Grace period: during hot-update restart, service may be briefly
+          // unavailable. Keep polling for a while before giving up.
+          consecutiveFailures.current++;
+          if (consecutiveFailures.current < MAX_FAILURES_BEFORE_STOP) {
+            return; // keep polling, wait for service to come back
+          }
+          // Grace period exhausted — give up and try auto-restart
+          consecutiveFailures.current = 0;
+          if (pollRef.current) clearInterval(pollRef.current);
           // Auto-restart with 10s cooldown to prevent rapid loops
           const now = Date.now();
           if (now - lastAutoStartRef.current < 10000) {
@@ -130,6 +142,9 @@ export const RemoteBridgePage: React.FC = () => {
           } else {
             setViewState('installed_stopped');
           }
+        } else {
+          // Service is running — reset failure counter
+          consecutiveFailures.current = 0;
         }
       } catch {}
     };
