@@ -6,6 +6,7 @@ interface UpdateNotificationProps {
   version: string | null;
   progress: number;
   error: string | null;
+  isPortable: boolean;
   onUpdate: () => void;
   onDismiss: () => void;
   onRetry: () => void;
@@ -16,6 +17,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
   version,
   progress,
   error,
+  isPortable,
   onUpdate,
   onDismiss,
   onRetry,
@@ -40,7 +42,7 @@ export const UpdateNotification: React.FC<UpdateNotificationProps> = ({
               onClick={onUpdate}
               className="px-3 py-1 text-[12px] bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded transition-colors"
             >
-              立即更新
+              {isPortable ? '前往下载' : '立即更新'}
             </button>
           </div>
         </div>

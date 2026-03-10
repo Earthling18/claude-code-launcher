@@ -161,6 +161,7 @@ function AppContent() {
           version={updateChecker.version}
           progress={updateChecker.progress}
           error={updateChecker.error}
+          isPortable={updateChecker.isPortable}
           onUpdate={updateChecker.downloadAndInstall}
           onDismiss={updateChecker.dismiss}
           onRetry={updateChecker.retry}

@@ -495,6 +495,26 @@ pub fn remove_cc_mcp_servers(file_path: String) -> Result<(), String> {
     CcConfigChecker::remove_mcp_servers(&file_path)
 }
 
+// ============ Portable Mode Commands ============
+
+/// Detect whether the app is running in portable mode.
+/// Portable mode is indicated by a `.portable` marker file next to the executable.
+#[tauri::command]
+pub fn is_portable_mode() -> bool {
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(dir) = exe_path.parent() {
+            return dir.join(".portable").exists();
+        }
+    }
+    false
+}
+
+/// Get the download URL for the latest portable release.
+#[tauri::command]
+pub fn get_portable_download_url() -> String {
+    "https://github.com/erthman18/claude-code-launcher/releases/latest".to_string()
+}
+
 // ============ Utility Commands ============
 
 #[tauri::command]

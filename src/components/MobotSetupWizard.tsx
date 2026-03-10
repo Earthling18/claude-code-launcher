@@ -21,8 +21,8 @@ export const MobotSetupWizard: React.FC<MobotSetupWizardProps> = ({
   onCancel,
 }) => {
   const [steps, setSteps] = useState<Step[]>([
-    { label: '检测 Python', description: '检测系统 Python 3.10+', status: 'pending' },
     { label: '释放 mobot-bridge', description: '将 mobot-bridge 安装到本地目录', status: 'pending' },
+    { label: '检测 Python', description: '检测系统 Python 3.10+', status: 'pending' },
     { label: '安装依赖', description: '安装 Python 依赖包 (pip install)', status: 'pending' },
     { label: '启动服务', description: '启动 mobot-bridge 服务并等待就绪', status: 'pending' },
   ]);
@@ -44,34 +44,33 @@ export const MobotSetupWizard: React.FC<MobotSetupWizardProps> = ({
     setLogs([]);
 
     try {
-      // Step 0: Detect Python
+      // Step 0: Install mobot-bridge (release files first, so embedded Python is available)
       setCurrentStep(0);
       updateStep(0, { status: 'running' });
-      addLog('正在检测系统 Python...');
+      addLog('正在释放 mobot-bridge 文件...');
+
+      const installPath = await mobotApi.install();
+      updateStep(0, { status: 'done' });
+      addLog(`mobot-bridge 已安装到: ${installPath}`);
+
+      // Step 1: Detect Python (now embedded python-embed/ is available)
+      setCurrentStep(1);
+      updateStep(1, { status: 'running' });
+      addLog('正在检测 Python...');
 
       const python = await mobotApi.detectPython();
       if (!python) {
-        updateStep(0, { status: 'error', error: '未找到 Python 3.10+' });
+        updateStep(1, { status: 'error', error: '未找到 Python 3.10+' });
         addLog('错误: 未找到 Python 3.10+，请先安装');
         addLog('macOS: brew install python@3.12');
         addLog('Windows: 从 python.org 下载安装');
         setIsRunning(false);
         return;
       }
-      updateStep(0, { status: 'done' });
+      updateStep(1, { status: 'done' });
       addLog(`找到 Python: ${python}`);
 
-      // Step 1: Install mobot-bridge
-      setCurrentStep(1);
-      updateStep(1, { status: 'running' });
-      addLog('正在释放 mobot-bridge 文件...');
-
-      const installPath = await mobotApi.install();
-      updateStep(1, { status: 'done' });
-      addLog(`mobot-bridge 已安装到: ${installPath}`);
-
-      // Re-detect python after install (install may have cleaned and re-copied python-embed/)
-      const pythonAfterInstall = await mobotApi.detectPython() || python;
+      const pythonAfterInstall = python;
 
       // Step 2: Install dependencies
       setCurrentStep(2);

@@ -123,6 +123,9 @@ pub fn run() {
             commands::fix_cc_config_bom,
             commands::fix_cc_mcp_misplaced,
             commands::remove_cc_mcp_servers,
+            // Portable mode commands
+            commands::is_portable_mode,
+            commands::get_portable_download_url,
             // Utility commands
             commands::get_hostname,
             commands::get_username,
