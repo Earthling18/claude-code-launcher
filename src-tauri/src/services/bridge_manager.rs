@@ -605,10 +605,29 @@ impl BridgeManager {
 
         // pywin32 needs its DLLs (pywintypes311.dll) on PATH
         let pywin32_sys32 = lib_dir.join("pywin32_system32");
+        let mut extra_path = String::new();
         if pywin32_sys32.exists() {
-            let current_path = std::env::var("PATH").unwrap_or_default();
             let sep = if cfg!(windows) { ";" } else { ":" };
-            cmd.env("PATH", format!("{}{}{}", pywin32_sys32.to_string_lossy(), sep, current_path));
+            extra_path = format!("{}{}", pywin32_sys32.to_string_lossy(), sep);
+        }
+
+        // Bundled MinGit: set CLAUDE_CODE_GIT_BASH_PATH and add git to PATH
+        // This is done in Rust so it survives bridge hot-updates that replace app/*.pyc
+        let mingit_dir = bridge_dir.join("mingit");
+        let mingit_bash = mingit_dir.join("usr").join("bin").join("bash.exe");
+        if mingit_bash.exists() {
+            log::info!("Found bundled MinGit bash at: {}", mingit_bash.display());
+            cmd.env("CLAUDE_CODE_GIT_BASH_PATH", mingit_bash.to_string_lossy().to_string());
+            let mingit_cmd = mingit_dir.join("cmd");
+            if mingit_cmd.is_dir() {
+                let sep = if cfg!(windows) { ";" } else { ":" };
+                extra_path = format!("{}{}{}", mingit_cmd.to_string_lossy(), sep, extra_path);
+            }
+        }
+
+        if !extra_path.is_empty() {
+            let current_path = std::env::var("PATH").unwrap_or_default();
+            cmd.env("PATH", format!("{}{}", extra_path, current_path));
         }
 
         // Note: Do NOT clear proxy vars for Agent service — it needs proxy
@@ -1039,12 +1058,26 @@ impl BridgeManager {
                 }
                 cmd.env("PYTHONPATH", &pythonpath);
 
-                // pywin32 DLLs
+                // pywin32 DLLs + bundled MinGit
                 let pywin32_sys32 = lib_dir.join("pywin32_system32");
+                let mut extra_path = String::new();
                 if pywin32_sys32.exists() {
-                    let current_path = std::env::var("PATH").unwrap_or_default();
                     let sep = if cfg!(windows) { ";" } else { ":" };
-                    cmd.env("PATH", format!("{}{}{}", pywin32_sys32.to_string_lossy(), sep, current_path));
+                    extra_path = format!("{}{}", pywin32_sys32.to_string_lossy(), sep);
+                }
+                let mingit_dir = project_root.join("mingit");
+                let mingit_bash = mingit_dir.join("usr").join("bin").join("bash.exe");
+                if mingit_bash.exists() {
+                    cmd.env("CLAUDE_CODE_GIT_BASH_PATH", mingit_bash.to_string_lossy().to_string());
+                    let mingit_cmd = mingit_dir.join("cmd");
+                    if mingit_cmd.is_dir() {
+                        let sep = if cfg!(windows) { ";" } else { ":" };
+                        extra_path = format!("{}{}{}", mingit_cmd.to_string_lossy(), sep, extra_path);
+                    }
+                }
+                if !extra_path.is_empty() {
+                    let current_path = std::env::var("PATH").unwrap_or_default();
+                    cmd.env("PATH", format!("{}{}", extra_path, current_path));
                 }
 
                 match stderr_file {
