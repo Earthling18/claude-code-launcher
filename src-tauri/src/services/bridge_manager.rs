@@ -705,25 +705,61 @@ impl BridgeManager {
     }
 
     /// Check mobot-bridge health via GET /health
-    /// Repair font files if missing (hot-update overwrites app/static/ without bundled fonts)
-    /// Called from start_service() and periodically from check_health()
+    /// Repair font files and fix CDN references in index.html after hot-update.
+    /// Hot-update overwrites app/static/ and index.html may reference external CDN
+    /// (e.g. jsdelivr) instead of local font files, which fails in China.
+    /// Called from start_service() and periodically from check_health().
     fn repair_fonts_if_needed() {
         let mobot_dir = Self::get_mobot_dir();
-        let font_file = mobot_dir.join("app").join("static").join("config").join("material-symbols-rounded.woff2");
-        let font_css = mobot_dir.join("app").join("static").join("config").join("material-symbols.css");
-        if font_file.exists() && font_css.exists() {
-            return;
-        }
-        if let Some(res_dir) = Self::find_resource_dir() {
-            let src_font = res_dir.join("app").join("static").join("config").join("material-symbols-rounded.woff2");
-            let src_css = res_dir.join("app").join("static").join("config").join("material-symbols.css");
-            if src_font.exists() && !font_file.exists() {
-                let _ = std::fs::copy(&src_font, &font_file);
-                log::info!("Repaired missing font file: {}", font_file.display());
+        let config_dir = mobot_dir.join("app").join("static").join("config");
+        let font_file = config_dir.join("material-symbols-rounded.woff2");
+        let font_css = config_dir.join("material-symbols.css");
+
+        // Ensure font files exist (copy from bundled resources if missing)
+        if !font_file.exists() || !font_css.exists() {
+            if let Some(res_dir) = Self::find_resource_dir() {
+                let src_font = res_dir.join("app").join("static").join("config").join("material-symbols-rounded.woff2");
+                let src_css = res_dir.join("app").join("static").join("config").join("material-symbols.css");
+                if src_font.exists() && !font_file.exists() {
+                    let _ = std::fs::copy(&src_font, &font_file);
+                    log::info!("Repaired missing font file: {}", font_file.display());
+                }
+                if src_css.exists() && !font_css.exists() {
+                    let _ = std::fs::copy(&src_css, &font_css);
+                    log::info!("Repaired missing font CSS: {}", font_css.display());
+                }
             }
-            if src_css.exists() && !font_css.exists() {
-                let _ = std::fs::copy(&src_css, &font_css);
-                log::info!("Repaired missing font CSS: {}", font_css.display());
+        }
+
+        // Fix index.html: replace CDN font references with local path
+        let index_html = config_dir.join("index.html");
+        if index_html.exists() {
+            if let Ok(html) = std::fs::read_to_string(&index_html) {
+                // Match any external material-symbols CSS link (jsdelivr, googleapis, etc.)
+                if html.contains("cdn.jsdelivr.net/npm/material-symbols")
+                    || html.contains("fonts.googleapis.com/css2?family=Material+Symbols")
+                {
+                    let mut fixed_lines: Vec<String> = Vec::new();
+                    let mut replaced_cdn = false;
+                    for line in html.lines() {
+                        if line.contains("<link")
+                            && (line.contains("cdn.jsdelivr.net/npm/material-symbols")
+                                || line.contains("fonts.googleapis.com/css2?family=Material+Symbols"))
+                        {
+                            if !replaced_cdn {
+                                fixed_lines.push(r#"    <link rel="stylesheet" href="/static/config/material-symbols.css">"#.to_string());
+                                replaced_cdn = true;
+                            }
+                        } else {
+                            fixed_lines.push(line.to_string());
+                        }
+                    }
+                    if replaced_cdn {
+                        let fixed_html = fixed_lines.join("\n");
+                        let _ = std::fs::write(&index_html, &fixed_html);
+                        log::info!("Fixed index.html: replaced CDN font link with local path");
+                    }
+                }
             }
         }
     }

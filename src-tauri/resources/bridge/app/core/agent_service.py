@@ -392,14 +392,26 @@ class ClaudeAgentService:
             logger.info("[GIT_BASH] bash found in PATH, no override needed")
             return
 
-        # 检查 bundled MinGit（相对于 claude_agent_sdk 包所在的 lib/ 目录）
+        # 检查 bundled MinGit（bridge 根目录下的 mingit/）
         try:
+            # bridge_root: agent_service.py 在 app/core/ 下，往上两级就是 bridge 根目录
+            bridge_root = Path(__file__).resolve().parent.parent.parent
+            bundled_bash = bridge_root / "mingit" / "usr" / "bin" / "bash.exe"
+            if bundled_bash.is_file():
+                os.environ["CLAUDE_CODE_GIT_BASH_PATH"] = str(bundled_bash)
+                # 同时把 mingit/cmd 加入 PATH，让 git.exe 也可用
+                mingit_cmd = bridge_root / "mingit" / "cmd"
+                if mingit_cmd.is_dir():
+                    os.environ["PATH"] = str(mingit_cmd) + os.pathsep + os.environ.get("PATH", "")
+                logger.info(f"[GIT_BASH] Using bundled MinGit: {bundled_bash}")
+                return
+            # 兼容旧布局（lib/mingit/）
             sdk_dir = Path(claude_agent_sdk.__file__).parent
             lib_dir = sdk_dir.parent  # lib/
             bundled_bash = lib_dir / "mingit" / "usr" / "bin" / "bash.exe"
             if bundled_bash.is_file():
                 os.environ["CLAUDE_CODE_GIT_BASH_PATH"] = str(bundled_bash)
-                logger.info(f"[GIT_BASH] Using bundled MinGit: {bundled_bash}")
+                logger.info(f"[GIT_BASH] Using bundled MinGit (lib/): {bundled_bash}")
                 return
         except Exception:
             pass

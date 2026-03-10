@@ -148,28 +148,48 @@ Write-Host '正在安装 Node.js LTS...' -ForegroundColor Green
 Write-Host ''
 
 $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
-if (-not $wingetCmd) {
-    Write-Host '✗ winget 不可用' -ForegroundColor Red
-    Write-Host '正在打开 Node.js 下载页面...' -ForegroundColor Yellow
-    Start-Process 'https://nodejs.org/en/download/'
+if ($wingetCmd) {
+    Write-Host '尝试使用 winget 安装...' -ForegroundColor Cyan
+    Write-Host '提示:安装过程中会显示进度条,请耐心等待' -ForegroundColor Yellow
     Write-Host ''
-    Write-Host '按任意键关闭此窗口...'
-    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-    exit
+    winget install OpenJS.NodeJS.LTS
+    $wingetExitCode = $LASTEXITCODE
+    Write-Host ''
+    if ($wingetExitCode -eq 0) {
+        Write-Host '✓ 安装成功完成!' -ForegroundColor Green
+        Write-Host '按任意键关闭此窗口...'
+        $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+        exit
+    } elseif ($wingetExitCode -eq -1978335189 -or $wingetExitCode -eq -1978335212) {
+        Write-Host 'ℹ Node.js 已安装' -ForegroundColor Cyan
+        Write-Host '按任意键关闭此窗口...'
+        $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+        exit
+    }
+    Write-Host "winget 安装失败 (exit code: $wingetExitCode)，尝试镜像下载..." -ForegroundColor Yellow
+}
+else {
+    Write-Host 'winget 不可用，正在从镜像下载 Node.js...' -ForegroundColor Yellow
 }
 
-Write-Host '提示:安装过程中会显示进度条,请耐心等待' -ForegroundColor Yellow
 Write-Host ''
-winget install OpenJS.NodeJS.LTS
-$wingetExitCode = $LASTEXITCODE
-Write-Host ''
-if ($wingetExitCode -eq 0) {
-    Write-Host '✓ 安装成功完成!' -ForegroundColor Green
-} elseif ($wingetExitCode -eq -1978335189 -or $wingetExitCode -eq -1978335212) {
-    Write-Host 'ℹ Node.js 已安装' -ForegroundColor Cyan
-} else {
-    Write-Host "✗ 安装失败! (错误代码: $wingetExitCode)" -ForegroundColor Red
-    winget install OpenJS.NodeJS.LTS --force
+$mirrorBase = 'https://cdn.npmmirror.com/binaries/node/'
+try {
+    $indexJson = Invoke-RestMethod -Uri "${mirrorBase}index.json" -UseBasicParsing
+    $ltsVersion = ($indexJson | Where-Object { $_.lts -ne $false } | Select-Object -First 1).version
+    $fileName = "node-${ltsVersion}-x64.msi"
+    $downloadUrl = "${mirrorBase}${ltsVersion}/${fileName}"
+    $outPath = "$env:TEMP\$fileName"
+
+    Write-Host "下载: $fileName" -ForegroundColor Cyan
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
+    Write-Host '下载完成，正在安装...' -ForegroundColor Green
+    Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i `"$outPath`" /qn /norestart" -Wait
+    Write-Host '✓ Node.js 安装完成' -ForegroundColor Green
+} catch {
+    Write-Host "下载失败: $_" -ForegroundColor Red
+    Write-Host '正在打开备用下载页面...' -ForegroundColor Yellow
+    Start-Process 'https://nodejs.org/en/download/'
 }
 Write-Host ''
 Write-Host '按任意键关闭此窗口...'
@@ -184,15 +204,42 @@ Write-Host '正在更新 Node.js...' -ForegroundColor Green
 Write-Host ''
 
 $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
-if (-not $wingetCmd) {
-    Write-Host '✗ winget 不可用' -ForegroundColor Red
-    Start-Process 'https://nodejs.org/en/download/'
-    Write-Host '按任意键关闭此窗口...'
-    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-    exit
+if ($wingetCmd) {
+    Write-Host '尝试使用 winget 更新...' -ForegroundColor Cyan
+    winget upgrade OpenJS.NodeJS.LTS
+    $wingetExitCode = $LASTEXITCODE
+    if ($wingetExitCode -eq 0 -or $wingetExitCode -eq -1978335189) {
+        Write-Host '✓ Node.js 更新完成' -ForegroundColor Green
+        Write-Host ''
+        Write-Host '按任意键关闭此窗口...'
+        $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+        exit
+    }
+    Write-Host "winget 更新失败 (exit code: $wingetExitCode)，尝试镜像下载..." -ForegroundColor Yellow
+}
+else {
+    Write-Host 'winget 不可用，正在从镜像下载 Node.js...' -ForegroundColor Yellow
 }
 
-winget upgrade OpenJS.NodeJS.LTS
+Write-Host ''
+$mirrorBase = 'https://cdn.npmmirror.com/binaries/node/'
+try {
+    $indexJson = Invoke-RestMethod -Uri "${mirrorBase}index.json" -UseBasicParsing
+    $ltsVersion = ($indexJson | Where-Object { $_.lts -ne $false } | Select-Object -First 1).version
+    $fileName = "node-${ltsVersion}-x64.msi"
+    $downloadUrl = "${mirrorBase}${ltsVersion}/${fileName}"
+    $outPath = "$env:TEMP\$fileName"
+
+    Write-Host "下载: $fileName" -ForegroundColor Cyan
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
+    Write-Host '下载完成，正在安装...' -ForegroundColor Green
+    Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i `"$outPath`" /qn /norestart" -Wait
+    Write-Host '✓ Node.js 更新完成' -ForegroundColor Green
+} catch {
+    Write-Host "下载失败: $_" -ForegroundColor Red
+    Write-Host '正在打开备用下载页面...' -ForegroundColor Yellow
+    Start-Process 'https://nodejs.org/en/download/'
+}
 Write-Host ''
 Write-Host '按任意键关闭此窗口...'
 $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
@@ -304,15 +351,44 @@ Write-Host '正在安装 Git...' -ForegroundColor Green
 Write-Host ''
 
 $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
-if (-not $wingetCmd) {
-    Write-Host '✗ winget 不可用' -ForegroundColor Red
-    Start-Process 'https://git-scm.com/download/windows'
-    Write-Host '按任意键关闭此窗口...'
-    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-    exit
+if ($wingetCmd) {
+    Write-Host '尝试使用 winget 安装...' -ForegroundColor Cyan
+    $wingetResult = Start-Process -FilePath 'winget' -ArgumentList 'install','--id','Git.Git','-e','--source','winget' -Wait -PassThru -NoNewWindow
+    if ($wingetResult.ExitCode -eq 0) {
+        Write-Host '✓ Git 安装完成 (winget)' -ForegroundColor Green
+        Write-Host ''
+        Write-Host '按任意键关闭此窗口...'
+        $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+        exit
+    }
+    Write-Host "winget 安装失败 (exit code: $($wingetResult.ExitCode))，尝试镜像下载..." -ForegroundColor Yellow
 }
+else {
+    Write-Host 'winget 不可用，正在从镜像下载 Git...' -ForegroundColor Yellow
+}
+Write-Host ''
 
-winget install --id Git.Git -e --source winget
+$mirrorBase = 'https://registry.npmmirror.com/-/binary/git-for-windows/'
+try {
+    $json = Invoke-RestMethod -Uri $mirrorBase -UseBasicParsing
+    $latest = $json | Where-Object { $_.type -eq 'dir' -and $_.name -match '^v[\d.]+\.windows\.\d+/$' -and $_.name -notmatch 'rc' } | Sort-Object -Property date -Descending | Select-Object -First 1
+    $ver = $latest.name.TrimEnd('/')
+    $verNum = $ver -replace '^v' -replace '\.windows\.\d+$'
+    $winSuffix = if ($ver -match '\.windows\.(\d+)$') { $Matches[1] } else { '1' }
+    $fileName = if ($winSuffix -eq '1') { "Git-$verNum-64-bit.exe" } else { "Git-$verNum.$winSuffix-64-bit.exe" }
+    $downloadUrl = "${mirrorBase}${ver}/${fileName}"
+    $outPath = "$env:TEMP\$fileName"
+
+    Write-Host "下载: $fileName" -ForegroundColor Cyan
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
+    Write-Host '下载完成，正在安装...' -ForegroundColor Green
+    Start-Process -FilePath $outPath -ArgumentList '/VERYSILENT /NORESTART' -Wait
+    Write-Host '✓ Git 安装完成' -ForegroundColor Green
+} catch {
+    Write-Host "下载失败: $_" -ForegroundColor Red
+    Write-Host '正在打开备用下载页面...' -ForegroundColor Yellow
+    Start-Process 'https://git-scm.com/download/windows'
+}
 Write-Host ''
 Write-Host '按任意键关闭此窗口...'
 $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
@@ -326,15 +402,44 @@ Write-Host '正在更新 Git...' -ForegroundColor Green
 Write-Host ''
 
 $wingetCmd = Get-Command winget -ErrorAction SilentlyContinue
-if (-not $wingetCmd) {
-    Write-Host '✗ winget 不可用' -ForegroundColor Red
-    Start-Process 'https://git-scm.com/download/windows'
-    Write-Host '按任意键关闭此窗口...'
-    $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
-    exit
+if ($wingetCmd) {
+    Write-Host '尝试使用 winget 更新...' -ForegroundColor Cyan
+    $wingetResult = Start-Process -FilePath 'winget' -ArgumentList 'upgrade','--id','Git.Git','-e','--source','winget' -Wait -PassThru -NoNewWindow
+    if ($wingetResult.ExitCode -eq 0) {
+        Write-Host '✓ Git 更新完成 (winget)' -ForegroundColor Green
+        Write-Host ''
+        Write-Host '按任意键关闭此窗口...'
+        $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+        exit
+    }
+    Write-Host "winget 更新失败 (exit code: $($wingetResult.ExitCode))，尝试镜像下载..." -ForegroundColor Yellow
 }
+else {
+    Write-Host 'winget 不可用，正在从镜像下载 Git...' -ForegroundColor Yellow
+}
+Write-Host ''
 
-winget upgrade --id Git.Git -e --source winget
+$mirrorBase = 'https://registry.npmmirror.com/-/binary/git-for-windows/'
+try {
+    $json = Invoke-RestMethod -Uri $mirrorBase -UseBasicParsing
+    $latest = $json | Where-Object { $_.type -eq 'dir' -and $_.name -match '^v[\d.]+\.windows\.\d+/$' -and $_.name -notmatch 'rc' } | Sort-Object -Property date -Descending | Select-Object -First 1
+    $ver = $latest.name.TrimEnd('/')
+    $verNum = $ver -replace '^v' -replace '\.windows\.\d+$'
+    $winSuffix = if ($ver -match '\.windows\.(\d+)$') { $Matches[1] } else { '1' }
+    $fileName = if ($winSuffix -eq '1') { "Git-$verNum-64-bit.exe" } else { "Git-$verNum.$winSuffix-64-bit.exe" }
+    $downloadUrl = "${mirrorBase}${ver}/${fileName}"
+    $outPath = "$env:TEMP\$fileName"
+
+    Write-Host "下载: $fileName" -ForegroundColor Cyan
+    Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
+    Write-Host '下载完成，正在安装...' -ForegroundColor Green
+    Start-Process -FilePath $outPath -ArgumentList '/VERYSILENT /NORESTART' -Wait
+    Write-Host '✓ Git 更新完成' -ForegroundColor Green
+} catch {
+    Write-Host "下载失败: $_" -ForegroundColor Red
+    Write-Host '正在打开备用下载页面...' -ForegroundColor Yellow
+    Start-Process 'https://git-scm.com/download/windows'
+}
 Write-Host ''
 Write-Host '按任意键关闭此窗口...'
 $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
