@@ -28,6 +28,10 @@
   "bundle": {
     "active": true,
     "targets": ["nsis", "app", "dmg"],
+    "publisher": "微众银行",
+    "copyright": "版权所有 © 2026",
+    "shortDescription": "Mobot Launcher",
+    "longDescription": "Mobot Launcher，支持桌面、远程启动claudecode、codex等服务，并对接企微、飞书",
     "resources": ["resources/bridge/**/*"],
     "icon": [
       "icons/32x32.png",
