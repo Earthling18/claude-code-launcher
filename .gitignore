@@ -41,3 +41,6 @@ src-tauri/resources/bridge/bridge_admin.json
 *.exe
 *.dmg
 *.sig
+
+# Allow bundled MinGit executables
+!src-tauri/resources/bridge/mingit/**/*.exe
