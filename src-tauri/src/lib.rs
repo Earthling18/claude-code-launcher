@@ -49,8 +49,9 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|_window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                // Stop mobot-bridge process when app window is destroyed
+            if let tauri::WindowEvent::CloseRequested { .. } = event {
+                // Stop mobot-bridge process BEFORE window closes,
+                // so we have time to run taskkill commands.
                 services::BridgeManager::stop_all();
             }
         })
@@ -130,6 +131,11 @@ pub fn run() {
             commands::get_hostname,
             commands::get_username,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app, event| {
+            if let tauri::RunEvent::Exit = event {
+                services::BridgeManager::stop_all();
+            }
+        });
 }

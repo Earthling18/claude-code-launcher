@@ -1252,7 +1252,7 @@ impl BridgeManager {
                 .args([
                     "/C",
                     &format!(
-                        "netstat -ano | findstr \"LISTENING\" | findstr \":{port} \""
+                        "netstat -ano | findstr LISTENING | findstr :{port}"
                     ),
                 ])
                 .output();
