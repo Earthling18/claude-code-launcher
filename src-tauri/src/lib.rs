@@ -48,13 +48,7 @@ pub fn run() {
 
             Ok(())
         })
-        .on_window_event(|_window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                // Stop mobot-bridge process BEFORE window closes,
-                // so we have time to run taskkill commands.
-                services::BridgeManager::stop_all();
-            }
-        })
+        .on_window_event(|_window, _event| {})
         .invoke_handler(tauri::generate_handler![
             commands::check_nodejs,
             commands::check_claude,
