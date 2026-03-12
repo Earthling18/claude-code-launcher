@@ -187,14 +187,6 @@ impl DependencyChecker {
     pub fn check_gitbash() -> DependencyStatus {
         #[cfg(windows)]
         {
-            // If a Git installer is still running, don't report as installed yet
-            // (Inno Setup extracts git.exe before the installer finishes)
-            if Self::is_git_installer_running() {
-                return DependencyStatus {
-                    installed: false, version: None, meets_requirement: false,
-                    latest_version: None, update_available: false, error: None,
-                };
-            }
             Self::refresh_system_path();
             let result = Self::check_dependency("git", &["--version"], r"git version (\d+\.\d+\.\d+)", None);
             if result.installed {
@@ -206,6 +198,13 @@ impl DependencyChecker {
                 r"C:\Program Files (x86)\Git\cmd\git.exe",
             ] {
                 if std::path::Path::new(git_exe).exists() {
+                    // git.exe exists but not in PATH yet — could be mid-install.
+                    // Inno Setup extracts git.exe before the installer finishes,
+                    // so check if the installer is still running before reporting installed.
+                    if Self::is_git_installer_running() {
+                        log::info!("git.exe found at {} but installer still running, waiting...", git_exe);
+                        break;
+                    }
                     let mut cmd = Command::new(git_exe);
                     cmd.arg("--version");
                     hide_window(&mut cmd);
