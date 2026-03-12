@@ -187,6 +187,14 @@ impl DependencyChecker {
     pub fn check_gitbash() -> DependencyStatus {
         #[cfg(windows)]
         {
+            // If a Git installer is still running, don't report as installed yet
+            // (Inno Setup extracts git.exe before the installer finishes)
+            if Self::is_git_installer_running() {
+                return DependencyStatus {
+                    installed: false, version: None, meets_requirement: false,
+                    latest_version: None, update_available: false, error: None,
+                };
+            }
             Self::refresh_system_path();
             let result = Self::check_dependency("git", &["--version"], r"git version (\d+\.\d+\.\d+)", None);
             if result.installed {
@@ -899,6 +907,27 @@ impl DependencyChecker {
         {
             None
         }
+    }
+
+    /// Check if a Git installer process (Inno Setup) is still running.
+    /// Git's Inno Setup extracts git.exe before the installer finishes,
+    /// so we must wait for the setup process to exit before reporting installed.
+    #[cfg(windows)]
+    fn is_git_installer_running() -> bool {
+        // Check for processes with "Git" in their name (e.g. Git-2.47.1-64-bit.exe)
+        let mut cmd = Command::new("powershell");
+        cmd.args(["-NoProfile", "-Command",
+            "Get-Process | Where-Object { $_.Name -match 'Git.*64.*bit' -or ($_.Name -match 'Git' -and $_.Name -match 'Setup') } | Select-Object -First 1 | ForEach-Object { $_.Id }"
+        ]);
+        hide_window(&mut cmd);
+        if let Ok(out) = cmd.output() {
+            let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if !stdout.is_empty() {
+                log::info!("Git installer still running (PID: {}), waiting...", stdout);
+                return true;
+            }
+        }
+        false
     }
 
     #[cfg(windows)]

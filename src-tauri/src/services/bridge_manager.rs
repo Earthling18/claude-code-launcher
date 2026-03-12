@@ -570,6 +570,9 @@ impl BridgeManager {
             return Err(format!("start.py not found at {}", start_py.display()));
         }
 
+        // Ensure bundled resources exist (e.g. mingit/ added in newer app versions)
+        Self::ensure_bundled_resources(bridge_dir);
+
         // Repair font files if missing
         Self::repair_fonts_if_needed();
 
@@ -723,7 +726,32 @@ impl BridgeManager {
         Ok(())
     }
 
-    /// Check mobot-bridge health via GET /health
+    /// Ensure bundled resource directories exist in the installed bridge path.
+    /// When the app upgrades and bundles new resources (e.g. mingit/), old users
+    /// won't have them because install_mobot_bridge only runs on fresh install.
+    /// This copies missing directories from bundled resources on each startup.
+    fn ensure_bundled_resources(bridge_dir: &Path) {
+        // Add new resource directory names here when they are introduced
+        let required_dirs = ["mingit"];
+
+        for dir_name in &required_dirs {
+            let installed = bridge_dir.join(dir_name);
+            if installed.exists() {
+                continue;
+            }
+            // Not present → copy from bundled resources
+            if let Some(res_dir) = Self::find_resource_dir() {
+                let src = res_dir.join(dir_name);
+                if src.is_dir() {
+                    log::info!("Copying missing resource '{}' from bundled resources", dir_name);
+                    if let Err(e) = Self::copy_dir_recursive(&src, &installed) {
+                        log::error!("Failed to copy {}: {}", dir_name, e);
+                    }
+                }
+            }
+        }
+    }
+
     /// Repair font files and fix CDN references in index.html after hot-update.
     /// Hot-update overwrites app/static/ and index.html may reference external CDN
     /// (e.g. jsdelivr) instead of local font files, which fails in China.
