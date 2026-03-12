@@ -967,16 +967,25 @@ impl BridgeManager {
         // Stop bridge client
         Self::stop_bridge_client();
 
-        let mut proc_lock = match MOBOT_PROCESS.lock() {
-            Ok(p) => p,
-            Err(_) => return,
-        };
+        let port;
+        {
+            let mut proc_lock = match MOBOT_PROCESS.lock() {
+                Ok(p) => p,
+                Err(_) => return,
+            };
 
-        if let Some(ref mut process) = *proc_lock {
-            log::info!("Stopping mobot-bridge on app exit");
-            Self::kill_child(&mut process.child);
+            port = proc_lock.as_ref().map(|p| p.port).unwrap_or(8000);
+
+            if let Some(ref mut process) = *proc_lock {
+                log::info!("Stopping mobot-bridge on app exit");
+                Self::kill_child(&mut process.child);
+            }
+            *proc_lock = None;
         }
-        *proc_lock = None;
+
+        // Also kill any orphaned process on the port (e.g. bridge restarted
+        // by hot-update's restart_helper, PID not tracked by Tauri)
+        Self::kill_process_on_port(port);
     }
 
     /// Get hostname (for display / connection command)
