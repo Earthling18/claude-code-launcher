@@ -704,7 +704,22 @@ impl DependencyChecker {
     async fn get_nodejs_latest_version() -> Option<String> {
         #[cfg(windows)]
         {
-            // Windows: 先尝试 winget，失败则从 npmmirror 获取
+            // Windows: 优先从 npmmirror 获取，失败则 winget
+            if let Ok(response) = reqwest::get("https://cdn.npmmirror.com/binaries/node/index.json").await {
+                if let Ok(json) = response.json::<Vec<serde_json::Value>>().await {
+                    for entry in &json {
+                        // lts field is either a string (codename) or false
+                        if entry.get("lts").and_then(|v| v.as_str()).is_some() {
+                            if let Some(version) = entry.get("version").and_then(|v| v.as_str()) {
+                                let ver = version.trim_start_matches('v');
+                                return Some(ver.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // fallback: winget
             for attempt in 0..3 {
                 let mut cmd = tokio::process::Command::new("winget");
                 cmd.args(&["show", "OpenJS.NodeJS.LTS"]);
@@ -731,25 +746,6 @@ impl DependencyChecker {
 
                 if attempt < 2 {
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                }
-            }
-
-            // winget 失败，fallback 到 npmmirror
-            if let Ok(response) = reqwest::get("https://cdn.npmmirror.com/binaries/node/index.json").await {
-                if let Ok(json) = response.json::<Vec<serde_json::Value>>().await {
-                    for entry in &json {
-                        if entry.get("lts").and_then(|v| v.as_str()).is_some()
-                            || entry.get("lts").and_then(|v| v.as_bool()).unwrap_or(false) == false
-                        {
-                            // lts field is either a string (codename) or false
-                            if entry.get("lts").and_then(|v| v.as_str()).is_some() {
-                                if let Some(version) = entry.get("version").and_then(|v| v.as_str()) {
-                                    let ver = version.trim_start_matches('v');
-                                    return Some(ver.to_string());
-                                }
-                            }
-                        }
-                    }
                 }
             }
 
@@ -818,7 +814,31 @@ impl DependencyChecker {
     async fn get_gitbash_latest_version() -> Option<String> {
         #[cfg(windows)]
         {
-            // Windows: 先尝试 winget，失败则从 npmmirror 获取
+            // Windows: 优先从 npmmirror 获取，失败则 winget
+            if let Ok(response) = reqwest::get("https://registry.npmmirror.com/-/binary/git-for-windows/").await {
+                if let Ok(json) = response.json::<Vec<serde_json::Value>>().await {
+                    let re = Regex::new(r"^v([\d.]+)\.windows\.\d+/$").unwrap();
+                    let mut best_version: Option<String> = None;
+                    for entry in &json {
+                        if let Some(name) = entry.get("name").and_then(|v| v.as_str()) {
+                            if name.contains("rc") { continue; }
+                            if let Some(caps) = re.captures(name) {
+                                if let Some(ver) = caps.get(1) {
+                                    let v = ver.as_str().to_string();
+                                    if best_version.is_none() || !Self::compare_versions(best_version.as_ref().unwrap(), &v) {
+                                        best_version = Some(v);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if best_version.is_some() {
+                        return best_version;
+                    }
+                }
+            }
+
+            // fallback: winget
             for attempt in 0..3 {
                 let mut cmd = tokio::process::Command::new("winget");
                 cmd.args(&["show", "Git.Git"]);
@@ -845,30 +865,6 @@ impl DependencyChecker {
 
                 if attempt < 2 {
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                }
-            }
-
-            // winget 失败，fallback 到 npmmirror git-for-windows 镜像
-            if let Ok(response) = reqwest::get("https://registry.npmmirror.com/-/binary/git-for-windows/").await {
-                if let Ok(json) = response.json::<Vec<serde_json::Value>>().await {
-                    let re = Regex::new(r"^v([\d.]+)\.windows\.\d+/$").unwrap();
-                    let mut best_version: Option<String> = None;
-                    for entry in &json {
-                        if let Some(name) = entry.get("name").and_then(|v| v.as_str()) {
-                            if name.contains("rc") { continue; }
-                            if let Some(caps) = re.captures(name) {
-                                if let Some(ver) = caps.get(1) {
-                                    let v = ver.as_str().to_string();
-                                    if best_version.is_none() || !Self::compare_versions(best_version.as_ref().unwrap(), &v) {
-                                        best_version = Some(v);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    if best_version.is_some() {
-                        return best_version;
-                    }
                 }
             }
 
