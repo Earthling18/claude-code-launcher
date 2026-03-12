@@ -140,11 +140,91 @@ impl DependencyChecker {
             }
         }
 
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(windows)]
+        {
+            Self::refresh_system_path();
+            let result = Self::check_dependency("node", &["--version"], r"v(\d+\.\d+\.\d+)", Some("18.0.0"));
+            if result.installed {
+                return result;
+            }
+            // Fallback: check known install path directly
+            let node_exe = r"C:\Program Files\nodejs\node.exe";
+            if std::path::Path::new(node_exe).exists() {
+                let mut cmd = Command::new(node_exe);
+                cmd.arg("--version");
+                hide_window(&mut cmd);
+                if let Ok(out) = cmd.output() {
+                    if out.status.success() {
+                        let stdout = String::from_utf8_lossy(&out.stdout);
+                        if let Ok(re) = Regex::new(r"v(\d+\.\d+\.\d+)") {
+                            if let Some(caps) = re.captures(&stdout) {
+                                let version = caps.get(1).map(|m| m.as_str().to_string());
+                                let meets_requirement = if let Some(ref v) = version {
+                                    Self::compare_versions(v, "18.0.0")
+                                } else {
+                                    false
+                                };
+                                return DependencyStatus {
+                                    installed: true,
+                                    version,
+                                    meets_requirement,
+                                    latest_version: None,
+                                    update_available: false,
+                                    error: None,
+                                };
+                            }
+                        }
+                    }
+                }
+            }
+            result
+        }
+
+        #[cfg(all(not(windows), not(target_os = "macos")))]
         Self::check_dependency("node", &["--version"], r"v(\d+\.\d+\.\d+)", Some("18.0.0"))
     }
 
     pub fn check_gitbash() -> DependencyStatus {
+        #[cfg(windows)]
+        {
+            Self::refresh_system_path();
+            let result = Self::check_dependency("git", &["--version"], r"git version (\d+\.\d+\.\d+)", None);
+            if result.installed {
+                return result;
+            }
+            // Fallback: check known install paths directly
+            for git_exe in &[
+                r"C:\Program Files\Git\cmd\git.exe",
+                r"C:\Program Files (x86)\Git\cmd\git.exe",
+            ] {
+                if std::path::Path::new(git_exe).exists() {
+                    let mut cmd = Command::new(git_exe);
+                    cmd.arg("--version");
+                    hide_window(&mut cmd);
+                    if let Ok(out) = cmd.output() {
+                        if out.status.success() {
+                            let stdout = String::from_utf8_lossy(&out.stdout);
+                            if let Ok(re) = Regex::new(r"git version (\d+\.\d+\.\d+)") {
+                                if let Some(caps) = re.captures(&stdout) {
+                                    let version = caps.get(1).map(|m| m.as_str().to_string());
+                                    return DependencyStatus {
+                                        installed: true,
+                                        version,
+                                        meets_requirement: true,
+                                        latest_version: None,
+                                        update_available: false,
+                                        error: None,
+                                    };
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            result
+        }
+
+        #[cfg(not(windows))]
         Self::check_dependency("git", &["--version"], r"git version (\d+\.\d+\.\d+)", None)
     }
 
@@ -624,7 +704,7 @@ impl DependencyChecker {
     async fn get_nodejs_latest_version() -> Option<String> {
         #[cfg(windows)]
         {
-            // Windows: 使用 winget 检查最新版本
+            // Windows: 先尝试 winget，失败则从 npmmirror 获取
             for attempt in 0..3 {
                 let mut cmd = tokio::process::Command::new("winget");
                 cmd.args(&["show", "OpenJS.NodeJS.LTS"]);
@@ -653,6 +733,26 @@ impl DependencyChecker {
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
             }
+
+            // winget 失败，fallback 到 npmmirror
+            if let Ok(response) = reqwest::get("https://cdn.npmmirror.com/binaries/node/index.json").await {
+                if let Ok(json) = response.json::<Vec<serde_json::Value>>().await {
+                    for entry in &json {
+                        if entry.get("lts").and_then(|v| v.as_str()).is_some()
+                            || entry.get("lts").and_then(|v| v.as_bool()).unwrap_or(false) == false
+                        {
+                            // lts field is either a string (codename) or false
+                            if entry.get("lts").and_then(|v| v.as_str()).is_some() {
+                                if let Some(version) = entry.get("version").and_then(|v| v.as_str()) {
+                                    let ver = version.trim_start_matches('v');
+                                    return Some(ver.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             None
         }
 
@@ -718,7 +818,7 @@ impl DependencyChecker {
     async fn get_gitbash_latest_version() -> Option<String> {
         #[cfg(windows)]
         {
-            // Windows: 使用 winget 检查最新版本
+            // Windows: 先尝试 winget，失败则从 npmmirror 获取
             for attempt in 0..3 {
                 let mut cmd = tokio::process::Command::new("winget");
                 cmd.args(&["show", "Git.Git"]);
@@ -747,6 +847,31 @@ impl DependencyChecker {
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 }
             }
+
+            // winget 失败，fallback 到 npmmirror git-for-windows 镜像
+            if let Ok(response) = reqwest::get("https://registry.npmmirror.com/-/binary/git-for-windows/").await {
+                if let Ok(json) = response.json::<Vec<serde_json::Value>>().await {
+                    let re = Regex::new(r"^v([\d.]+)\.windows\.\d+/$").unwrap();
+                    let mut best_version: Option<String> = None;
+                    for entry in &json {
+                        if let Some(name) = entry.get("name").and_then(|v| v.as_str()) {
+                            if name.contains("rc") { continue; }
+                            if let Some(caps) = re.captures(name) {
+                                if let Some(ver) = caps.get(1) {
+                                    let v = ver.as_str().to_string();
+                                    if best_version.is_none() || !Self::compare_versions(best_version.as_ref().unwrap(), &v) {
+                                        best_version = Some(v);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if best_version.is_some() {
+                        return best_version;
+                    }
+                }
+            }
+
             None
         }
 

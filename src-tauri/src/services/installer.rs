@@ -183,9 +183,13 @@ try {
 
     Write-Host "下载: $fileName" -ForegroundColor Cyan
     Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
-    Write-Host '下载完成，正在安装...' -ForegroundColor Green
-    Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i `"$outPath`" /qn /norestart" -Wait
-    Write-Host '✓ Node.js 安装完成' -ForegroundColor Green
+    Write-Host '下载完成，正在启动安装程序...' -ForegroundColor Green
+    $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i `"$outPath`" /norestart" -Wait -PassThru
+    if ($proc.ExitCode -eq 0) {
+        Write-Host '✓ Node.js 安装完成' -ForegroundColor Green
+    } else {
+        Write-Host "✗ 安装失败 (exit code: $($proc.ExitCode))" -ForegroundColor Red
+    }
 } catch {
     Write-Host "下载失败: $_" -ForegroundColor Red
     Write-Host '正在打开备用下载页面...' -ForegroundColor Yellow
@@ -232,9 +236,13 @@ try {
 
     Write-Host "下载: $fileName" -ForegroundColor Cyan
     Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
-    Write-Host '下载完成，正在安装...' -ForegroundColor Green
-    Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i `"$outPath`" /qn /norestart" -Wait
-    Write-Host '✓ Node.js 更新完成' -ForegroundColor Green
+    Write-Host '下载完成，正在启动安装程序...' -ForegroundColor Green
+    $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList "/i `"$outPath`" /norestart" -Wait -PassThru
+    if ($proc.ExitCode -eq 0) {
+        Write-Host '✓ Node.js 更新完成' -ForegroundColor Green
+    } else {
+        Write-Host "✗ 安装失败 (exit code: $($proc.ExitCode))" -ForegroundColor Red
+    }
 } catch {
     Write-Host "下载失败: $_" -ForegroundColor Red
     Write-Host '正在打开备用下载页面...' -ForegroundColor Yellow
@@ -381,9 +389,13 @@ try {
 
     Write-Host "下载: $fileName" -ForegroundColor Cyan
     Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
-    Write-Host '下载完成，正在安装...' -ForegroundColor Green
-    Start-Process -FilePath $outPath -ArgumentList '/VERYSILENT /NORESTART' -Wait
-    Write-Host '✓ Git 安装完成' -ForegroundColor Green
+    Write-Host '下载完成，正在启动安装程序...' -ForegroundColor Green
+    $proc = Start-Process -FilePath $outPath -ArgumentList '/SILENT /NORESTART' -Wait -PassThru
+    if ($proc.ExitCode -eq 0) {
+        Write-Host '✓ Git 安装完成' -ForegroundColor Green
+    } else {
+        Write-Host "✗ 安装失败 (exit code: $($proc.ExitCode))" -ForegroundColor Red
+    }
 } catch {
     Write-Host "下载失败: $_" -ForegroundColor Red
     Write-Host '正在打开备用下载页面...' -ForegroundColor Yellow
@@ -432,9 +444,13 @@ try {
 
     Write-Host "下载: $fileName" -ForegroundColor Cyan
     Invoke-WebRequest -Uri $downloadUrl -OutFile $outPath -UseBasicParsing
-    Write-Host '下载完成，正在安装...' -ForegroundColor Green
-    Start-Process -FilePath $outPath -ArgumentList '/VERYSILENT /NORESTART' -Wait
-    Write-Host '✓ Git 更新完成' -ForegroundColor Green
+    Write-Host '下载完成，正在启动安装程序...' -ForegroundColor Green
+    $proc = Start-Process -FilePath $outPath -ArgumentList '/SILENT /NORESTART' -Wait -PassThru
+    if ($proc.ExitCode -eq 0) {
+        Write-Host '✓ Git 更新完成' -ForegroundColor Green
+    } else {
+        Write-Host "✗ 安装失败 (exit code: $($proc.ExitCode))" -ForegroundColor Red
+    }
 } catch {
     Write-Host "下载失败: $_" -ForegroundColor Red
     Write-Host '正在打开备用下载页面...' -ForegroundColor Yellow
