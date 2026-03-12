@@ -326,6 +326,14 @@ pub async fn detect_mobot_installation(app_handle: tauri::AppHandle) -> InstallS
         .await
         .unwrap_or(InstallStatus::NotInstalled);
 
+    // If installed, ensure bundled resources (e.g. mingit/) exist in the bridge dir.
+    // This must run here (not just in start_service) because the service may already
+    // be running, in which case start_service is never called.
+    if !matches!(status, InstallStatus::NotInstalled) {
+        let bridge_dir = BridgeManager::get_mobot_dir();
+        BridgeManager::ensure_bundled_resources(&bridge_dir);
+    }
+
     // If installed, compare installed version with bundled version
     // to force re-install when app is upgraded (e.g. master -> mobot branch)
     if !matches!(status, InstallStatus::NotInstalled) {

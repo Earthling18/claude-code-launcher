@@ -261,6 +261,7 @@ impl BridgeManager {
     fn find_resource_dir() -> Option<PathBuf> {
         // Try exe directory (installed) and dev mode
         if let Ok(exe) = std::env::current_exe() {
+            log::info!("find_resource_dir: exe={}", exe.display());
             if let Some(exe_dir) = exe.parent() {
                 let candidates = [
                     exe_dir.join("resources").join("bridge"),
@@ -269,12 +270,17 @@ impl BridgeManager {
                     Path::new(env!("CARGO_MANIFEST_DIR")).join("resources").join("bridge"),
                 ];
                 for candidate in &candidates {
-                    if candidate.join("start.py").exists() {
+                    let has_start_py = candidate.join("start.py").exists();
+                    log::info!("find_resource_dir: checking {}, start.py exists={}", candidate.display(), has_start_py);
+                    if has_start_py {
                         return Some(candidate.clone());
                     }
                 }
             }
+        } else {
+            log::warn!("find_resource_dir: current_exe() failed");
         }
+        log::warn!("find_resource_dir: no valid resource dir found");
         None
     }
 
@@ -730,23 +736,35 @@ impl BridgeManager {
     /// When the app upgrades and bundles new resources (e.g. mingit/), old users
     /// won't have them because install_mobot_bridge only runs on fresh install.
     /// This copies missing directories from bundled resources on each startup.
-    fn ensure_bundled_resources(bridge_dir: &Path) {
+    pub fn ensure_bundled_resources(bridge_dir: &Path) {
+        log::info!("ensure_bundled_resources: bridge_dir={}", bridge_dir.display());
         // Add new resource directory names here when they are introduced
         let required_dirs = ["mingit"];
 
         for dir_name in &required_dirs {
             let installed = bridge_dir.join(dir_name);
             if installed.exists() {
+                log::info!("ensure_bundled_resources: '{}' already exists, skipping", dir_name);
                 continue;
             }
+            log::info!("ensure_bundled_resources: '{}' missing, looking in bundled resources...", dir_name);
             // Not present → copy from bundled resources
-            if let Some(res_dir) = Self::find_resource_dir() {
-                let src = res_dir.join(dir_name);
-                if src.is_dir() {
-                    log::info!("Copying missing resource '{}' from bundled resources", dir_name);
-                    if let Err(e) = Self::copy_dir_recursive(&src, &installed) {
-                        log::error!("Failed to copy {}: {}", dir_name, e);
+            match Self::find_resource_dir() {
+                Some(res_dir) => {
+                    let src = res_dir.join(dir_name);
+                    log::info!("ensure_bundled_resources: resource_dir={}, src={}, is_dir={}", res_dir.display(), src.display(), src.is_dir());
+                    if src.is_dir() {
+                        log::info!("Copying missing resource '{}' from bundled resources", dir_name);
+                        match Self::copy_dir_recursive(&src, &installed) {
+                            Ok(_) => log::info!("ensure_bundled_resources: successfully copied '{}'", dir_name),
+                            Err(e) => log::error!("Failed to copy {}: {}", dir_name, e),
+                        }
+                    } else {
+                        log::warn!("ensure_bundled_resources: src '{}' is not a directory", src.display());
                     }
+                }
+                None => {
+                    log::warn!("ensure_bundled_resources: find_resource_dir() returned None");
                 }
             }
         }
