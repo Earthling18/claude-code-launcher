@@ -1,562 +1,603 @@
-# API 参考文档
+# Mobot Launcher Tauri - API Reference
 
-> **Tauri Commands API 完整参考**
-> **最后更新**: 2026-02-26
-> **API 数量**: 37 个 Tauri Commands
-
----
-
-## 📋 目录
-
-- [1. API 概览](#1-api-概览)
-- [2. 依赖检测 API](#2-依赖检测-api)
-- [3. 安装/更新 API](#3-安装更新-api)
-- [4. 启动器 API](#4-启动器-api)
-- [5. 设置管理 API](#5-设置管理-api)
-- [6. 应用配置 API](#6-应用配置-api)
-- [7. 项目管理 API](#7-项目管理-api)
-- [8. 桥接管理 API](#8-桥接管理-api)
-- [9. 数据类型](#9-数据类型)
-- [10. 错误处理](#10-错误处理)
-- [11. 使用示例](#11-使用示例)
-- [12. 总结](#12-总结)
+> **项目版本**: 1.0.4
+> **最后更新**: 2026-03-13
+> **API 数量**: 67 个 Tauri Commands
 
 ---
 
-## 1. API 概览
+## 目录
 
-### 1.1 所有可用 Commands (37 个)
+1. [依赖检测 API](#1-依赖检测-api) (8 个)
+2. [安装/更新 API](#2-安装更新-api) (8 个)
+3. [系统工具 API](#3-系统工具-api) (2 个)
+4. [启动器 API](#4-启动器-api) (4 个)
+5. [命令生成 API](#5-命令生成-api) (3 个)
+6. [设置管理 API](#6-设置管理-api) (3 个)
+7. [应用配置 API](#7-应用配置-api) (2 个)
+8. [项目管理 API](#8-项目管理-api) (14 个)
+9. [引导 API](#9-引导-api) (2 个)
+10. [Mobot Bridge 管理 API](#10-mobot-bridge-管理-api) (11 个)
+11. [Claude 登录 API](#11-claude-登录-api) (2 个)
+12. [CC 配置检查 API](#12-cc-配置检查-api) (7 个)
+13. [便携模式 API](#13-便携模式-api) (2 个)
+14. [工具 API](#14-工具-api) (2 个)
 
-| 分类 | Command 名称 | 说明 |
-|------|--------------|------|
-| **依赖检测** | `check_nodejs` | 检测 Node.js 安装状态 |
-| | `check_claude` | 检测 Claude Code 安装状态 |
-| | `check_gitbash` | 检测 Git Bash 安装状态 |
-| | `check_nodejs_with_update` | 检测 Node.js 并获取最新版本 |
-| | `check_claude_with_update` | 检测 Claude Code 并获取最新版本 |
-| | `check_gitbash_with_update` | 检测 Git Bash 并获取最新版本 |
-| | `refresh_system_path` | 刷新系统 PATH 环境变量 |
-| **安装/更新** | `install_nodejs` | 安装 Node.js |
-| | `update_nodejs` | 更新 Node.js |
-| | `install_claude` | 安装 Claude Code |
-| | `update_claude` | 更新 Claude Code |
-| | `install_gitbash` | 安装 Git Bash |
-| | `update_gitbash` | 更新 Git Bash |
-| **启动器** | `launch_claude_code` | 启动 Claude Code |
-| | `generate_powershell_command` | 生成 PowerShell 命令 |
-| | `generate_cmd_command` | 生成 CMD 命令 |
-| | `generate_bash_command` | 生成 Bash 命令 |
-| **平台检测** | `get_platform` | 获取当前操作系统平台 |
-| | `get_home_directory` | 获取用户主目录 |
-| **设置管理** | `save_to_settings` | 保存配置到 Claude 设置 |
-| | `reset_settings` | 重置 Claude 设置 |
-| | `open_settings_file` | 打开设置文件 |
-| **应用配置** | `save_app_config` | 保存应用配置 |
-| | `load_app_config` | 加载应用配置 |
-| **项目管理** | `get_projects` | 获取所有项目列表 |
-| | `get_project` | 获取单个项目详情 |
-| | `create_project` | 创建新项目 |
-| | `update_project` | 更新项目配置 |
-| | `delete_project` | 删除项目 |
-| | `launch_project` | 启动指定项目 |
-| | `select_directory` | 选择目录对话框 |
-| | `generate_project_powershell_command` | 生成项目的 PowerShell 命令 |
-| | `generate_project_cmd_command` | 生成项目的 CMD 命令 |
-| | `generate_project_bash_command` | 生成项目的 Bash 命令 |
-| **桥接管理** | `get_hostname` | 获取本机主机名（Bridge client_id） |
-| | `get_username` | 获取当前系统用户名（小写） |
-| | `bridge_get_or_create_key` | 通过 Admin API 创建/获取用户 API Key |
+---
 
-### 1.2 调用方式
+## 类型定义
+
+### DependencyStatus (Rust / TypeScript)
+
+```rust
+// src-tauri/src/services/dependency_checker.rs
+pub struct DependencyStatus {
+    pub installed: bool,
+    pub version: Option<String>,
+    pub meets_requirement: bool,
+    pub latest_version: Option<String>,
+    pub update_available: bool,
+    pub error: Option<String>,
+}
+```
 
 ```typescript
-import { invoke } from "@tauri-apps/api/core";
+// src/types.ts
+export interface DependencyStatus {
+  installed: boolean;
+  version: string | null;
+  meets_requirement: boolean;
+  latest_version: string | null;
+  update_available: boolean;
+  error: string | null;
+}
+```
 
-// 无参数调用
-const status = await invoke<DependencyStatus>('check_nodejs');
+### AppConfig (Rust / TypeScript)
 
-// 带参数调用
-await invoke('launch_claude_code', { config: { /* ... */ } });
+```rust
+// src-tauri/src/services/config_storage.rs
+pub struct AppConfig {
+    pub mode: String,
+    pub proxy: String,
+    pub model: String,
+    pub base_url: String,
+    pub token: String,
+    pub skip_permissions: bool,
+}
+```
+
+```typescript
+// src/types.ts
+export interface AppConfig {
+  mode: 'claude' | 'custom';
+  proxy: string;
+  model: string;
+  base_url: string;
+  token: string;
+  skip_permissions: boolean;
+}
+```
+
+### Project (Rust / TypeScript)
+
+```rust
+// src-tauri/src/models/project.rs
+pub struct Project {
+    pub id: String,
+    pub name: String,
+    pub working_directory: String,
+    pub config: ProjectConfig,
+    pub is_default: bool,
+    pub created_at: u64,
+    pub updated_at: u64,
+    pub last_launched_at: Option<u64>,
+    pub is_pinned: bool,
+    pub pinned_at: Option<u64>,
+    pub sort_order: u32,
+}
+```
+
+```typescript
+// src/types/project.ts
+export interface Project {
+  id: string;
+  name: string;
+  working_directory: string;
+  config: ProjectConfig;
+  is_default: boolean;
+  created_at: number;
+  updated_at: number;
+  last_launched_at?: number;
+  is_pinned: boolean;
+  pinned_at?: number;
+  sort_order: number;
+}
+```
+
+### ProjectConfig (Rust / TypeScript)
+
+```rust
+// src-tauri/src/models/project.rs
+pub struct ProjectConfig {
+    pub mode: String,                        // "claude", "custom", "codex", or "remote"
+    pub proxy: String,                       // HTTP/HTTPS proxy for Claude mode
+    pub model: String,                       // Model name for custom mode
+    pub base_url: String,                    // API base URL for custom mode
+    pub token: String,                       // API token (Base64 encoded in storage)
+    pub skip_permissions: bool,              // Skip permissions flag (default: true)
+    pub codex_api_key: String,               // Proxy for Codex mode
+    pub custom_cli: String,                  // CLI tool for custom mode: "claude" or "codex"
+    pub mobot_bridge_path: Option<String>,   // Install path (auto-detected or user-specified)
+    pub mobot_bridge_port: u16,              // Service port (default 8000)
+}
+```
+
+```typescript
+// src/types/project.ts
+export interface ProjectConfig {
+  mode: 'claude' | 'custom' | 'codex' | 'remote';
+  proxy: string;
+  model: string;
+  base_url: string;
+  token: string;
+  skip_permissions: boolean;
+  codex_api_key: string;
+  custom_cli: 'claude' | 'codex';
+  mobot_bridge_path: string | null;
+  mobot_bridge_port: number;
+}
+```
+
+### InstallStatus (Rust / TypeScript)
+
+```rust
+// src-tauri/src/services/bridge_manager.rs
+pub enum InstallStatus {
+    NotInstalled,
+    Installed { path: String },
+    Running { path: String, port: u16 },
+}
+```
+
+```typescript
+// src/types/project.ts
+export type InstallStatus =
+  | 'NotInstalled'
+  | { Installed: { path: string } }
+  | { Running: { path: string; port: number } };
+```
+
+### HealthStatus (Rust / TypeScript)
+
+```rust
+// src-tauri/src/services/bridge_manager.rs
+pub struct HealthStatus {
+    pub healthy: bool,
+    pub details: String,
+}
+```
+
+```typescript
+// src/types/project.ts
+export interface HealthStatus {
+  healthy: boolean;
+  details: string;
+}
+```
+
+### MobotServiceStatus (Rust / TypeScript)
+
+```rust
+// src-tauri/src/services/bridge_manager.rs
+pub struct MobotServiceStatus {
+    pub installed: bool,
+    pub running: bool,
+    pub pid: Option<u32>,
+    pub port: u16,
+    pub install_path: Option<String>,
+    pub healthy: bool,
+    pub started_at: Option<u64>,
+}
+```
+
+```typescript
+// src/types/project.ts
+export interface MobotServiceStatus {
+  installed: boolean;
+  running: boolean;
+  pid: number | null;
+  port: number;
+  install_path: string | null;
+  healthy: boolean;
+  started_at: number | null;
+}
+```
+
+### ConfigScanResult / ConfigConflict / BomFileIssue / McpMisplaced / CleanTarget / ProjectInfo
+
+```rust
+// src-tauri/src/services/cc_config_checker.rs
+pub struct ConfigScanResult {
+    pub conflicts: Vec<ConfigConflict>,
+    pub bom_files: Vec<BomFileIssue>,
+    pub mcp_misplaced: Vec<McpMisplaced>,
+}
+
+pub struct ConfigConflict {
+    pub source: String,
+    pub file_path: Option<String>,
+    pub key: String,
+    pub value: String,
+    pub can_clean: bool,
+}
+
+pub struct BomFileIssue {
+    pub file_path: String,
+}
+
+pub struct McpMisplaced {
+    pub file_path: String,
+    pub target_path: String,
+    pub keys: Vec<String>,
+    pub can_fix: bool,
+}
+
+pub struct CleanTarget {
+    pub file_path: String,
+    pub key: String,
+}
+
+pub struct ProjectInfo {
+    pub name: String,
+    pub working_directory: String,
+}
+```
+
+### ProjectOrderItem / PinnedOrderItem
+
+```rust
+// src-tauri/src/models/project.rs
+pub struct ProjectOrderItem {
+    pub id: String,
+    pub sort_order: u32,
+}
+
+pub struct PinnedOrderItem {
+    pub id: String,
+    pub pinned_at: u64,
+}
+```
+
+### CreateProjectInput / UpdateProjectInput
+
+```rust
+// src-tauri/src/models/project.rs
+pub struct CreateProjectInput {
+    pub name: String,
+    pub working_directory: String,
+    pub config: ProjectConfig,
+}
+
+pub struct UpdateProjectInput {
+    pub name: Option<String>,
+    pub working_directory: Option<String>,
+    pub config: Option<ProjectConfig>,
+    pub is_pinned: Option<bool>,
+}
 ```
 
 ---
 
-## 2. 依赖检测 API
+## 1. 依赖检测 API
 
-### 2.1 check_nodejs
+### 1.1 check_nodejs
 
-**说明**: 检测 Node.js 安装状态和版本
+**功能**: 检测 Node.js 是否已安装及版本信息（不检查更新）
 
-**前端调用**:
-```typescript
-invoke<DependencyStatus>('check_nodejs')
+**Rust 签名**:
+```rust
+pub async fn check_nodejs() -> Result<DependencyStatus, String>
 ```
 
 **参数**: 无
 
-**返回值**: `DependencyStatus`
+**返回值**: `Result<DependencyStatus, String>`
 
-**返回示例**:
-```json
-{
-  "installed": true,
-  "version": "20.10.0",
-  "meets_requirement": true,
-  "latest_version": null,
-  "update_available": false,
-  "error": null
-}
-```
-
-**检测逻辑**:
-1. 执行 `node --version` 命令
-2. 使用正则 `v(\d+\.\d+\.\d+)` 提取版本号
-3. 检查是否满足最低要求 (≥18.0.0)
-4. 失败时尝试刷新 PATH 后重试
-
-**错误情况**:
-```json
-{
-  "installed": false,
-  "version": null,
-  "meets_requirement": false,
-  "latest_version": null,
-  "update_available": false,
-  "error": "未安装或不在 PATH 中"
-}
-```
+**前端调用**: `api.checkNodejs()`
 
 ---
 
-### 2.2 check_claude
+### 1.2 check_claude
 
-**说明**: 检测 Claude Code 安装状态和版本
+**功能**: 检测 Claude Code CLI 是否已安装及版本信息（不检查更新）
 
-**前端调用**:
-```typescript
-invoke<DependencyStatus>('check_claude')
+**Rust 签名**:
+```rust
+pub async fn check_claude() -> Result<DependencyStatus, String>
 ```
 
 **参数**: 无
 
-**返回值**: `DependencyStatus`
+**返回值**: `Result<DependencyStatus, String>`
 
-**返回示例**:
-```json
-{
-  "installed": true,
-  "version": "2.0.37",
-  "meets_requirement": true,
-  "latest_version": null,
-  "update_available": false,
-  "error": null
-}
-```
-
-**检测方法**:
-1. **方法 1**: `npm list -g @anthropic-ai/claude-code --depth=0`
-   - 正则: `@anthropic-ai/claude-code@(\d+\.\d+\.\d+)`
-2. **方法 2**: `claude --version`
-   - 正则: `(\d+\.\d+\.\d+)`
-3. 任一方法成功即返回结果
-
-**错误情况**:
-```json
-{
-  "installed": false,
-  "version": null,
-  "meets_requirement": false,
-  "latest_version": null,
-  "update_available": false,
-  "error": "未安装或不在 PATH 中"
-}
-```
+**前端调用**: `api.checkClaude()`
 
 ---
 
-### 2.3 check_nodejs_with_update
+### 1.3 check_gitbash
 
-**说明**: 检测 Node.js 并获取最新可用版本
+**功能**: 检测 Git Bash 是否已安装及版本信息（不检查更新）
 
-**前端调用**:
-```typescript
-invoke<DependencyStatus>('check_nodejs_with_update')
+**Rust 签名**:
+```rust
+pub async fn check_gitbash() -> Result<DependencyStatus, String>
 ```
 
 **参数**: 无
 
-**返回值**: `DependencyStatus`
+**返回值**: `Result<DependencyStatus, String>`
 
-**返回示例**:
-```json
-{
-  "installed": true,
-  "version": "20.10.0",
-  "meets_requirement": true,
-  "latest_version": "22.0.0",
-  "update_available": true,
-  "error": null
-}
-```
-
-**获取最新版本**:
-- 执行 `winget show OpenJS.NodeJS.LTS`
-- 正则提取: `Version:\s*(\d+\.\d+\.\d+)`
-- 比较当前版本和最新版本
-
-**注意事项**:
-- 需要 winget 可用
-- 首先调用 `check_nodejs()` 检测当前状态
-- 如果已安装，再获取最新版本信息
+**前端调用**: `api.checkGitbash()`
 
 ---
 
-### 2.4 check_claude_with_update
+### 1.4 check_codex
 
-**说明**: 检测 Claude Code 并获取最新可用版本（异步）
+**功能**: 检测 Codex CLI 是否已安装及版本信息（不检查更新）
 
-**前端调用**:
-```typescript
-invoke<DependencyStatus>('check_claude_with_update')
+**Rust 签名**:
+```rust
+pub async fn check_codex() -> Result<DependencyStatus, String>
 ```
 
 **参数**: 无
 
-**返回值**: `Promise<DependencyStatus>`
+**返回值**: `Result<DependencyStatus, String>`
 
-**返回示例**:
-```json
-{
-  "installed": true,
-  "version": "2.0.37",
-  "meets_requirement": true,
-  "latest_version": "2.1.0",
-  "update_available": true,
-  "error": null
-}
-```
-
-**获取最新版本**:
-- HTTP 请求: `https://registry.npmjs.org/@anthropic-ai/claude-code/latest`
-- 解析 JSON 响应中的 `version` 字段
-- 比较当前版本和最新版本
-
-**注意事项**:
-- 异步操作，需要网络连接
-- 首先调用 `check_claude()` 检测当前状态
-- 网络失败时 `latest_version` 为 `null`
+**前端调用**: `api.checkCodex()`
 
 ---
 
-### 2.5 check_gitbash
+### 1.5 check_nodejs_with_update
 
-**说明**: 检测 Git Bash 安装状态和版本 (Windows)
+**功能**: 检测 Node.js 安装状态，同时查询最新版本以判断是否有更新
 
-**前端调用**:
-```typescript
-invoke<DependencyStatus>('check_gitbash')
+**Rust 签名**:
+```rust
+pub async fn check_nodejs_with_update() -> Result<DependencyStatus, String>
 ```
 
 **参数**: 无
 
-**返回值**: `DependencyStatus`
+**返回值**: `Result<DependencyStatus, String>` — `update_available` 和 `latest_version` 字段会被填充
 
-**返回示例**:
-```json
-{
-  "installed": true,
-  "version": "2.43.0",
-  "meets_requirement": true,
-  "latest_version": null,
-  "update_available": false,
-  "error": null
-}
-```
-
-**检测方法**:
-1. 执行 `git --version` 命令
-2. 检查 `C:\Program Files\Git\bin\bash.exe` 是否存在
-3. 正则提取版本号
+**前端调用**: `api.checkNodejsWithUpdate()`
 
 ---
 
-### 2.6 check_gitbash_with_update
+### 1.6 check_claude_with_update
 
-**说明**: 检测 Git Bash 并获取最新可用版本
+**功能**: 检测 Claude Code CLI 安装状态，同时查询最新版本以判断是否有更新
 
-**前端调用**:
-```typescript
-invoke<DependencyStatus>('check_gitbash_with_update')
+**Rust 签名**:
+```rust
+pub async fn check_claude_with_update() -> Result<DependencyStatus, String>
 ```
 
 **参数**: 无
 
-**返回值**: `DependencyStatus`
+**返回值**: `Result<DependencyStatus, String>`
 
-**返回示例**:
-```json
-{
-  "installed": true,
-  "version": "2.43.0",
-  "meets_requirement": true,
-  "latest_version": "2.44.0",
-  "update_available": true,
-  "error": null
-}
-```
-
-**获取最新版本**:
-- 执行 `winget show Git.Git` 获取最新版本
-- 比较当前版本和最新版本
+**前端调用**: `api.checkClaudeWithUpdate()`
 
 ---
 
-### 2.7 refresh_system_path
+### 1.7 check_gitbash_with_update
 
-**说明**: 刷新当前进程的 PATH 环境变量（Windows）
+**功能**: 检测 Git Bash 安装状态，同时查询最新版本以判断是否有更新
 
-**前端调用**:
-```typescript
-invoke('refresh_system_path')
+**Rust 签名**:
+```rust
+pub async fn check_gitbash_with_update() -> Result<DependencyStatus, String>
 ```
 
 **参数**: 无
 
-**返回值**: `Promise<void>`
+**返回值**: `Result<DependencyStatus, String>`
 
-**操作流程**:
-1. 读取注册表系统 PATH: `HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment\Path`
-2. 读取注册表用户 PATH: `HKCU\Environment\Path`
-3. 合并两个 PATH
-4. 去重路径
-5. 设置到当前进程环境变量
-
-**使用场景**:
-- 刚安装 Node.js 或 Claude Code 后
-- 手动修改环境变量后
-- 检测失败但确信已安装时
-
-**错误处理**:
-```typescript
-try {
-  await invoke('refresh_system_path');
-  // 刷新成功，可以重新检测依赖
-} catch (error) {
-  console.error('刷新 PATH 失败:', error);
-}
-```
+**前端调用**: `api.checkGitbashWithUpdate()`
 
 ---
 
-## 3. 安装/更新 API
+### 1.8 check_codex_with_update
 
-### 3.1 install_nodejs
+**功能**: 检测 Codex CLI 安装状态，同时查询最新版本以判断是否有更新
 
-**说明**: 安装 Node.js LTS 版本（Windows）
-
-**前端调用**:
-```typescript
-invoke('install_nodejs')
+**Rust 签名**:
+```rust
+pub async fn check_codex_with_update() -> Result<DependencyStatus, String>
 ```
 
 **参数**: 无
 
-**返回值**: `Promise<void>`
+**返回值**: `Result<DependencyStatus, String>`
 
-**安装流程**:
-1. 检查 winget 是否可用
-2. 如果可用，在新控制台窗口执行 `winget install OpenJS.NodeJS.LTS`
-3. 如果不可用，打开 Node.js 官网下载页面
-
-**PowerShell 脚本**:
-```powershell
-Write-Host "正在安装 Node.js LTS..." -ForegroundColor Green
-winget install OpenJS.NodeJS.LTS
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "`n✓ Node.js 安装成功！" -ForegroundColor Green
-    Write-Host "请关闭此窗口并重新启动应用。" -ForegroundColor Yellow
-} else {
-    Write-Host "`n✗ Node.js 安装失败，错误代码: $LASTEXITCODE" -ForegroundColor Red
-    Write-Host "请检查网络连接或手动安装。" -ForegroundColor Yellow
-}
-
-Write-Host "`n按任意键关闭窗口..."
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-```
-
-**注意事项**:
-- 在独立控制台窗口执行，不阻塞主界面
-- 安装后需要重新启动应用或刷新 PATH
-- 需要管理员权限（winget 自动提示）
-
-**错误处理**:
-```typescript
-try {
-  await invoke('install_nodejs');
-  // 安装命令已执行，用户在新窗口操作
-} catch (error) {
-  // winget 不可用或启动失败
-  alert(`安装失败: ${error}`);
-}
-```
+**前端调用**: `api.checkCodexWithUpdate()`
 
 ---
 
-### 3.2 update_nodejs
+## 2. 安装/更新 API
 
-**说明**: 更新 Node.js 到最新 LTS 版本
+### 2.1 install_nodejs
 
-**前端调用**:
-```typescript
-invoke('update_nodejs')
+**功能**: 安装 Node.js（通过系统包管理器或下载安装包）
+
+**Rust 签名**:
+```rust
+pub async fn install_nodejs() -> Result<(), String>
 ```
 
 **参数**: 无
 
-**返回值**: `Promise<void>`
+**返回值**: `Result<(), String>`
 
-**更新流程**:
-1. 检查 winget 是否可用
-2. 在新控制台窗口执行 `winget upgrade OpenJS.NodeJS.LTS`
-
-**PowerShell 脚本**:
-```powershell
-Write-Host "正在更新 Node.js..." -ForegroundColor Green
-winget upgrade OpenJS.NodeJS.LTS
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "`n✓ Node.js 更新成功！" -ForegroundColor Green
-} else {
-    Write-Host "`n✗ Node.js 更新失败，错误代码: $LASTEXITCODE" -ForegroundColor Red
-}
-
-Write-Host "`n按任意键关闭窗口..."
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-```
-
-**使用示例**:
-```typescript
-if (status.update_available) {
-  await invoke('update_nodejs');
-  await invoke('refresh_system_path');
-  const newStatus = await invoke<DependencyStatus>('check_nodejs');
-}
-```
+**前端调用**: `api.installNodejs()`
 
 ---
 
-### 3.3 install_claude
+### 2.2 update_nodejs
 
-**说明**: 安装 Claude Code CLI 工具
+**功能**: 更新 Node.js 到最新版本
 
-**前端调用**:
-```typescript
-invoke('install_claude')
+**Rust 签名**:
+```rust
+pub async fn update_nodejs() -> Result<(), String>
 ```
 
 **参数**: 无
 
-**返回值**: `Promise<void>`
+**返回值**: `Result<(), String>`
 
-**安装流程**:
-- 在新控制台窗口执行 `npm install -g @anthropic-ai/claude-code`
-
-**PowerShell 脚本**:
-```powershell
-Write-Host "正在安装 Claude Code..." -ForegroundColor Green
-npm install -g @anthropic-ai/claude-code
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "`n✓ Claude Code 安装成功！" -ForegroundColor Green
-} else {
-    Write-Host "`n✗ Claude Code 安装失败，错误代码: $LASTEXITCODE" -ForegroundColor Red
-    Write-Host "请检查 Node.js 是否正确安装。" -ForegroundColor Yellow
-}
-
-Write-Host "`n按任意键关闭窗口..."
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-```
-
-**前置条件**:
-- 必须先安装 Node.js
-- npm 必须在 PATH 中
+**前端调用**: `api.updateNodejs()`
 
 ---
 
-### 3.4 update_claude
+### 2.3 install_claude
 
-**说明**: 更新 Claude Code 到最新版本
+**功能**: 安装 Claude Code CLI（通过 npm 全局安装）
 
-**前端调用**:
-```typescript
-invoke('update_claude')
+**Rust 签名**:
+```rust
+pub async fn install_claude() -> Result<(), String>
 ```
 
 **参数**: 无
 
-**返回值**: `Promise<void>`
+**返回值**: `Result<(), String>`
 
-**更新流程**:
-- 在新控制台窗口执行 `npm install -g @anthropic-ai/claude-code@latest`
-
-**PowerShell 脚本**:
-```powershell
-Write-Host "正在更新 Claude Code..." -ForegroundColor Green
-npm install -g @anthropic-ai/claude-code@latest
-
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "`n✓ Claude Code 更新成功！" -ForegroundColor Green
-} else {
-    Write-Host "`n✗ Claude Code 更新失败，错误代码: $LASTEXITCODE" -ForegroundColor Red
-}
-
-Write-Host "`n按任意键关闭窗口..."
-$null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
-```
+**前端调用**: `api.installClaude()`
 
 ---
 
-### 3.5 install_gitbash
+### 2.4 update_claude
 
-**说明**: 安装 Git Bash
+**功能**: 更新 Claude Code CLI 到最新版本
 
-**前端调用**:
-```typescript
-invoke('install_gitbash')
+**Rust 签名**:
+```rust
+pub async fn update_claude() -> Result<(), String>
 ```
 
 **参数**: 无
 
-**返回值**: `Promise<void>`
+**返回值**: `Result<(), String>`
 
-**安装流程**:
-- Windows: 在新控制台窗口执行 `winget install Git.Git`
-- macOS: 在终端执行 `brew install git`
-
-**注意事项**:
-- Windows 需要 winget 可用
-- macOS 需要 Homebrew 可用
-- 安装后需要重新启动应用或刷新 PATH
+**前端调用**: `api.updateClaude()`
 
 ---
 
-### 3.6 update_gitbash
+### 2.5 install_gitbash
 
-**说明**: 更新 Git Bash 到最新版本
+**功能**: 安装 Git (含 Git Bash)
 
-**前端调用**:
-```typescript
-invoke('update_gitbash')
+**Rust 签名**:
+```rust
+pub async fn install_gitbash() -> Result<(), String>
 ```
 
 **参数**: 无
 
-**返回值**: `Promise<void>`
+**返回值**: `Result<(), String>`
 
-**更新流程**:
-- Windows: `winget upgrade Git.Git`
-- macOS: `brew upgrade git`
+**前端调用**: `api.installGitbash()`
+
+---
+
+### 2.6 update_gitbash
+
+**功能**: 更新 Git 到最新版本
+
+**Rust 签名**:
+```rust
+pub async fn update_gitbash() -> Result<(), String>
+```
+
+**参数**: 无
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `api.updateGitbash()`
+
+---
+
+### 2.7 install_codex
+
+**功能**: 安装 Codex CLI（通过 npm 全局安装）
+
+**Rust 签名**:
+```rust
+pub async fn install_codex() -> Result<(), String>
+```
+
+**参数**: 无
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `api.installCodex()`
+
+---
+
+### 2.8 update_codex
+
+**功能**: 更新 Codex CLI 到最新版本
+
+**Rust 签名**:
+```rust
+pub async fn update_codex() -> Result<(), String>
+```
+
+**参数**: 无
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `api.updateCodex()`
+
+---
+
+## 3. 系统工具 API
+
+### 3.1 refresh_system_path
+
+**功能**: 刷新系统 PATH 环境变量（仅 Windows 平台生效），用于安装完依赖后让新路径立即可用
+
+**Rust 签名**:
+```rust
+pub fn refresh_system_path()
+```
+
+**参数**: 无
+
+**返回值**: 无（`()`）
+
+**前端调用**: `api.refreshSystemPath()`
+
+---
+
+### 3.2 get_platform
+
+**功能**: 获取当前操作系统平台标识
+
+**Rust 签名**:
+```rust
+pub fn get_platform() -> String
+```
+
+**参数**: 无
+
+**返回值**: `String` — `"windows"` | `"macos"` | `"linux"` | `"unknown"`
+
+**前端调用**: `api.getPlatform()`
 
 ---
 
@@ -564,1416 +605,999 @@ invoke('update_gitbash')
 
 ### 4.1 launch_claude_code
 
-**说明**: 使用指定环境变量配置启动 Claude Code
+**功能**: 使用指定的环境变量配置启动 Claude Code CLI（无项目上下文，在用户主目录启动）
 
-**前端调用**:
-```typescript
-invoke('launch_claude_code', {
-  config: {
-    'ANTHROPIC_MODEL': 'qwen3-coder-480b-a35b',
-    'ANTHROPIC_BASE_URL': 'http://api.example.com',
-    'ANTHROPIC_AUTH_TOKEN': 'token',
-  }
-})
+**Rust 签名**:
+```rust
+pub fn launch_claude_code(config: HashMap<String, String>) -> Result<(), String>
 ```
 
 **参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `config` | `Record<string, string>` | 是 | 环境变量配置字典 |
-
-**返回值**: `Promise<void>`
-
-**环境变量支持**:
-- `HTTP_PROXY`: HTTP 代理地址
-- `HTTPS_PROXY`: HTTPS 代理地址
-- `ANTHROPIC_MODEL`: 自定义模型名称
-- `ANTHROPIC_BASE_URL`: 自定义 API 地址
-- `ANTHROPIC_AUTH_TOKEN`: 认证令牌
-
-**启动流程**:
-1. 检查 `claude` 命令是否存在
-2. 获取用户主目录
-3. 构建 PowerShell 脚本
-4. 在新控制台窗口启动
-
-**生成的 PowerShell 命令**:
-```powershell
-& { $env:ANTHROPIC_MODEL="qwen3-coder-480b-a35b"; $env:ANTHROPIC_BASE_URL="http://api.example.com"; $env:ANTHROPIC_AUTH_TOKEN="token"; claude }
-```
-
-**窗口特性**:
-- 使用 `-NoExit` 保持窗口打开
-- `CREATE_NEW_CONSOLE` 创建新窗口
-- 在用户主目录启动
-
-**错误处理**:
-```typescript
-try {
-  await invoke('launch_claude_code', { config });
-  alert('Claude Code 已启动！');
-} catch (error) {
-  alert(`启动失败: ${error}`);
-  // 可能的错误：
-  // - "Claude Code 未安装或不在 PATH 中"
-  // - "无法获取用户主目录"
-  // - "启动失败: <系统错误>"
-}
-```
-
----
-
-### 4.2 generate_powershell_command
-
-**说明**: 生成 PowerShell 格式的启动命令
-
-**前端调用**:
-```typescript
-const command = await invoke<string>('generate_powershell_command', {
-  config: {
-    'ANTHROPIC_MODEL': 'qwen3-coder-480b-a35b',
-    'HTTP_PROXY': 'http://127.0.0.1:7890',
-  }
-});
-```
-
-**参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `config` | `Record<string, string>` | 是 | 环境变量配置字典 |
-
-**返回值**: `Promise<string>`
-
-**返回示例**:
-```powershell
-$env:ANTHROPIC_MODEL="qwen3-coder-480b-a35b";$env:HTTP_PROXY="http://127.0.0.1:7890";claude
-```
-
-**特殊字符转义**:
-- `"` 转义为 `` `" ``
-
-**使用场景**:
-- 复制命令到剪贴板
-- 手动在 PowerShell 中执行
-- 集成到自动化脚本
-
----
-
-### 4.3 generate_cmd_command
-
-**说明**: 生成 CMD 格式的启动命令
-
-**前端调用**:
-```typescript
-const command = await invoke<string>('generate_cmd_command', {
-  config: {
-    'ANTHROPIC_MODEL': 'qwen3-coder-480b-a35b',
-    'HTTP_PROXY': 'http://127.0.0.1:7890',
-  }
-});
-```
-
-**参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `config` | `Record<string, string>` | 是 | 环境变量配置字典 |
-
-**返回值**: `Promise<string>`
-
-**返回示例**:
-```cmd
-set ANTHROPIC_MODEL=qwen3-coder-480b-a35b & set HTTP_PROXY=http://127.0.0.1:7890 & claude
-```
-
-**格式说明**:
-- 使用 `set VAR=value` 设置环境变量
-- 使用 `&` 连接多个命令
-- 最后执行 `claude`
-
-**使用场景**:
-- 在 CMD 窗口中执行
-- Windows 批处理脚本
-- 兼容旧版 Windows
-
----
-
-### 4.4 generate_bash_command
-
-**说明**: 生成 Bash 格式的启动命令 (macOS/Linux/Git Bash)
-
-**前端调用**:
-```typescript
-const command = await invoke<string>('generate_bash_command', {
-  config: {
-    'ANTHROPIC_MODEL': 'qwen3-coder-480b-a35b',
-    'HTTP_PROXY': 'http://127.0.0.1:7890',
-  }
-});
-```
-
-**参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `config` | `Record<string, string>` | 是 | 环境变量配置字典 |
-
-**返回值**: `Promise<string>`
-
-**返回示例**:
-```bash
-ANTHROPIC_MODEL="qwen3-coder-480b-a35b" HTTP_PROXY="http://127.0.0.1:7890" claude --dangerously-skip-permissions
-```
-
-**格式说明**:
-- 使用 `VAR="value"` 设置环境变量
-- 环境变量放在命令前面（内联设置）
-- 最后执行 `claude` 命令
-
-**使用场景**:
-- 在 macOS Terminal 中执行
-- 在 Linux 终端中执行
-- 在 Windows Git Bash 中执行
-- Shell 脚本
-
----
-
-### 4.5 get_platform
-
-**说明**: 获取当前操作系统平台
-
-**前端调用**:
-```typescript
-const platform = await invoke<string>('get_platform');
-```
-
-**参数**: 无
-
-**返回值**: `Promise<string>`
-
-**返回值说明**:
-
-| 返回值 | 说明 |
-|--------|------|
-| `"windows"` | Windows 系统 |
-| `"macos"` | macOS 系统 |
-| `"linux"` | Linux 系统 |
-| `"unknown"` | 未知系统 |
-
-**使用示例**:
-```typescript
-const platform = await api.getPlatform();
-
-if (platform === 'windows') {
-  // 显示 PowerShell 和 CMD 选项
-} else {
-  // 显示 Bash 选项
-}
-```
-
-**使用场景**:
-- 根据平台显示不同的 UI 选项
-- 选择合适的命令格式
-- 条件性功能启用
-
----
-
-## 5. 设置管理 API
-
-### 5.1 save_to_settings
-
-**说明**: 将配置保存到 `~/.claude/settings.json`
-
-**前端调用**:
-```typescript
-await invoke('save_to_settings', {
-  config: {
-    'ANTHROPIC_MODEL': 'qwen3-coder-480b-a35b',
-    'ANTHROPIC_BASE_URL': 'http://api.example.com',
-  }
-});
-```
-
-**参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `config` | `Record<string, string>` | 是 | 环境变量配置字典 |
-
-**返回值**: `Promise<void>`
-
-**配置文件路径**: `~/.claude/settings.json`
-
-**操作流程**:
-1. 检查 `.claude` 目录是否存在
-2. 读取现有 `settings.json`（如果存在）
-3. 合并配置到 `env` 字段
-4. 格式化写入 JSON
-
-**配置示例**:
-
-**原始文件**:
-```json
-{
-  "theme": "dark"
-}
-```
-
-**调用**:
-```typescript
-await invoke('save_to_settings', {
-  config: {
-    'ANTHROPIC_MODEL': 'qwen3-coder-480b-a35b',
-  }
-});
-```
-
-**结果文件**:
-```json
-{
-  "theme": "dark",
-  "env": {
-    "ANTHROPIC_MODEL": "qwen3-coder-480b-a35b"
-  }
-}
-```
-
-**错误处理**:
-```typescript
-try {
-  await invoke('save_to_settings', { config });
-  alert('配置已保存到 Claude 设置！');
-} catch (error) {
-  // 可能的错误：
-  // - "Claude Code 未初始化，请先运行 'claude' 命令"
-  // - "读取配置文件失败: <系统错误>"
-  // - "写入配置文件失败: <系统错误>"
-  alert(`保存失败: ${error}`);
-}
-```
-
-**注意事项**:
-- 不会覆盖其他配置字段
-- 仅更新 `env` 中的指定变量
-- 配置永久生效，直接运行 `claude` 即可使用
-
----
-
-### 5.2 reset_settings
-
-**说明**: 重置 Claude 设置中的环境变量配置
-
-**前端调用**:
-```typescript
-await invoke('reset_settings')
-```
-
-**参数**: 无
-
-**返回值**: `Promise<void>`
-
-**操作流程**:
-1. 读取 `~/.claude/settings.json`
-2. 删除 `env` 字段中的以下变量：
-   - `ANTHROPIC_MODEL`
-   - `ANTHROPIC_BASE_URL`
-   - `ANTHROPIC_AUTH_TOKEN`
-   - `HTTP_PROXY`
-   - `HTTPS_PROXY`
-3. 如果 `env` 为空，删除整个 `env` 字段
-4. 如果配置文件为空，删除文件
-
-**示例**:
-
-**原始文件**:
-```json
-{
-  "theme": "dark",
-  "env": {
-    "ANTHROPIC_MODEL": "qwen3-coder-480b-a35b",
-    "ANTHROPIC_BASE_URL": "http://api.example.com",
-    "CUSTOM_VAR": "value"
-  }
-}
-```
-
-**调用重置**:
-```typescript
-await invoke('reset_settings');
-```
-
-**结果文件**:
-```json
-{
-  "theme": "dark",
-  "env": {
-    "CUSTOM_VAR": "value"
-  }
-}
-```
-
-**使用场景**:
-- 恢复默认配置
-- 清除自定义模型设置
-- 移除代理配置
-
-**错误处理**:
-```typescript
-if (confirm('确定要重置 Claude 设置中的环境变量配置吗？')) {
-  try {
-    await invoke('reset_settings');
-    alert('设置已重置！');
-  } catch (error) {
-    alert(`重置失败: ${error}`);
-  }
-}
-```
-
----
-
-### 5.3 open_settings_file
-
-**说明**: 使用默认编辑器打开 `~/.claude/settings.json`
-
-**前端调用**:
-```typescript
-await invoke('open_settings_file')
-```
-
-**参数**: 无
-
-**返回值**: `Promise<void>`
-
-**操作流程**:
-1. 检查 `~/.claude/settings.json` 是否存在
-2. 使用默认编辑器打开文件
-
-**Windows 实现**:
-```bash
-cmd /C start "" "C:\Users\username\.claude\settings.json"
-```
-
-**macOS/Linux 实现**:
-```bash
-open ~/.claude/settings.json
-```
-
-**使用场景**:
-- 查看完整配置
-- 手动修改高级选项
-- 调试配置问题
-
-**错误处理**:
-```typescript
-try {
-  await invoke('open_settings_file');
-} catch (error) {
-  // 可能的错误：
-  // - "设置文件不存在"
-  // - "打开文件失败: <系统错误>"
-  alert(`打开设置文件失败: ${error}`);
-}
-```
-
----
-
-## 6. 应用配置 API
-
-### 6.1 save_app_config
-
-**说明**: 保存应用配置到 `%APPDATA%\ClaudeCodeLauncher\config.json`
-
-**前端调用**:
-```typescript
-await invoke('save_app_config', {
-  config: {
-    mode: 'custom',
-    proxy: '',
-    model: 'qwen3-coder-480b-a35b',
-    base_url: 'http://api.example.com',
-    token: 'my-token',
-  }
-});
-```
-
-**参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `config` | `AppConfig` | 是 | 应用配置对象 |
-
-**AppConfig 结构**:
-
-| 字段 | 类型 | 说明 |
+| 参数 | 类型 | 说明 |
 |------|------|------|
-| `mode` | `'claude' \| 'custom'` | 工作模式 |
-| `proxy` | `string` | 代理地址 |
-| `model` | `string` | 模型名称 |
-| `base_url` | `string` | API Base URL |
-| `token` | `string` | 认证令牌 |
+| `config` | `HashMap<String, String>` | 环境变量键值对，如 `HTTP_PROXY`、`ANTHROPIC_MODEL` 等 |
 
-**返回值**: `Promise<void>`
+**返回值**: `Result<(), String>`
 
-**配置文件路径**: `%APPDATA%\ClaudeCodeLauncher\config.json`
-
-**安全特性**:
-- Token 使用 Base64 编码存储（简单混淆，非加密）
-
-**存储示例**:
-```json
-{
-  "mode": "custom",
-  "proxy": "",
-  "model": "qwen3-coder-480b-a35b",
-  "base_url": "http://api.example.com",
-  "token": "bXktdG9rZW4="
-}
-```
-
-**使用场景**:
-- 窗口关闭时自动保存配置
-- 用户点击保存按钮
-- 配置变更时持久化
-
-**错误处理**:
-```typescript
-try {
-  await invoke('save_app_config', { config });
-} catch (error) {
-  console.error('保存配置失败:', error);
-}
-```
+**前端调用**: `api.launchClaudeCode(config)`
 
 ---
 
-### 6.2 load_app_config
+### 4.2 launch_project
 
-**说明**: 加载应用配置
+**功能**: 根据项目 ID 启动 Claude Code，自动构建环境变量配置并在项目工作目录中启动，同时更新项目的 `last_launched_at` 时间戳
 
-**前端调用**:
-```typescript
-const config = await invoke<AppConfig>('load_app_config');
-```
-
-**参数**: 无
-
-**返回值**: `Promise<AppConfig>`
-
-**返回示例**:
-```json
-{
-  "mode": "custom",
-  "proxy": "",
-  "model": "qwen3-coder-480b-a35b",
-  "base_url": "http://api.example.com",
-  "token": "my-token"
-}
-```
-
-**操作流程**:
-1. 检查配置文件是否存在
-2. 如果不存在，返回默认配置
-3. 如果存在，读取并解析 JSON
-4. 解码 Base64 编码的 Token
-5. 返回配置对象
-
-**默认配置**:
-```typescript
-{
-  mode: 'claude',
-  proxy: '',
-  model: 'qwen3-coder-480b-a35b',
-  base_url: 'http://litellm.uattest.weoa.com',
-  token: '',
-}
-```
-
-**使用场景**:
-- 应用启动时加载配置
-- 恢复用户上次的设置
-
-**错误处理**:
-```typescript
-try {
-  const config = await invoke<AppConfig>('load_app_config');
-  // 应用配置到状态
-} catch (error) {
-  console.error('加载配置失败:', error);
-  // 使用默认配置
-}
-```
-
----
-
-## 7. 项目管理 API
-
-### 7.1 get_projects
-
-**说明**: 获取所有项目列表
-
-**前端调用**:
-```typescript
-const projects = await invoke<Project[]>('get_projects');
-```
-
-**参数**: 无
-
-**返回值**: `Promise<Project[]>`
-
-**返回示例**:
-```json
-[
-  {
-    "id": "abc123-def456",
-    "name": "默认项目",
-    "working_directory": "C:\\Users\\username",
-    "config": {
-      "mode": "claude",
-      "proxy": "",
-      "model": "",
-      "base_url": "",
-      "token": "",
-      "skip_permissions": true
-    },
-    "is_default": true,
-    "created_at": 1706918400,
-    "updated_at": 1706918400,
-    "last_launched_at": null
-  }
-]
-```
-
----
-
-### 7.2 get_project
-
-**说明**: 获取单个项目详情
-
-**前端调用**:
-```typescript
-const project = await invoke<Project>('get_project', { id: 'project-id' });
+**Rust 签名**:
+```rust
+pub fn launch_project(id: String) -> Result<(), String>
 ```
 
 **参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `id` | `string` | 是 | 项目 ID |
-
-**返回值**: `Promise<Project>`
-
-**错误情况**:
-- `"项目不存在: <id>"`: 指定 ID 的项目不存在
-
----
-
-### 7.3 create_project
-
-**说明**: 创建新项目
-
-**前端调用**:
-```typescript
-const project = await invoke<Project>('create_project', {
-  name: '我的项目',
-  working_directory: 'D:\\projects\\my-app',
-  config: {
-    mode: 'custom',
-    proxy: '',
-    model: 'qwen3-coder-480b-a35b',
-    base_url: 'http://api.example.com',
-    token: 'my-token',
-    skip_permissions: true
-  }
-});
-```
-
-**参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `name` | `string` | 是 | 项目名称 |
-| `working_directory` | `string` | 是 | 工作目录路径 |
-| `config` | `ProjectConfig` | 是 | 项目配置 |
-
-**返回值**: `Promise<Project>`
-
-**注意事项**:
-- 新创建的项目 `is_default` 为 `false`
-- 自动生成 UUID 作为项目 ID
-- 自动记录创建和更新时间戳
-
----
-
-### 7.4 update_project
-
-**说明**: 更新项目配置
-
-**前端调用**:
-```typescript
-const project = await invoke<Project>('update_project', {
-  id: 'project-id',
-  name: '新名称',  // 可选
-  working_directory: 'D:\\new\\path',  // 可选
-  config: { /* ... */ }  // 可选
-});
-```
-
-**参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `id` | `string` | 是 | 项目 ID |
-| `name` | `string` | 否 | 新项目名称 |
-| `working_directory` | `string` | 否 | 新工作目录 |
-| `config` | `ProjectConfig` | 否 | 新配置 |
-
-**返回值**: `Promise<Project>`
-
-**注意事项**:
-- 只更新提供的字段
-- 自动更新 `updated_at` 时间戳
-
----
-
-### 7.5 delete_project
-
-**说明**: 删除项目
-
-**前端调用**:
-```typescript
-await invoke('delete_project', { id: 'project-id' });
-```
-
-**参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `id` | `string` | 是 | 项目 ID |
-
-**返回值**: `Promise<void>`
-
-**错误情况**:
-- `"项目不存在: <id>"`: 指定 ID 的项目不存在
-- `"不能删除默认项目"`: 尝试删除默认项目
-
----
-
-### 7.6 launch_project
-
-**说明**: 启动指定项目
-
-**前端调用**:
-```typescript
-await invoke('launch_project', { id: 'project-id' });
-```
-
-**参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `id` | `string` | 是 | 项目 ID |
-
-**返回值**: `Promise<void>`
-
-**启动流程**:
-1. 获取项目配置
-2. 根据模式构建环境变量
-3. 使用项目的工作目录启动 Claude Code
-4. 更新 `last_launched_at` 时间戳
-
----
-
-### 7.7 select_directory
-
-**说明**: 打开目录选择对话框
-
-**前端调用**:
-```typescript
-const path = await invoke<string | null>('select_directory');
-```
-
-**参数**: 无
-
-**返回值**: `Promise<string | null>`
-
-**返回说明**:
-- 用户选择目录后返回路径字符串
-- 用户取消选择返回 `null`
-
-**注意事项**:
-- 使用 `tauri-plugin-dialog` 实现
-- 对话框标题为 "选择项目目录"
-
----
-
-### 7.8 generate_project_powershell_command
-
-**说明**: 生成指定项目的 PowerShell 启动命令
-
-**前端调用**:
-```typescript
-const command = await invoke<string>('generate_project_powershell_command', { id: 'project-id' });
-```
-
-**参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `id` | `string` | 是 | 项目 ID |
-
-**返回值**: `Promise<string>`
-
-**返回示例**:
-```powershell
-Set-Location -LiteralPath 'D:\projects\my-app';$env:ANTHROPIC_MODEL='qwen3';claude --dangerously-skip-permissions
-```
-
----
-
-### 7.9 generate_project_cmd_command
-
-**说明**: 生成指定项目的 CMD 启动命令
-
-**前端调用**:
-```typescript
-const command = await invoke<string>('generate_project_cmd_command', { id: 'project-id' });
-```
-
-**参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `id` | `string` | 是 | 项目 ID |
-
-**返回值**: `Promise<string>`
-
----
-
-### 7.10 generate_project_bash_command
-
-**说明**: 生成指定项目的 Bash 启动命令
-
-**前端调用**:
-```typescript
-const command = await invoke<string>('generate_project_bash_command', { id: 'project-id' });
-```
-
-**参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `id` | `string` | 是 | 项目 ID |
-
-**返回值**: `Promise<string>`
-
----
-
-### 7.11 get_home_directory
-
-**说明**: 获取用户主目录路径
-
-**前端调用**:
-```typescript
-const homeDir = await invoke<string>('get_home_directory');
-```
-
-**参数**: 无
-
-**返回值**: `Promise<string>`
-
-**返回示例**:
-- Windows: `"C:\\Users\\username"`
-- macOS: `"/Users/username"`
-
-**错误情况**:
-- `"无法获取用户主目录"`: 系统无法确定主目录
-
----
-
-## 8. 桥接管理 API
-
-### 8.1 get_hostname
-
-**说明**: 获取本机主机名，用作 Bridge client_id。优先读取 `~/.agent-bridge/client_id` 文件，如不存在则回退到系统环境变量。
-
-**前端调用**:
-```typescript
-const hostname = await invoke<string>('get_hostname');
-```
-
-**参数**: 无
-
-**返回值**: `Promise<string>`
-
-**返回示例**: `"shawnlin-NB1"`
-
-**检测逻辑**:
-1. 尝试读取 `~/.agent-bridge/client_id` 文件内容
-2. 如果文件不存在或为空，回退到 `COMPUTERNAME` 环境变量 (Windows)
-3. 再回退到 `HOSTNAME` 环境变量 (macOS/Linux)
-4. 最终回退到 `"unknown"`
-
-**使用场景**:
-- 生成 `/变身 bridge:<hostname>:<key>` 连接口令
-
----
-
-### 8.2 get_username
-
-**说明**: 获取当前系统用户名（自动转为小写），用于在 Bridge Admin API 中创建/查询用户。
-
-**前端调用**:
-```typescript
-const username = await invoke<string>('get_username');
-```
-
-**参数**: 无
-
-**返回值**: `Promise<string>`
-
-**返回示例**: `"shawnlin"`
-
-**检测逻辑**:
-1. 读取 `USERNAME` 环境变量 (Windows)
-2. 回退到 `USER` 环境变量 (macOS/Linux)
-3. 最终回退到 `"unknown"`
-4. 结果统一转为小写
-
----
-
-### 8.3 bridge_get_or_create_key
-
-**说明**: 通过 Bridge Admin API 自动创建用户或获取已有用户的 API Key。使用 `.no_proxy()` 绕过系统代理。
-
-**前端调用**:
-```typescript
-const key = await invoke<string>('bridge_get_or_create_key', { username: 'shawnlin' });
-```
-
-**参数**:
-
-| 参数名 | 类型 | 必需 | 说明 |
-|--------|------|------|------|
-| `username` | `string` | 是 | 用户名（小写英文） |
-
-**返回值**: `Promise<string>` — 用户的 API Key
-
-**操作流程**:
-1. 使用 `reqwest::Client::builder().no_proxy()` 构建 HTTP 客户端（绕过系统代理）
-2. POST `/api/login` 登录获取 `admin_token` Cookie
-3. GET `/api/admin/users/{username}` 尝试查询已有用户
-4. 如果用户存在，直接返回 `api_key`
-5. 如果用户不存在（404），POST `/api/admin/users` 创建新用户并返回 `api_key`
-
-**错误情况**:
-- 无法连接 Admin API（外网环境）
-- 登录失败
-- 创建用户失败
-
-**错误提示**: 前端统一显示"获取失败，请联系管理员"
-
----
-
-## 9. 数据类型
-
-### 8.1 DependencyStatus
-
-**说明**: 依赖检测状态
-
-```typescript
-interface DependencyStatus {
-  installed: boolean;           // 是否已安装
-  version: string | null;        // 当前版本号
-  meets_requirement: boolean;    // 是否满足最低版本要求
-  latest_version: string | null; // 最新可用版本
-  update_available: boolean;     // 是否有可用更新
-  error: string | null;          // 错误信息
-}
-```
-
-**状态组合**:
-
-| 场景 | installed | version | meets_requirement | update_available |
-|------|-----------|---------|-------------------|------------------|
-| 未安装 | false | null | false | false |
-| 已安装，最新版 | true | "20.10.0" | true | false |
-| 已安装，有更新 | true | "20.10.0" | true | true |
-| 已安装，版本过低 | true | "16.0.0" | false | true |
-| 检测失败 | false | null | false | false |
-
----
-
-### 8.2 AppConfig
-
-**说明**: 应用配置对象
-
-```typescript
-interface AppConfig {
-  mode: 'claude' | 'custom';  // 工作模式
-  proxy: string;              // 代理地址
-  model: string;              // 模型名称
-  base_url: string;           // API Base URL
-  token: string;              // 认证令牌
-  skip_permissions: boolean;  // 是否跳过权限确认
-}
-```
-
-**字段说明**:
-
-| 字段 | 类型 | 说明 |
+| 参数 | 类型 | 说明 |
 |------|------|------|
-| `mode` | `'claude' \| 'custom'` | 工作模式 |
-| `proxy` | `string` | 代理地址 (Claude 模式) |
-| `model` | `string` | 模型名称 (自定义模式) |
-| `base_url` | `string` | API Base URL (自定义模式) |
-| `token` | `string` | 认证令牌 (自定义模式) |
-| `skip_permissions` | `boolean` | 是否启用 `--dangerously-skip-permissions` |
+| `id` | `String` | 项目 UUID |
 
-**模式说明**:
+**返回值**: `Result<(), String>`
 
-**claude 模式**:
-- 使用 `proxy` 字段配置代理
-- `model`, `base_url`, `token` 不生效
-
-**custom 模式**:
-- 使用 `model`, `base_url`, `token` 配置自定义模型
-- `proxy` 不生效
-
-**skip_permissions 说明**:
-- `true`: 启动时添加 `--dangerously-skip-permissions` 参数
-- `false`: 普通模式，需要权限确认
-- 默认值: `true`
-
-**默认值**:
-```typescript
-{
-  mode: 'claude',
-  proxy: '',
-  model: 'qwen3-coder-480b-a35b',
-  base_url: 'http://litellm.uattest.weoa.com',
-  token: '',
-  skip_permissions: true,
-}
-```
+**前端调用**: `projectApi.launch(id)`
 
 ---
 
-### 8.3 Project
+### 4.3 launch_claude_for_login
 
-**说明**: 项目数据结构
+**功能**: 启动 Claude Code CLI 用于登录认证（在用户主目录启动，可选代理）
 
-```typescript
-interface Project {
-  id: string;                      // 项目 UUID
-  name: string;                    // 项目名称
-  working_directory: string;       // 工作目录路径
-  config: ProjectConfig;           // 项目配置
-  is_default: boolean;             // 是否为默认项目
-  created_at: number;              // 创建时间 (Unix 时间戳)
-  updated_at: number;              // 更新时间 (Unix 时间戳)
-  last_launched_at: number | null; // 最后启动时间
-}
+**Rust 签名**:
+```rust
+pub fn launch_claude_for_login(proxy: Option<String>) -> Result<(), String>
 ```
 
-**字段说明**:
-
-| 字段 | 类型 | 说明 |
+**参数**:
+| 参数 | 类型 | 说明 |
 |------|------|------|
-| `id` | `string` | 自动生成的 UUID |
-| `name` | `string` | 项目显示名称 |
-| `working_directory` | `string` | Claude Code 启动时的工作目录 |
-| `config` | `ProjectConfig` | 项目的环境配置 |
-| `is_default` | `boolean` | 是否为默认项目（不可删除） |
-| `created_at` | `number` | Unix 时间戳 |
-| `updated_at` | `number` | Unix 时间戳 |
-| `last_launched_at` | `number \| null` | 最后一次启动的时间戳 |
+| `proxy` | `Option<String>` | 可选的 HTTP 代理地址 |
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `claudeLoginApi.launchForLogin(proxy?)`
 
 ---
 
-### 8.4 ProjectConfig
+### 4.4 select_directory
 
-**说明**: 项目配置结构
+**功能**: 打开系统原生目录选择对话框，让用户选择项目工作目录
 
-```typescript
-interface ProjectConfig {
-  mode: 'claude' | 'custom';  // 工作模式
-  proxy: string;              // 代理地址 (Claude 模式)
-  model: string;              // 模型名称 (自定义模式)
-  base_url: string;           // API Base URL (自定义模式)
-  token: string;              // 认证令牌 (自定义模式)
-  skip_permissions: boolean;  // 是否跳过权限确认
-}
+**Rust 签名**:
+```rust
+pub async fn select_directory(app_handle: tauri::AppHandle) -> Result<Option<String>, String>
 ```
 
-**与 AppConfig 的关系**:
-- `ProjectConfig` 结构与 `AppConfig` 相同
-- `AppConfig` 用于兼容旧的 V1 配置格式
-- `ProjectConfig` 用于 V2 多项目配置
+**参数**: 无（`app_handle` 由 Tauri 自动注入）
 
-**默认值**:
-```typescript
-{
-  mode: 'claude',
-  proxy: '',
-  model: 'qwen3-coder-480b-a35b',
-  base_url: 'http://litellm.uattest.weoa.com',
-  token: '',
-  skip_permissions: true,
-}
-```
+**返回值**: `Result<Option<String>, String>` — 用户选择的目录路径，取消时返回 `None`
+
+**前端调用**: `dialogApi.selectDirectory()`
 
 ---
 
-## 10. 错误处理
+## 5. 命令生成 API
 
-### 10.1 错误类型
+### 5.1 generate_powershell_command
 
-所有 API 调用都返回 `Promise`，失败时会 reject 一个字符串错误消息。
+**功能**: 根据环境变量配置生成 PowerShell 启动命令字符串
 
-**错误格式**:
-```typescript
-// 成功
-Promise.resolve(result)
-
-// 失败
-Promise.reject("错误消息")
+**Rust 签名**:
+```rust
+pub fn generate_powershell_command(config: HashMap<String, String>) -> String
 ```
 
-### 10.2 常见错误
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `config` | `HashMap<String, String>` | 环境变量键值对 |
 
-| 错误消息 | 原因 | 解决方法 |
-|----------|------|----------|
-| "未安装或不在 PATH 中" | 依赖未安装或环境变量未配置 | 安装依赖或刷新 PATH |
-| "Claude Code 未初始化" | 未运行过 `claude` 命令 | 先运行一次 `claude` |
-| "winget 不可用" | winget 未安装或不在 PATH | 手动下载安装 |
-| "无法获取用户主目录" | 系统环境异常 | 检查系统配置 |
-| "设置文件不存在" | 从未保存过配置 | 先保存配置 |
-| "启动失败: ..." | 系统调用失败 | 查看详细错误信息 |
+**返回值**: `String`
 
-### 10.3 错误处理模式
-
-**模式 1: try-catch**
-```typescript
-try {
-  const result = await invoke('some_command');
-  // 成功处理
-} catch (error) {
-  console.error('操作失败:', error);
-  alert(`操作失败: ${error}`);
-}
-```
-
-**模式 2: Promise.catch()**
-```typescript
-invoke('some_command')
-  .then(result => {
-    // 成功处理
-  })
-  .catch(error => {
-    console.error('操作失败:', error);
-  });
-```
-
-**模式 3: 默认值**
-```typescript
-const config = await invoke<AppConfig>('load_app_config')
-  .catch(() => DEFAULT_CONFIG);
-```
+**前端调用**: `api.generatePowershellCommand(config)`
 
 ---
 
-## 11. 使用示例
+### 5.2 generate_cmd_command
 
-### 11.1 完整的依赖检测流程
+**功能**: 根据环境变量配置生成 CMD 启动命令字符串
 
-```typescript
-async function checkAndInstallDependencies() {
-  // 1. 检测 Node.js
-  let nodejsStatus = await invoke<DependencyStatus>('check_nodejs');
-
-  if (!nodejsStatus.installed) {
-    // 未安装，执行安装
-    await invoke('install_nodejs');
-    alert('Node.js 安装已开始，请在新窗口中完成安装');
-
-    // 安装后刷新 PATH 并重新检测
-    await invoke('refresh_system_path');
-    nodejsStatus = await invoke<DependencyStatus>('check_nodejs');
-  }
-
-  // 2. 检查 Node.js 更新
-  if (nodejsStatus.installed) {
-    nodejsStatus = await invoke<DependencyStatus>('check_nodejs_with_update');
-
-    if (nodejsStatus.update_available) {
-      const shouldUpdate = confirm(
-        `有新版本 ${nodejsStatus.latest_version} 可用，是否更新？`
-      );
-
-      if (shouldUpdate) {
-        await invoke('update_nodejs');
-        await invoke('refresh_system_path');
-      }
-    }
-  }
-
-  // 3. 检测 Claude Code
-  let claudeStatus = await invoke<DependencyStatus>('check_claude');
-
-  if (!claudeStatus.installed) {
-    await invoke('install_claude');
-    alert('Claude Code 安装已开始');
-    await invoke('refresh_system_path');
-    claudeStatus = await invoke<DependencyStatus>('check_claude');
-  }
-
-  // 4. 检查 Claude Code 更新
-  if (claudeStatus.installed) {
-    claudeStatus = await invoke<DependencyStatus>('check_claude_with_update');
-
-    if (claudeStatus.update_available) {
-      const shouldUpdate = confirm(
-        `有新版本 ${claudeStatus.latest_version} 可用，是否更新？`
-      );
-
-      if (shouldUpdate) {
-        await invoke('update_claude');
-      }
-    }
-  }
-
-  return {
-    nodejs: nodejsStatus,
-    claude: claudeStatus,
-  };
-}
+**Rust 签名**:
+```rust
+pub fn generate_cmd_command(config: HashMap<String, String>) -> String
 ```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `config` | `HashMap<String, String>` | 环境变量键值对 |
+
+**返回值**: `String`
+
+**前端调用**: `api.generateCmdCommand(config)`
 
 ---
 
-### 11.2 启动 Claude Code 的完整流程
+### 5.3 generate_bash_command
 
-```typescript
-async function launchClaudeCode() {
-  // 1. 验证配置
-  if (mode === 'claude') {
-    if (proxy && !proxy.startsWith('http://') && !proxy.startsWith('https://')) {
-      alert('代理地址必须以 http:// 或 https:// 开头');
-      return;
-    }
-  } else {
-    if (!model || !baseUrl) {
-      alert('请填写完整的模型配置');
-      return;
-    }
-    if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
-      alert('Base URL 必须以 http:// 或 https:// 开头');
-      return;
-    }
-  }
+**功能**: 根据环境变量配置生成 Bash 启动命令字符串
 
-  // 2. 构建配置
-  const config: Record<string, string> = {};
-
-  if (mode === 'claude') {
-    if (proxy) {
-      config['HTTP_PROXY'] = proxy;
-      config['HTTPS_PROXY'] = proxy;
-    }
-  } else {
-    config['ANTHROPIC_MODEL'] = model;
-    config['ANTHROPIC_BASE_URL'] = baseUrl;
-    if (token) {
-      config['ANTHROPIC_AUTH_TOKEN'] = token;
-    }
-  }
-
-  // 3. 启动
-  try {
-    await invoke('launch_claude_code', { config });
-    alert('Claude Code 已启动！');
-  } catch (error) {
-    alert(`启动失败: ${error}`);
-  }
-}
+**Rust 签名**:
+```rust
+pub fn generate_bash_command(config: HashMap<String, String>) -> String
 ```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `config` | `HashMap<String, String>` | 环境变量键值对 |
+
+**返回值**: `String`
+
+**前端调用**: `api.generateBashCommand(config)`
 
 ---
 
-### 11.3 配置管理的完整流程
+## 6. 设置管理 API
 
-```typescript
-// 启动时加载配置
-useEffect(() => {
-  loadConfig();
-}, []);
+### 6.1 save_to_settings
 
-async function loadConfig() {
-  try {
-    const config = await invoke<AppConfig>('load_app_config');
-    setMode(config.mode);
-    setProxy(config.proxy);
-    setModel(config.model);
-    setBaseUrl(config.base_url);
-    setToken(config.token);
-  } catch (error) {
-    console.error('加载配置失败:', error);
-    // 使用默认值
-  }
-}
+**功能**: 将环境变量配置保存到 Claude Code 的 `settings.json` 文件中
 
-// 配置变更时自动保存
-useEffect(() => {
-  const saveConfig = async () => {
-    try {
-      const config: AppConfig = {
-        mode,
-        proxy,
-        model,
-        base_url: baseUrl,
-        token,
-      };
-      await invoke('save_app_config', { config });
-    } catch (error) {
-      console.error('保存配置失败:', error);
-    }
-  };
-
-  // 防抖保存
-  const timer = setTimeout(saveConfig, 1000);
-  return () => clearTimeout(timer);
-}, [mode, proxy, model, baseUrl, token]);
-
-// 保存到 Claude 设置
-async function saveToClaudeSettings() {
-  const config: Record<string, string> = {};
-
-  if (mode === 'claude') {
-    if (proxy) {
-      config['HTTP_PROXY'] = proxy;
-      config['HTTPS_PROXY'] = proxy;
-    }
-  } else {
-    config['ANTHROPIC_MODEL'] = model;
-    config['ANTHROPIC_BASE_URL'] = baseUrl;
-    if (token) {
-      config['ANTHROPIC_AUTH_TOKEN'] = token;
-    }
-  }
-
-  try {
-    await invoke('save_to_settings', { config });
-    alert('配置已保存到 Claude 设置！');
-  } catch (error) {
-    alert(`保存失败: ${error}`);
-  }
-}
+**Rust 签名**:
+```rust
+pub fn save_to_settings(config: HashMap<String, String>) -> Result<(), String>
 ```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `config` | `HashMap<String, String>` | 要保存的环境变量键值对 |
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `api.saveToSettings(config)`
 
 ---
 
-### 11.4 生成和复制命令
+### 6.2 reset_settings
 
-```typescript
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+**功能**: 重置 Claude Code 的 `settings.json` 配置文件为默认状态
 
-async function copyCommand(type: 'powershell' | 'cmd' | 'bash') {
-  // 1. 构建配置
-  const config: Record<string, string> = {};
-
-  if (mode === 'claude') {
-    if (proxy) {
-      config['HTTP_PROXY'] = proxy;
-      config['HTTPS_PROXY'] = proxy;
-    }
-  } else {
-    config['ANTHROPIC_MODEL'] = model;
-    config['ANTHROPIC_BASE_URL'] = baseUrl;
-    if (token) {
-      config['ANTHROPIC_AUTH_TOKEN'] = token;
-    }
-  }
-
-  // 2. 生成命令
-  try {
-    let command: string;
-    switch (type) {
-      case 'powershell':
-        command = await invoke<string>('generate_powershell_command', { config });
-        break;
-      case 'cmd':
-        command = await invoke<string>('generate_cmd_command', { config });
-        break;
-      case 'bash':
-        command = await invoke<string>('generate_bash_command', { config });
-        break;
-    }
-
-    // 3. 复制到剪贴板
-    await writeText(command);
-
-    // 4. 显示成功提示
-    setCopySuccess(true);
-    setTimeout(() => setCopySuccess(false), 2000);
-  } catch (error) {
-    alert(`生成命令失败: ${error}`);
-  }
-}
-
-// 根据平台选择命令类型
-async function detectPlatformAndCopy() {
-  const platform = await invoke<string>('get_platform');
-
-  if (platform === 'windows') {
-    // Windows: 默认使用 PowerShell
-    await copyCommand('powershell');
-  } else {
-    // macOS/Linux: 使用 Bash
-    await copyCommand('bash');
-  }
-}
+**Rust 签名**:
+```rust
+pub fn reset_settings() -> Result<(), String>
 ```
+
+**参数**: 无
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `api.resetSettings()`
 
 ---
 
-## 12. 总结
+### 6.3 open_settings_file
 
-### 12.1 API 设计特点
+**功能**: 使用系统默认编辑器打开 Claude Code 的 `settings.json` 文件
 
-- ✅ **命名清晰**: 函数名直接表达功能
-- ✅ **类型安全**: 完整的 TypeScript 类型定义
-- ✅ **错误友好**: 详细的中文错误提示
-- ✅ **异步优先**: 所有 I/O 操作均为异步
-- ✅ **职责单一**: 每个 API 只做一件事
-- ✅ **跨平台**: 支持 Windows 和 macOS
+**Rust 签名**:
+```rust
+pub fn open_settings_file() -> Result<(), String>
+```
 
-### 12.2 API 统计
+**参数**: 无
 
-| 分类 | 数量 |
-|------|------|
-| 依赖检测 | 7 |
-| 安装/更新 | 6 |
-| 启动器 | 4 |
-| 平台/工具 | 2 |
-| 设置管理 | 3 |
-| 应用配置 | 2 |
-| 项目管理 | 10 |
-| 桥接管理 | 3 |
-| **总计** | **37** |
+**返回值**: `Result<(), String>`
 
-### 12.3 使用建议
+**前端调用**: `api.openSettingsFile()`
 
-1. **依赖检测**: 应用启动时自动检测，检测失败时刷新 PATH 后重试
-2. **安装/更新**: 在新窗口执行，不阻塞主界面
-3. **启动器**: 验证配置后再调用
-4. **平台检测**: 启动时调用一次，用于 UI 适配
-5. **设置管理**: 保存前确认用户意图
-6. **配置存储**: 窗口关闭时自动保存
+---
 
-### 12.4 相关文档
+## 7. 应用配置 API
 
-- [项目总览](./PROJECT_DOCUMENTATION.md)
-- [前端开发指南](./FRONTEND_GUIDE.md)
-- [后端开发指南](./BACKEND_GUIDE.md)
+### 7.1 save_app_config
+
+**功能**: 保存应用全局配置（旧版 API，用于向后兼容）
+
+**Rust 签名**:
+```rust
+pub fn save_app_config(config: AppConfig) -> Result<(), String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `config` | `AppConfig` | 应用全局配置对象 |
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `api.saveAppConfig(config)`
+
+---
+
+### 7.2 load_app_config
+
+**功能**: 加载应用全局配置（旧版 API，用于向后兼容）
+
+**Rust 签名**:
+```rust
+pub fn load_app_config() -> Result<AppConfig, String>
+```
+
+**参数**: 无
+
+**返回值**: `Result<AppConfig, String>`
+
+**前端调用**: `api.loadAppConfig()`
+
+---
+
+## 8. 项目管理 API
+
+### 8.1 get_projects
+
+**功能**: 获取所有项目列表
+
+**Rust 签名**:
+```rust
+pub fn get_projects() -> Result<Vec<Project>, String>
+```
+
+**参数**: 无
+
+**返回值**: `Result<Vec<Project>, String>`
+
+**前端调用**: `projectApi.getAll()`
+
+---
+
+### 8.2 get_project
+
+**功能**: 根据 ID 获取单个项目
+
+**Rust 签名**:
+```rust
+pub fn get_project(id: String) -> Result<Project, String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `id` | `String` | 项目 UUID |
+
+**返回值**: `Result<Project, String>`
+
+**前端调用**: `projectApi.get(id)`
+
+---
+
+### 8.3 create_project
+
+**功能**: 创建新项目
+
+**Rust 签名**:
+```rust
+pub fn create_project(name: String, working_directory: String, config: ProjectConfig) -> Result<Project, String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `name` | `String` | 项目名称 |
+| `working_directory` | `String` | 工作目录路径 |
+| `config` | `ProjectConfig` | 项目配置 |
+
+**返回值**: `Result<Project, String>` — 新创建的项目对象
+
+**前端调用**: `projectApi.create(name, workingDirectory, config)`
+
+---
+
+### 8.4 update_project
+
+**功能**: 更新现有项目（所有字段均为可选，仅更新传入的字段）
+
+**Rust 签名**:
+```rust
+pub fn update_project(
+    id: String,
+    name: Option<String>,
+    working_directory: Option<String>,
+    config: Option<ProjectConfig>,
+    is_pinned: Option<bool>
+) -> Result<Project, String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `id` | `String` | 项目 UUID |
+| `name` | `Option<String>` | 新项目名称 |
+| `working_directory` | `Option<String>` | 新工作目录 |
+| `config` | `Option<ProjectConfig>` | 新项目配置 |
+| `is_pinned` | `Option<bool>` | 是否置顶 |
+
+**返回值**: `Result<Project, String>` — 更新后的项目对象
+
+**前端调用**: `projectApi.update(id, name?, workingDirectory?, config?, isPinned?)`
+
+---
+
+### 8.5 delete_project
+
+**功能**: 删除指定项目
+
+**Rust 签名**:
+```rust
+pub fn delete_project(id: String) -> Result<(), String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `id` | `String` | 项目 UUID |
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `projectApi.delete(id)`
+
+---
+
+### 8.6 generate_project_powershell_command
+
+**功能**: 根据项目 ID 生成 PowerShell 启动命令（包含工作目录切换）
+
+**Rust 签名**:
+```rust
+pub fn generate_project_powershell_command(id: String) -> Result<String, String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `id` | `String` | 项目 UUID |
+
+**返回值**: `Result<String, String>`
+
+**前端调用**: `projectApi.generatePowershellCommand(id)`
+
+---
+
+### 8.7 generate_project_cmd_command
+
+**功能**: 根据项目 ID 生成 CMD 启动命令（包含工作目录切换）
+
+**Rust 签名**:
+```rust
+pub fn generate_project_cmd_command(id: String) -> Result<String, String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `id` | `String` | 项目 UUID |
+
+**返回值**: `Result<String, String>`
+
+**前端调用**: `projectApi.generateCmdCommand(id)`
+
+---
+
+### 8.8 generate_project_bash_command
+
+**功能**: 根据项目 ID 生成 Bash 启动命令（包含工作目录切换）
+
+**Rust 签名**:
+```rust
+pub fn generate_project_bash_command(id: String) -> Result<String, String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `id` | `String` | 项目 UUID |
+
+**返回值**: `Result<String, String>`
+
+**前端调用**: `projectApi.generateBashCommand(id)`
+
+---
+
+### 8.9 update_projects_order
+
+**功能**: 批量更新项目排序顺序（拖拽排序后调用）
+
+**Rust 签名**:
+```rust
+pub fn update_projects_order(orders: Vec<ProjectOrderItem>) -> Result<(), String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `orders` | `Vec<ProjectOrderItem>` | 项目 ID 与排序值的数组 |
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `projectApi.updateProjectsOrder(orders)`
+
+---
+
+### 8.10 update_pinned_order
+
+**功能**: 批量更新置顶项目的排序顺序
+
+**Rust 签名**:
+```rust
+pub fn update_pinned_order(orders: Vec<PinnedOrderItem>) -> Result<(), String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `orders` | `Vec<PinnedOrderItem>` | 置顶项目 ID 与置顶时间戳的数组 |
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `projectApi.updatePinnedOrder(orders)`
+
+---
+
+### 8.11 toggle_project_pinned
+
+**功能**: 切换项目的置顶状态
+
+**Rust 签名**:
+```rust
+pub fn toggle_project_pinned(id: String, is_pinned: bool) -> Result<Project, String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `id` | `String` | 项目 UUID |
+| `is_pinned` | `bool` | 是否置顶 |
+
+**返回值**: `Result<Project, String>` — 更新后的项目对象
+
+**前端调用**: `projectApi.togglePinned(id, isPinned)`
+
+---
+
+### 8.12 get_home_directory
+
+**功能**: 获取当前用户的主目录路径
+
+**Rust 签名**:
+```rust
+pub fn get_home_directory() -> Result<String, String>
+```
+
+**参数**: 无
+
+**返回值**: `Result<String, String>`
+
+**前端调用**: `systemApi.getHomeDirectory()`
+
+---
+
+## 9. 引导 API
+
+### 9.1 get_onboarding_status
+
+**功能**: 获取用户是否已完成新手引导
+
+**Rust 签名**:
+```rust
+pub fn get_onboarding_status() -> Result<bool, String>
+```
+
+**参数**: 无
+
+**返回值**: `Result<bool, String>` — `true` 表示已完成引导
+
+**前端调用**: `onboardingApi.getStatus()`
+
+---
+
+### 9.2 set_onboarding_completed
+
+**功能**: 标记新手引导为已完成
+
+**Rust 签名**:
+```rust
+pub fn set_onboarding_completed() -> Result<(), String>
+```
+
+**参数**: 无
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `onboardingApi.setCompleted()`
+
+---
+
+## 10. Mobot Bridge 管理 API
+
+### 10.1 detect_mobot_installation
+
+**功能**: 检测 Mobot Bridge 的安装状态。如果已安装，还会确保捆绑资源（如 mingit/）存在于 bridge 目录中，并比较已安装版本与捆绑版本，版本不一致时返回 `NotInstalled` 以强制重新安装
+
+**Rust 签名**:
+```rust
+pub async fn detect_mobot_installation(app_handle: tauri::AppHandle) -> InstallStatus
+```
+
+**参数**: 无（`app_handle` 由 Tauri 自动注入）
+
+**返回值**: `InstallStatus` — `NotInstalled` | `Installed { path }` | `Running { path, port }`
+
+**前端调用**: `mobotApi.detectInstallation()`
+
+---
+
+### 10.2 install_mobot_bridge
+
+**功能**: 从应用捆绑资源安装 Mobot Bridge 到用户配置目录（`~/.config/mobot-launcher/mobot-bridge/`）
+
+**Rust 签名**:
+```rust
+pub async fn install_mobot_bridge(app_handle: tauri::AppHandle) -> Result<String, String>
+```
+
+**参数**: 无（`app_handle` 由 Tauri 自动注入）
+
+**返回值**: `Result<String, String>` — 安装路径
+
+**前端调用**: `mobotApi.install()`
+
+---
+
+### 10.3 check_mobot_deps_installed
+
+**功能**: 检查 Mobot Bridge 的 Python 依赖是否已安装
+
+**Rust 签名**:
+```rust
+pub async fn check_mobot_deps_installed(bridge_path: String) -> bool
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `bridge_path` | `String` | Bridge 安装路径 |
+
+**返回值**: `bool`
+
+**前端调用**: `mobotApi.checkDepsInstalled(bridgePath)`
+
+---
+
+### 10.4 detect_python
+
+**功能**: 检测系统中可用的 Python 解释器路径
+
+**Rust 签名**:
+```rust
+pub async fn detect_python() -> Option<String>
+```
+
+**参数**: 无
+
+**返回值**: `Option<String>` — Python 可执行文件路径，未找到时返回 `null`
+
+**前端调用**: `mobotApi.detectPython()`
+
+---
+
+### 10.5 install_mobot_deps
+
+**功能**: 安装 Mobot Bridge 的 Python 依赖（pip install），安装过程中通过 Tauri 事件向前端发送进度
+
+**Rust 签名**:
+```rust
+pub async fn install_mobot_deps(app_handle: tauri::AppHandle, bridge_path: String, python: String) -> Result<String, String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `bridge_path` | `String` | Bridge 安装路径 |
+| `python` | `String` | Python 可执行文件路径 |
+
+**返回值**: `Result<String, String>`
+
+**前端调用**: `mobotApi.installDeps(bridgePath, python)`
+
+---
+
+### 10.6 start_mobot_service
+
+**功能**: 启动 Mobot Bridge 服务（FastAPI + Claude Agent SDK），返回进程 PID
+
+**Rust 签名**:
+```rust
+pub async fn start_mobot_service(bridge_path: String, python: String, port: u16) -> Result<u32, String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `bridge_path` | `String` | Bridge 安装路径 |
+| `python` | `String` | Python 可执行文件路径 |
+| `port` | `u16` | 服务监听端口（默认 8000） |
+
+**返回值**: `Result<u32, String>` — 服务进程 PID
+
+**前端调用**: `mobotApi.startService(bridgePath, python, port)`
+
+---
+
+### 10.7 stop_mobot_service
+
+**功能**: 停止正在运行的 Mobot Bridge 服务
+
+**Rust 签名**:
+```rust
+pub async fn stop_mobot_service() -> Result<(), String>
+```
+
+**参数**: 无
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `mobotApi.stopService()`
+
+---
+
+### 10.8 check_mobot_health
+
+**功能**: 检查 Mobot Bridge 服务的健康状态（调用 `/health` 端点）
+
+**Rust 签名**:
+```rust
+pub async fn check_mobot_health(port: u16) -> HealthStatus
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `port` | `u16` | 服务端口 |
+
+**返回值**: `HealthStatus` — `{ healthy: bool, details: String }`
+
+**前端调用**: `mobotApi.checkHealth(port)`
+
+---
+
+### 10.9 get_mobot_status
+
+**功能**: 获取 Mobot Bridge 服务的综合状态信息
+
+**Rust 签名**:
+```rust
+pub async fn get_mobot_status(port: u16) -> MobotServiceStatus
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `port` | `u16` | 服务端口 |
+
+**返回值**: `MobotServiceStatus`
+
+**前端调用**: `mobotApi.getStatus(port)`
+
+---
+
+### 10.10 get_mobot_logs
+
+**功能**: 获取 Mobot Bridge 服务的最近日志
+
+**Rust 签名**:
+```rust
+pub async fn get_mobot_logs(max_lines: Option<usize>) -> Vec<String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `max_lines` | `Option<usize>` | 最大行数，默认 200 |
+
+**返回值**: `Vec<String>` — 日志行数组
+
+**前端调用**: `mobotApi.getLogs(maxLines?)`
+
+---
+
+### 10.11 is_mobot_updating
+
+**功能**: 检查 Mobot Bridge 是否正在更新中
+
+**Rust 签名**:
+```rust
+pub async fn is_mobot_updating() -> bool
+```
+
+**参数**: 无
+
+**返回值**: `bool`
+
+**前端调用**: `mobotApi.isUpdating()`
+
+---
+
+## 11. Claude 登录 API
+
+### 11.1 check_claude_login
+
+**功能**: 检查用户是否已登录 Claude（通过检测 `~/.claude` 目录是否存在）
+
+**Rust 签名**:
+```rust
+pub fn check_claude_login() -> bool
+```
+
+**参数**: 无
+
+**返回值**: `bool`
+
+**前端调用**: `claudeLoginApi.checkLogin()`
+
+---
+
+### 11.2 launch_claude_for_login
+
+**功能**: 启动 Claude Code CLI 用于登录认证，在用户主目录启动，可选配置代理
+
+**Rust 签名**:
+```rust
+pub fn launch_claude_for_login(proxy: Option<String>) -> Result<(), String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `proxy` | `Option<String>` | 可选的 HTTP/HTTPS 代理地址 |
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `claudeLoginApi.launchForLogin(proxy?)`
+
+---
+
+## 12. CC 配置检查 API
+
+### 12.1 scan_cc_config
+
+**功能**: 扫描 Claude Code 配置文件，检测环境变量冲突、BOM 编码问题和 MCP 配置错位
+
+**Rust 签名**:
+```rust
+pub fn scan_cc_config(projects: Vec<ProjectInfo>) -> ConfigScanResult
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `projects` | `Vec<ProjectInfo>` | 项目信息列表 `[{ name, working_directory }]` |
+
+**返回值**: `ConfigScanResult` — `{ conflicts, bom_files, mcp_misplaced }`
+
+**检查的环境变量 Key**: `HTTP_PROXY`, `HTTPS_PROXY`, `ANTHROPIC_MODEL`, `ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`
+
+**前端调用**: `ccConfigApi.scan(projects)`
+
+---
+
+### 12.2 clean_cc_config_field
+
+**功能**: 清除配置文件中指定的单个环境变量字段
+
+**Rust 签名**:
+```rust
+pub fn clean_cc_config_field(file_path: String, key: String) -> Result<(), String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `file_path` | `String` | 配置文件路径 |
+| `key` | `String` | 要清除的环境变量 Key |
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `ccConfigApi.cleanField(filePath, key)`
+
+---
+
+### 12.3 clean_cc_config_all
+
+**功能**: 批量清除多个配置文件中的环境变量字段
+
+**Rust 签名**:
+```rust
+pub fn clean_cc_config_all(targets: Vec<CleanTarget>) -> Result<u32, String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `targets` | `Vec<CleanTarget>` | 清除目标数组 `[{ file_path, key }]` |
+
+**返回值**: `Result<u32, String>` — 成功清除的数量
+
+**前端调用**: `ccConfigApi.cleanAll(targets)`
+
+---
+
+### 12.4 open_cc_config_file
+
+**功能**: 使用系统默认程序打开指定的配置文件
+
+**Rust 签名**:
+```rust
+pub fn open_cc_config_file(file_path: String) -> Result<(), String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `file_path` | `String` | 配置文件路径 |
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `ccConfigApi.openFile(filePath)`
+
+---
+
+### 12.5 fix_cc_config_bom
+
+**功能**: 修复配置文件的 UTF-8 BOM 编码问题（去除 BOM 头）
+
+**Rust 签名**:
+```rust
+pub fn fix_cc_config_bom(file_path: String) -> Result<(), String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `file_path` | `String` | 配置文件路径 |
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `ccConfigApi.fixBom(filePath)`
+
+---
+
+### 12.6 fix_cc_mcp_misplaced
+
+**功能**: 修复 MCP 配置错位问题（将错放在 settings.json 中的 mcpServers 移到正确的目标文件）
+
+**Rust 签名**:
+```rust
+pub fn fix_cc_mcp_misplaced(file_path: String, target_path: String) -> Result<(), String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `file_path` | `String` | 源配置文件路径（包含错位的 MCP 配置） |
+| `target_path` | `String` | 目标配置文件路径（正确的 MCP 配置位置） |
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `ccConfigApi.fixMcpMisplaced(filePath, targetPath)`
+
+---
+
+### 12.7 remove_cc_mcp_servers
+
+**功能**: 从配置文件中移除 mcpServers 配置段
+
+**Rust 签名**:
+```rust
+pub fn remove_cc_mcp_servers(file_path: String) -> Result<(), String>
+```
+
+**参数**:
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `file_path` | `String` | 配置文件路径 |
+
+**返回值**: `Result<(), String>`
+
+**前端调用**: `ccConfigApi.removeMcpServers(filePath)`
+
+---
+
+## 13. 便携模式 API
+
+### 13.1 is_portable_mode
+
+**功能**: 检测应用是否以便携模式运行（通过检测可执行文件旁边是否存在 `.portable` 标记文件）
+
+**Rust 签名**:
+```rust
+pub fn is_portable_mode() -> bool
+```
+
+**参数**: 无
+
+**返回值**: `bool`
+
+**前端调用**: `invoke<boolean>('is_portable_mode')` （在 `useUpdateChecker` hook 中直接调用）
+
+---
+
+### 13.2 get_portable_download_url
+
+**功能**: 获取便携版最新发布的下载 URL
+
+**Rust 签名**:
+```rust
+pub fn get_portable_download_url() -> String
+```
+
+**参数**: 无
+
+**返回值**: `String` — 固定返回 `"https://github.com/erthman18/claude-code-launcher/releases/latest"`
+
+**前端调用**: `invoke<string>('get_portable_download_url')` （在 `useUpdateChecker` hook 中直接调用）
+
+---
+
+## 14. 工具 API
+
+### 14.1 get_hostname
+
+**功能**: 获取当前机器的主机名
+
+**Rust 签名**:
+```rust
+pub fn get_hostname() -> String
+```
+
+**参数**: 无
+
+**返回值**: `String`
+
+**前端调用**: `mobotApi.getHostname()`
+
+---
+
+### 14.2 get_username
+
+**功能**: 获取当前操作系统用户名
+
+**Rust 签名**:
+```rust
+pub fn get_username() -> String
+```
+
+**参数**: 无
+
+**返回值**: `String`
+
+**前端调用**: `mobotApi.getUsername()`
+
+---
+
+## 前端 API 模块索引
+
+| 模块 | 导入路径 | 包含的命令 |
+|------|----------|-----------|
+| `api` | `import { api } from './api'` | 依赖检测、安装更新、启动、命令生成、平台检测、设置管理、应用配置 |
+| `projectApi` | `import { projectApi } from './api'` | 项目 CRUD、启动、命令生成、排序、置顶 |
+| `mobotApi` | `import { mobotApi } from './api'` | Bridge 安装、依赖、服务管理、健康检查、日志 |
+| `ccConfigApi` | `import { ccConfigApi } from './api'` | 配置扫描、清理、修复 |
+| `claudeLoginApi` | `import { claudeLoginApi } from './api'` | 登录检查、启动登录 |
+| `dialogApi` | `import { dialogApi } from './api'` | 目录选择对话框 |
+| `systemApi` | `import { systemApi } from './api'` | 主目录获取 |
+| `onboardingApi` | `import { onboardingApi } from './api'` | 引导状态管理 |

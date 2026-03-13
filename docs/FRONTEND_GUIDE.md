@@ -1,54 +1,45 @@
-# 前端开发指南
+# Mobot Launcher - 前端开发指南
 
-> **技术栈**: React 19 + TypeScript + Vite + Tailwind CSS
-> **最后更新**: 2026-02-26
+> **项目版本**: 1.0.4
+> **最后更新**: 2026-03-13
+> **技术栈**: React 19 + TypeScript + Tailwind CSS + Vite 7
 
 ---
 
-## 📋 目录
+## 目录
 
-- [1. 技术栈概览](#1-技术栈概览)
+- [1. 技术栈概述](#1-技术栈概述)
 - [2. 项目结构](#2-项目结构)
-- [3. 组件详解](#3-组件详解)
-- [4. 状态管理](#4-状态管理)
-- [5. API 调用](#5-api-调用)
-- [6. 类型系统](#6-类型系统)
-- [7. 样式设计](#7-样式设计)
-- [8. 开发实践](#8-开发实践)
+- [3. 路由系统](#3-路由系统)
+- [4. 页面组件](#4-页面组件)
+- [5. 通用组件](#5-通用组件)
+- [6. Hooks](#6-hooks)
+- [7. API 层](#7-api-层)
+- [8. 类型系统](#8-类型系统)
+- [9. 样式系统](#9-样式系统)
+- [10. 状态管理](#10-状态管理)
+- [11. 依赖列表](#11-依赖列表)
 
 ---
 
-## 1. 技术栈概览
+## 1. 技术栈概述
 
-### 1.1 核心依赖
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| React | ^19.1.0 | UI 框架 |
+| TypeScript | ~5.8.3 | 类型安全 |
+| Vite | ^7.0.4 | 构建工具，端口 1420，HMR 端口 1421 |
+| Tailwind CSS | ^3.4.0 | 原子化 CSS |
+| React Router DOM | ^7.13.0 | 客户端路由 |
+| @dnd-kit/core | ^6.3.1 | 拖拽排序核心 |
+| @dnd-kit/sortable | ^10.0.0 | 列表排序插件 |
+| @tauri-apps/api | ^2.10.1 | Tauri 前端 API (invoke, event, window) |
+| @tauri-apps/plugin-clipboard-manager | ^2.3.2 | 剪贴板读写 |
+| @tauri-apps/plugin-opener | ^2 | 打开 URL/文件 |
+| @tauri-apps/plugin-process | ^2 | 应用重启 (relaunch) |
+| @tauri-apps/plugin-updater | ^2 | 应用自动更新 |
 
-```json
-{
-  "dependencies": {
-    "@tauri-apps/api": "^2",           // Tauri 前端 API
-    "@tauri-apps/plugin-opener": "^2", // 打开文件/URL 插件
-    "react": "^19.1.0",                // React 框架
-    "react-dom": "^19.1.0"             // React DOM 渲染
-  }
-}
-```
-
-### 1.2 开发依赖
-
-```json
-{
-  "devDependencies": {
-    "@types/react": "^19.1.8",         // React 类型定义
-    "@types/react-dom": "^19.1.6",     // React DOM 类型
-    "@vitejs/plugin-react": "^4.6.0",  // Vite React 插件
-    "autoprefixer": "^10.4.22",        // CSS 前缀自动化
-    "postcss": "^8.5.6",               // CSS 处理器
-    "tailwindcss": "^3.4.0",           // 实用优先的 CSS 框架
-    "typescript": "~5.8.3",            // TypeScript 编译器
-    "vite": "^7.0.4"                   // 快速构建工具
-  }
-}
-```
+**编译目标**: ES2020，React JSX 转换，Bundler 模块解析。严格模式开启 (`strict: true`)，禁止未使用的局部变量和参数。
 
 ---
 
@@ -56,1412 +47,930 @@
 
 ```
 src/
-├── main.tsx                 # 应用入口，ReactDOM 渲染
-├── App.tsx                  # 主应用组件，状态管理和布局
-├── index.css                # 全局样式，Tailwind 基础
-├── types.ts                 # TypeScript 类型定义
-├── api.ts                   # Tauri API 调用封装
+├── main.tsx                          # 应用入口，ReactDOM.createRoot + StrictMode
+├── App.tsx                           # 主应用组件，BrowserRouter + DragContext + 路由定义
+├── api.ts                            # 所有 Tauri invoke 调用的封装 (7 个 API 对象)
+├── types.ts                          # 全局类型 (DependencyStatus, AppConfig, MODEL_OPTIONS)
+├── index.css                         # Tailwind 指令 + 自定义全局样式
+├── types/
+│   └── project.ts                    # 项目相关类型 (Project, ProjectConfig, Mobot, CC Config)
+├── hooks/
+│   └── useUpdateChecker.ts           # 自动更新检测 Hook (installer + portable 双模式)
+├── pages/
+│   ├── ModeSelectPage.tsx            # 首页 - 本地/远程 模式选择
+│   ├── ProjectListPage.tsx           # 项目列表 - 拖拽排序 + 依赖检测 + 首次安装向导
+│   ├── ProjectCreatePage.tsx         # 新建项目 - 支持拖拽文件夹创建
+│   ├── ProjectDetailPage.tsx         # 项目详情 - 查看配置 + 启动 + 复制命令
+│   ├── ProjectEditPage.tsx           # 编辑项目 - 修改配置 + 删除 + 拖拽更新目录
+│   └── RemoteBridgePage.tsx          # 远程 Mobot Bridge - 安装/启动/iframe 嵌入
 └── components/
-    ├── DependencyFrame.tsx  # 依赖检测面板组件
-    └── ConfigPanel.tsx      # 配置参数面板组件
-```
-
-### 2.1 文件职责
-
-| 文件 | 职责 | 代码行数 |
-|------|------|----------|
-| `main.tsx` | 应用挂载，React 根节点 | ~10 行 |
-| `App.tsx` | 主逻辑、状态管理、布局 | ~250 行 |
-| `DependencyFrame.tsx` | 依赖检测 UI 和交互 | ~200 行 |
-| `ConfigPanel.tsx` | 配置表单 UI 和验证 | ~300 行 |
-| `api.ts` | Tauri Commands 封装 | ~80 行 |
-| `types.ts` | 类型定义和常量 | ~40 行 |
-| `index.css` | 全局样式和主题 | ~150 行 |
-
----
-
-## 3. 组件详解
-
-### 3.1 App.tsx - 主应用组件
-
-#### 3.1.1 组件结构
-
-```tsx
-import { useEffect, useState } from "react";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import DependencyFrame from "./components/DependencyFrame";
-import ConfigPanel from "./components/ConfigPanel";
-import { api } from "./api";
-import { AppConfig, DEFAULT_CONFIG } from "./types";
-
-function App() {
-  // 状态管理
-  const [mode, setMode] = useState<'claude' | 'custom'>('claude');
-  const [proxy, setProxy] = useState('');
-  const [model, setModel] = useState('qwen3-coder-480b-a35b');
-  const [baseUrl, setBaseUrl] = useState('http://litellm.uattest.weoa.com');
-  const [token, setToken] = useState('');
-  const [copySuccess, setCopySuccess] = useState(false);
-
-  // 生命周期和事件处理
-  useEffect(() => { /* ... */ }, []);
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 p-6">
-      {/* 组件布局 */}
-    </div>
-  );
-}
-```
-
-#### 3.1.2 状态管理
-
-**状态列表**:
-
-| 状态 | 类型 | 默认值 | 说明 |
-|------|------|--------|------|
-| `mode` | `'claude' \| 'custom'` | `'claude'` | 工作模式 |
-| `proxy` | `string` | `''` | 代理地址 |
-| `model` | `string` | `''` | 自定义模型名称（可留空） |
-| `baseUrl` | `string` | `'http://...'` | 自定义 API 地址 |
-| `token` | `string` | `''` | 认证令牌 |
-| `copySuccess` | `boolean` | `false` | 复制成功提示 |
-
-**状态同步**:
-
-```tsx
-// 启动时加载配置
-useEffect(() => {
-  loadConfig();
-}, []);
-
-// 关闭前保存配置
-useEffect(() => {
-  const handleBeforeUnload = () => {
-    saveConfig();
-  };
-  window.addEventListener('beforeunload', handleBeforeUnload);
-  return () => {
-    window.removeEventListener('beforeunload', handleBeforeUnload);
-    saveConfig(); // 组件卸载时也保存
-  };
-}, [mode, proxy, model, baseUrl, token]);
-```
-
-#### 3.1.3 核心功能函数
-
-**1. 加载配置**
-
-```tsx
-const loadConfig = async () => {
-  try {
-    const config: AppConfig = await api.loadAppConfig();
-    setMode(config.mode);
-    setProxy(config.proxy);
-    setModel(config.model);
-    setBaseUrl(config.base_url);
-    setToken(config.token);
-  } catch (error) {
-    console.error('加载配置失败:', error);
-    // 使用默认配置
-  }
-};
-```
-
-**2. 保存配置**
-
-```tsx
-const saveConfig = async () => {
-  try {
-    const config: AppConfig = {
-      mode,
-      proxy,
-      model,
-      base_url: baseUrl,
-      token,
-    };
-    await api.saveAppConfig(config);
-  } catch (error) {
-    console.error('保存配置失败:', error);
-  }
-};
-```
-
-**3. 配置验证**
-
-```tsx
-const validateConfig = (): string | null => {
-  if (mode === 'claude') {
-    // Claude 模式：验证代理地址
-    if (proxy && !proxy.startsWith('http://') && !proxy.startsWith('https://')) {
-      return '代理地址必须以 http:// 或 https:// 开头';
-    }
-  } else {
-    // 自定义模式：验证必填字段（model 可留空）
-    if (!baseUrl.trim()) {
-      return '请输入 Base URL';
-    }
-    if (!baseUrl.startsWith('http://') && !baseUrl.startsWith('https://')) {
-      return 'Base URL 必须以 http:// 或 https:// 开头';
-    }
-  }
-  return null;
-};
-```
-
-**4. 获取环境变量配置**
-
-```tsx
-const getConfig = (): Record<string, string> => {
-  const config: Record<string, string> = {};
-
-  if (mode === 'claude') {
-    // Claude 原版模式
-    if (proxy) {
-      config['HTTP_PROXY'] = proxy;
-      config['HTTPS_PROXY'] = proxy;
-    }
-  } else {
-    // 自定义模型模式
-    config['ANTHROPIC_MODEL'] = model;
-    config['ANTHROPIC_BASE_URL'] = baseUrl;
-    if (token) {
-      config['ANTHROPIC_AUTH_TOKEN'] = token;
-    }
-  }
-
-  return config;
-};
-```
-
-**5. 启动 Claude Code**
-
-```tsx
-const handleLaunch = async () => {
-  const error = validateConfig();
-  if (error) {
-    alert(error);
-    return;
-  }
-
-  try {
-    const config = getConfig();
-    await api.launchClaudeCode(config);
-    alert('Claude Code 已启动！');
-  } catch (error) {
-    alert(`启动失败: ${error}`);
-  }
-};
-```
-
-**6. 生成和复制命令**
-
-```tsx
-const handleCopyCommand = async (type: 'powershell' | 'cmd') => {
-  const error = validateConfig();
-  if (error) {
-    alert(error);
-    return;
-  }
-
-  try {
-    const config = getConfig();
-    const command = type === 'powershell'
-      ? await api.generatePowershellCommand(config)
-      : await api.generateCmdCommand(config);
-
-    await writeText(command);
-    setCopySuccess(true);
-    setTimeout(() => setCopySuccess(false), 2000);
-  } catch (error) {
-    alert(`生成命令失败: ${error}`);
-  }
-};
-```
-
-**7. 保存到 Claude 设置**
-
-```tsx
-const handleSaveToSettings = async () => {
-  const error = validateConfig();
-  if (error) {
-    alert(error);
-    return;
-  }
-
-  try {
-    const config = getConfig();
-    await api.saveToSettings(config);
-    alert('配置已保存到 Claude 设置！');
-  } catch (error) {
-    alert(`保存失败: ${error}`);
-  }
-};
-```
-
-**8. 重置设置**
-
-```tsx
-const handleResetSettings = async () => {
-  if (!confirm('确定要重置 Claude 设置中的环境变量配置吗？')) {
-    return;
-  }
-
-  try {
-    await api.resetSettings();
-    alert('设置已重置！');
-  } catch (error) {
-    alert(`重置失败: ${error}`);
-  }
-};
-```
-
-**9. 打开设置文件**
-
-```tsx
-const handleOpenSettingsFile = async () => {
-  try {
-    await api.openSettingsFile();
-  } catch (error) {
-    alert(`打开设置文件失败: ${error}`);
-  }
-};
-```
-
-#### 3.1.4 布局结构
-
-```tsx
-<div className="min-h-screen bg-gradient-to-br from-gray-900 to-gray-800 p-6">
-  <div className="max-w-4xl mx-auto space-y-6">
-    {/* 标题 */}
-    <h1 className="text-4xl font-bold text-center text-white mb-8">
-      Claude Code 启动器
-    </h1>
-
-    {/* 依赖检测面板 */}
-    <DependencyFrame />
-
-    {/* 配置面板 */}
-    <ConfigPanel
-      mode={mode}
-      setMode={setMode}
-      proxy={proxy}
-      setProxy={setProxy}
-      model={model}
-      setModel={setModel}
-      baseUrl={baseUrl}
-      setBaseUrl={setBaseUrl}
-      token={token}
-      setToken={setToken}
-    />
-
-    {/* 操作按钮组 */}
-    <div className="card space-y-4">
-      {/* 启动按钮 */}
-      <button onClick={handleLaunch} className="btn-launch">
-        🚀 启动 Claude Code
-      </button>
-
-      {/* 命令生成按钮 */}
-      <div className="grid grid-cols-2 gap-4">
-        <button onClick={() => handleCopyCommand('powershell')}>
-          📋 复制 PowerShell 命令
-        </button>
-        <button onClick={() => handleCopyCommand('cmd')}>
-          📋 复制 CMD 命令
-        </button>
-      </div>
-
-      {/* 设置管理按钮 */}
-      <div className="grid grid-cols-3 gap-4">
-        <button onClick={handleSaveToSettings}>💾 保存到 Claude 设置</button>
-        <button onClick={handleResetSettings}>🔄 重置设置</button>
-        <button onClick={handleOpenSettingsFile}>📂 打开设置文件</button>
-      </div>
-
-      {/* 复制成功提示 */}
-      {copySuccess && (
-        <div className="text-center text-green-400">✓ 已复制到剪贴板</div>
-      )}
-    </div>
-  </div>
-</div>
+    ├── ModeSwitch.tsx                # 本地/远程 切换按钮 (自动最大化/还原窗口)
+    ├── ProjectCard.tsx               # 项目卡片 (名称/目录/模式标签/启动/复制命令)
+    ├── SortableProjectCard.tsx       # 可拖拽的项目卡片 (useSortable 包装)
+    ├── ProjectForm.tsx               # 项目表单 (名称/目录/模式/代理/启动模式/置顶)
+    ├── DirectoryPicker.tsx           # 目录选择器 (文本输入 + 系统目录选择对话框)
+    ├── ConfigPanel.tsx               # 配置参数面板 (legacy，用于独立配置页)
+    ├── ConfirmDialog.tsx             # 确认对话框 (模态遮罩 + danger/default 变体)
+    ├── DependencyFrame.tsx           # 依赖检测面板 (折叠/展开/CC配置检测 三态)
+    ├── CcConfigPanel.tsx             # CC 配置检测面板 (冲突扫描/BOM修复/MCP迁移)
+    ├── LocalSetupWizard.tsx          # 本地首次安装向导 (Node.js/Git/Claude/Codex)
+    ├── MobotSetupWizard.tsx          # Mobot Bridge 安装向导 (释放/Python/依赖/启动)
+    ├── OnboardingOverlay.tsx         # 新手引导遮罩 (6步聚光灯引导)
+    ├── OnboardingTrigger.tsx         # 新手引导触发按钮 (右下角问号图标)
+    └── UpdateNotification.tsx        # 更新通知条 (available/downloading/error 三态)
 ```
 
 ---
 
-### 3.2 DependencyFrame.tsx - 依赖检测组件
+## 3. 路由系统
 
-#### 3.2.1 组件结构
+使用 `react-router-dom` v7 的 `BrowserRouter` + `Routes` + `Route`。路由定义在 `App.tsx` 的 `AppContent` 组件中。
 
-```tsx
-import { useEffect, useState } from "react";
-import { api } from "../api";
-import { DependencyStatus } from "../types";
+| 路径 | 页面组件 | 说明 |
+|------|----------|------|
+| `/` | `ModeSelectPage` | 首页，选择本地或远程模式 |
+| `/local` | `ProjectListPage` | 本地项目列表，含首次安装向导 |
+| `/local/project/new` | `ProjectCreatePage` | 新建项目 |
+| `/local/project/:id` | `ProjectDetailPage` | 项目详情 |
+| `/local/project/:id/edit` | `ProjectEditPage` | 编辑项目 |
+| `/remote` | `RemoteBridgePage` | 远程 Mobot Bridge 管理 |
 
-export default function DependencyFrame() {
-  // 状态管理
-  const [nodejsStatus, setNodejsStatus] = useState<DependencyStatus | null>(null);
-  const [claudeStatus, setClaudeStatus] = useState<DependencyStatus | null>(null);
-  const [loading, setLoading] = useState<string | null>(null);
+**全局包装层** (`AppContent`):
+- `DragContext.Provider` — 全局拖拽上下文
+- `UpdateNotification` — 顶部更新通知条
+- 拖拽遮罩层 — 当文件拖入窗口时显示蓝色虚线框
+- `OnboardingOverlay` — 仅在 `/local` 路径显示
+- `OnboardingTrigger` — 右下角帮助按钮，始终可见
 
-  // 自动检测依赖
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      checkDependencies();
-    }, 100);
-    return () => clearTimeout(timer);
-  }, []);
+---
 
-  // 功能函数
-  const checkDependencies = async () => { /* ... */ };
-  const checkUpdates = async () => { /* ... */ };
-  const handleInstallOrUpdate = async (dep: 'nodejs' | 'claude') => { /* ... */ };
+## 4. 页面组件
 
-  return (
-    <div className="card">
-      {/* 组件内容 */}
-    </div>
-  );
-}
-```
+### 4.1 ModeSelectPage
 
-#### 3.2.2 状态管理
+**文件**: `src/pages/ModeSelectPage.tsx`
 
+首页，两个大按钮选择"本地使用"或"Mobot (远程连接)"。
+
+- **本地使用**: 导航到 `/local`
+- **远程连接**: 导航到 `/remote`，并调用 `getCurrentWindow().maximize()` 最大化窗口
+- 无 API 调用，无状态管理
+
+### 4.2 ProjectListPage
+
+**文件**: `src/pages/ProjectListPage.tsx`
+
+项目列表页，是本地模式的主页面。
+
+**关键状态**:
 | 状态 | 类型 | 说明 |
 |------|------|------|
-| `nodejsStatus` | `DependencyStatus \| null` | Node.js 依赖状态 |
-| `claudeStatus` | `DependencyStatus \| null` | Claude Code 依赖状态 |
-| `loading` | `string \| null` | 加载状态标识 |
+| `depsReady` | `boolean` | 依赖是否就绪，初始值从 `localStorage('local_deps_ok')` 读取 |
+| `projects` | `Project[]` | 项目列表 |
+| `platform` | `string` | 操作系统平台 |
+| `loading` | `boolean` | 加载状态 |
+| `activeId` | `string \| null` | 当前拖拽的项目 ID |
 
-**DependencyStatus 结构**:
-```typescript
-interface DependencyStatus {
-  installed: boolean;           // 是否已安装
-  version: string | null;        // 当前版本
-  meets_requirement: boolean;    // 是否满足版本要求
-  latest_version: string | null; // 最新版本
-  update_available: boolean;     // 是否有更新
-  error: string | null;          // 错误信息
-}
-```
+**API 调用**:
+- `projectApi.getAll()` — 加载项目列表
+- `api.getPlatform()` — 获取平台信息
+- `projectApi.launch(id)` — 启动项目
+- `projectApi.updateProjectsOrder(orders)` — 保存普通项目排序
+- `projectApi.updatePinnedOrder(orders)` — 保存置顶项目排序
 
-#### 3.2.3 核心功能
+**核心逻辑**:
+- `depsReady === false` 时显示 `LocalSetupWizard`，完成后切换到项目列表
+- 项目按规则排序: 默认项目 > 置顶项目 (pinned_at 降序) > 普通项目 (sort_order 升序)
+- 使用 `@dnd-kit` 实现拖拽排序，默认项目不可拖拽，置顶组和普通组不可跨组拖拽
+- 拖拽使用乐观更新，失败时回滚重新加载
+- `PointerSensor` 需 8px 移动距离才触发拖拽（避免误触）
+- 项目列表使用 `grid grid-cols-2` 两列布局
 
-**1. 检测依赖**
+**子组件**:
+- `ModeSwitch` (active="local")
+- `DependencyFrame` (项目列表上方的依赖检测栏)
+- `ProjectCard` / `SortableProjectCard` (项目卡片)
+- `LocalSetupWizard` (首次安装时)
 
-```tsx
-const checkDependencies = async () => {
-  setLoading('checking');
-  try {
-    const [nodejs, claude] = await Promise.all([
-      api.checkNodejs(),
-      api.checkClaude(),
-    ]);
-    setNodejsStatus(nodejs);
-    setClaudeStatus(claude);
-  } catch (error) {
-    console.error('检测依赖失败:', error);
-  } finally {
-    setLoading(null);
-  }
-};
-```
+### 4.3 ProjectCreatePage
 
-**2. 检查更新**
+**文件**: `src/pages/ProjectCreatePage.tsx`
 
-```tsx
-const checkUpdates = async () => {
-  setLoading('checking-updates');
-  try {
-    const [nodejs, claude] = await Promise.all([
-      api.checkNodejsWithUpdate(),
-      api.checkClaudeWithUpdate(),
-    ]);
-    setNodejsStatus(nodejs);
-    setClaudeStatus(claude);
-  } catch (error) {
-    console.error('检查更新失败:', error);
-  } finally {
-    setLoading(null);
-  }
-};
-```
+新建项目页面。
 
-**3. 安装/更新依赖**
+**关键状态**:
+| 状态 | 类型 | 说明 |
+|------|------|------|
+| `saving` | `boolean` | 保存中 |
+| `defaultWorkingDirectory` | `string` | 默认工作目录 |
+| `lastConfig` | `ProjectConfig \| undefined` | 上一个项目的配置 (作为新项目默认值) |
 
-```tsx
-const handleInstallOrUpdate = async (dep: 'nodejs' | 'claude') => {
-  const status = dep === 'nodejs' ? nodejsStatus : claudeStatus;
-  if (!status) return;
+**API 调用**:
+- `systemApi.getHomeDirectory()` — 获取用户主目录作为默认工作目录
+- `projectApi.getAll()` — 加载最后一个项目的配置作为模板
+- `projectApi.create(name, workingDirectory, config)` — 创建项目
+- `projectApi.togglePinned(id, true)` — 置顶新项目 (如勾选)
 
-  setLoading(`${dep}-install`);
-  try {
-    if (status.installed && status.update_available) {
-      // 更新
-      if (dep === 'nodejs') {
-        await api.updateNodejs();
-      } else {
-        await api.updateClaude();
-      }
-      alert(`${dep === 'nodejs' ? 'Node.js' : 'Claude Code'} 更新完成！`);
-    } else {
-      // 安装
-      if (dep === 'nodejs') {
-        await api.installNodejs();
-      } else {
-        await api.installClaude();
-      }
-      alert(`${dep === 'nodejs' ? 'Node.js' : 'Claude Code'} 安装完成！`);
-    }
+**拖拽集成**: 从 `DragContext` 读取 `droppedPath`，如果有拖拽路径则作为默认工作目录，消费后清除。
 
-    // 刷新系统 PATH
-    await api.refreshSystemPath();
+### 4.4 ProjectDetailPage
 
-    // 重新检测
-    await checkDependencies();
-  } catch (error) {
-    alert(`操作失败: ${error}`);
-  } finally {
-    setLoading(null);
-  }
-};
-```
+**文件**: `src/pages/ProjectDetailPage.tsx`
 
-#### 3.2.4 状态渲染逻辑
+项目详情页，显示项目配置信息、启动按钮和命令复制。
 
-```tsx
-const renderStatus = (status: DependencyStatus | null) => {
-  if (!status) {
-    return <span className="text-gray-400">⏳ 检测中...</span>;
-  }
+**关键状态**:
+| 状态 | 类型 | 说明 |
+|------|------|------|
+| `project` | `Project \| null` | 当前项目 |
+| `copySuccess` | `boolean` | 复制成功提示 (2秒自动消失) |
+| `platform` | `string` | 操作系统 |
 
-  if (status.error) {
-    return <span className="text-error">✗ {status.error}</span>;
-  }
+**API 调用**:
+- `projectApi.get(id)` — 加载项目详情
+- `api.getPlatform()` — 获取平台
+- `projectApi.launch(id)` — 启动项目
+- `projectApi.generatePowershellCommand(id)` — 生成 PowerShell 命令
+- `projectApi.generateCmdCommand(id)` — 生成 CMD 命令
+- `projectApi.generateBashCommand(id)` — 生成 Bash 命令
 
-  if (!status.installed) {
-    return <span className="text-error">✗ 未安装</span>;
-  }
+**平台适配**: Windows 显示 PowerShell + CMD 复制按钮，macOS/Linux 显示 Bash/Zsh 按钮。
 
-  if (!status.meets_requirement) {
-    return (
-      <span className="text-warning">
-        ⚠ 版本过低 (当前: {status.version}, 需要: ≥18.0.0)
-      </span>
-    );
-  }
+### 4.5 ProjectEditPage
 
-  if (status.update_available) {
-    return (
-      <span className="text-warning">
-        ⚠ 已安装 {status.version} (有更新: {status.latest_version})
-      </span>
-    );
-  }
+**文件**: `src/pages/ProjectEditPage.tsx`
 
-  return (
-    <span className="text-success">
-      ✓ 已安装 {status.version} (最新版本)
-    </span>
-  );
-};
-```
+编辑项目页面，含删除功能。
 
-#### 3.2.5 UI 布局
+**关键状态**:
+| 状态 | 类型 | 说明 |
+|------|------|------|
+| `project` | `Project \| null` | 当前项目 |
+| `saving` | `boolean` | 保存中 |
+| `showDeleteConfirm` | `boolean` | 删除确认对话框 |
+| `droppedWorkingDirectory` | `string \| null` | 拖拽更新的工作目录 |
 
-```tsx
-<div className="card">
-  <h2 className="text-2xl font-bold text-white mb-4">📦 依赖检测</h2>
+**API 调用**:
+- `projectApi.get(id)` — 加载项目
+- `projectApi.update(id, name, workingDirectory, config, isPinned)` — 更新项目
+- `projectApi.delete(id)` — 删除项目
 
-  <div className="space-y-4">
-    {/* Node.js 状态 */}
-    <div className="flex items-center justify-between">
-      <div>
-        <span className="text-lg font-semibold text-white">Node.js:</span>
-        <div className="mt-1">{renderStatus(nodejsStatus)}</div>
-      </div>
-      {nodejsStatus && (!nodejsStatus.installed || nodejsStatus.update_available) && (
-        <button
-          onClick={() => handleInstallOrUpdate('nodejs')}
-          disabled={loading === 'nodejs-install'}
-          className="btn-primary"
-        >
-          {loading === 'nodejs-install'
-            ? '处理中...'
-            : nodejsStatus.installed ? '更新' : '安装'}
-        </button>
-      )}
-    </div>
+**拖拽集成**: 注册自定义拖拽处理器 (`registerDragHandler`)，将拖入的文件夹路径更新到工作目录字段。默认项目不处理拖拽。使用 `useRef` 保证 handler 引用稳定，避免频繁注册/注销。
 
-    {/* Claude Code 状态 */}
-    <div className="flex items-center justify-between">
-      <div>
-        <span className="text-lg font-semibold text-white">Claude Code:</span>
-        <div className="mt-1">{renderStatus(claudeStatus)}</div>
-      </div>
-      {claudeStatus && (!claudeStatus.installed || claudeStatus.update_available) && (
-        <button
-          onClick={() => handleInstallOrUpdate('claude')}
-          disabled={loading === 'claude-install'}
-          className="btn-primary"
-        >
-          {loading === 'claude-install'
-            ? '处理中...'
-            : claudeStatus.installed ? '更新' : '安装'}
-        </button>
-      )}
-    </div>
-  </div>
+**默认项目限制**: `is_default` 为 true 时，名称和工作目录不可修改，不显示删除按钮。
 
-  {/* 操作按钮 */}
-  <div className="mt-6 flex gap-4">
-    <button
-      onClick={checkDependencies}
-      disabled={loading === 'checking'}
-      className="btn-secondary flex-1"
-    >
-      {loading === 'checking' ? '检测中...' : '🔄 重新检测'}
-    </button>
-    <button
-      onClick={checkUpdates}
-      disabled={loading === 'checking-updates'}
-      className="btn-secondary flex-1"
-    >
-      {loading === 'checking-updates' ? '检查中...' : '🔍 检查更新'}
-    </button>
-  </div>
-</div>
-```
+### 4.6 RemoteBridgePage
+
+**文件**: `src/pages/RemoteBridgePage.tsx`
+
+远程 Mobot Bridge 管理页面，四种视图状态:
+
+| ViewState | 说明 |
+|-----------|------|
+| `loading` | 检测安装状态中 |
+| `not_installed` | 未安装，显示 `MobotSetupWizard` |
+| `installed_stopped` | 已安装但未运行，自动启动或显示错误 |
+| `running` | 运行中，嵌入 iframe 显示配置界面 |
+
+**关键状态**:
+| 状态 | 类型 | 说明 |
+|------|------|------|
+| `viewState` | `ViewState` | 当前视图状态 |
+| `status` | `MobotServiceStatus \| null` | 服务状态 |
+| `bridgePath` | `string` | 安装路径 |
+| `pythonPath` | `string` | Python 路径 |
+| `port` | `number` | 固定 8000 |
+| `logs` | `string[]` | 服务日志 |
+| `showLogs` | `boolean` | 是否显示日志面板 |
+| `iframeLoaded` | `boolean` | iframe 是否加载完成 |
+
+**API 调用**:
+- `mobotApi.detectInstallation()` — 检测安装状态
+- `mobotApi.detectPython()` — 检测 Python
+- `mobotApi.startService(path, python, port)` — 启动服务
+- `mobotApi.getStatus(port)` — 轮询服务状态 (每 3 秒)
+- `mobotApi.checkHealth(port)` — 健康检查
+- `mobotApi.isUpdating()` — 检查是否正在热更新
+- `mobotApi.getLogs(maxLines)` — 获取日志 (显示日志时每 2 秒轮询)
+
+**自动恢复机制**:
+- 服务停止后有 15 秒 (5 次 x 3 秒) 的宽限期等待热更新重启
+- 宽限期后尝试自动重启，10 秒冷却防止快速循环
+- iframe 挂载后 1.5 秒自动消除加载遮罩
+
+**进入时自动最大化窗口** (`getCurrentWindow().maximize()`)。
 
 ---
 
-### 3.3 ConfigPanel.tsx - 配置面板组件
+## 5. 通用组件
 
-#### 3.3.1 组件 Props
+### 5.1 ModeSwitch
 
-```tsx
-interface ConfigPanelProps {
-  mode: 'claude' | 'custom';
-  onModeChange: (mode: 'claude' | 'custom') => void;
-  proxy: string;
-  onProxyChange: (value: string) => void;
-  model: string;
-  onModelChange: (value: string) => void;
-  baseUrl: string;
-  onBaseUrlChange: (value: string) => void;
-  token: string;
-  onTokenChange: (value: string) => void;
-  skipPermissions: boolean;
-  onSkipPermissionsChange: (value: boolean) => void;
-  onLaunch: () => void;
-  onCopyPowershell: () => void;
-  onCopyCmd: () => void;
-  onCopyBash: () => void;
-  copySuccess: boolean;
-  platform: 'windows' | 'macos' | 'linux' | 'unknown';
-}
-```
+**文件**: `src/components/ModeSwitch.tsx`
 
-**新增 Props 说明**:
+本地/远程模式切换按钮，显示在页面顶部标题栏。
 
 | Prop | 类型 | 说明 |
 |------|------|------|
-| `skipPermissions` | `boolean` | 是否跳过权限确认 |
-| `onSkipPermissionsChange` | `(value: boolean) => void` | 切换跳过权限回调 |
-| `onCopyBash` | `() => void` | 复制 Bash 命令回调 |
-| `platform` | `string` | 当前操作系统平台 |
+| `active` | `'local' \| 'remote'` | 当前激活模式 |
+| `disabled` | `boolean` | 可选，禁用状态 |
 
-**平台适配**: 根据 `platform` 值显示不同的命令复制按钮:
-- Windows: 显示 PowerShell 和 CMD 按钮
-- macOS/Linux: 显示 Bash 按钮
+切换到远程时最大化窗口，切换到本地时还原窗口。
 
-#### 3.3.2 内部状态
+### 5.2 ProjectCard
 
-```tsx
-const [showToken, setShowToken] = useState(false);
-```
+**文件**: `src/components/ProjectCard.tsx`
 
-| 状态 | 类型 | 说明 |
+项目卡片，显示项目名称、模式标签、置顶标签、工作目录、时间、启动/复制按钮。
+
+| Prop | 类型 | 说明 |
 |------|------|------|
-| `showToken` | `boolean` | 是否显示 Token 明文 |
+| `project` | `Project` | 项目数据 |
+| `platform` | `string` | 操作系统 |
+| `onLaunch` | `(id: string) => void` | 启动回调 |
+| `onEdit` | `(id: string) => void` | 编辑回调 |
+| `isDragging` | `boolean` | 可选，拖拽视觉状态 |
 
-#### 3.3.3 UI 布局
+使用 `@tauri-apps/plugin-clipboard-manager` 的 `writeText` 复制命令。路径超过 40 字符时自动缩写 (`C:\...\last\two`)。Windows 显示"复制PS"+"复制CMD"按钮，其他平台显示"复制Bash"按钮。
 
-**模式切换**:
+### 5.3 SortableProjectCard
 
-```tsx
-<div className="card">
-  <h2 className="text-2xl font-bold text-white mb-4">⚙️ 配置参数</h2>
+**文件**: `src/components/SortableProjectCard.tsx`
 
-  {/* 模式选择 */}
-  <div className="mb-6">
-    <label className="text-white font-semibold mb-2 block">工作模式</label>
-    <div className="flex gap-4">
-      <button
-        onClick={() => setMode('claude')}
-        className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all ${
-          mode === 'claude'
-            ? 'bg-primary text-white shadow-lg'
-            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-        }`}
-      >
-        🌐 Claude 原版
-      </button>
-      <button
-        onClick={() => setMode('custom')}
-        className={`flex-1 py-3 px-4 rounded-lg font-semibold transition-all ${
-          mode === 'custom'
-            ? 'bg-primary text-white shadow-lg'
-            : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-        }`}
-      >
-        🔧 自定义模型
-      </button>
-    </div>
-  </div>
+使用 `@dnd-kit/sortable` 的 `useSortable` 包装 `ProjectCard`，添加拖拽手柄和变换动画。
 
-  {/* 根据模式显示不同表单 */}
-  {mode === 'claude' ? renderClaudeMode() : renderCustomMode()}
-</div>
-```
+| Prop | 类型 | 说明 |
+|------|------|------|
+| `project` | `Project` | 项目数据 |
+| `platform` | `string` | 操作系统 |
+| `onLaunch` | `(id: string) => void` | 启动回调 |
+| `onEdit` | `(id: string) => void` | 编辑回调 |
 
-**Claude 原版模式表单**:
+拖拽时 opacity 降为 0.5。
 
-```tsx
-const renderClaudeMode = () => (
-  <div className="space-y-4">
-    <div>
-      <label className="text-white font-semibold mb-2 block">
-        代理地址 (可选)
-      </label>
-      <input
-        type="text"
-        value={proxy}
-        onChange={(e) => setProxy(e.target.value)}
-        placeholder="http://127.0.0.1:7890"
-        className="input-field"
-      />
-      <p className="text-sm text-gray-400 mt-1">
-        用于访问 Claude 官方服务，留空则不使用代理
-      </p>
-    </div>
-  </div>
-);
-```
+### 5.4 ProjectForm
 
-**自定义模型模式表单**:
+**文件**: `src/components/ProjectForm.tsx`
 
-```tsx
-const renderCustomMode = () => (
-  <div className="space-y-4">
-    {/* Model Name */}
-    <div>
-      <label className="text-white font-semibold mb-2 block">
-        Model Name (可选)
-      </label>
-      <input
-        type="text"
-        value={model}
-        onChange={(e) => setModel(e.target.value)}
-        placeholder="输入模型名称，留空使用默认模型"
-        className="input-field"
-      />
-    </div>
+项目创建/编辑的通用表单，被 `ProjectCreatePage` 和 `ProjectEditPage` 共用。
 
-    {/* Base URL */}
-    <div>
-      <label className="text-white font-semibold mb-2 block">
-        Base URL <span className="text-error">*</span>
-      </label>
-      <input
-        type="text"
-        value={baseUrl}
-        onChange={(e) => setBaseUrl(e.target.value)}
-        placeholder="http://api.example.com"
-        className="input-field"
-      />
-    </div>
+| Prop | 类型 | 说明 |
+|------|------|------|
+| `initialName` | `string` | 可选，初始项目名称 |
+| `initialWorkingDirectory` | `string` | 可选，初始工作目录 |
+| `initialConfig` | `ProjectConfig` | 可选，初始配置 |
+| `initialIsPinned` | `boolean` | 可选，初始置顶状态 |
+| `onSubmit` | `(name, workingDirectory, config, isPinned) => void` | 提交回调 |
+| `onCancel` | `() => void` | 取消回调 |
+| `onDelete` | `() => void` | 可选，删除回调 (有值时显示删除按钮) |
+| `submitLabel` | `string` | 可选，提交按钮文本 |
+| `isDefault` | `boolean` | 可选，是否默认项目 (禁用名称和目录编辑) |
 
-    {/* Auth Token */}
-    <div>
-      <label className="text-white font-semibold mb-2 block">
-        Auth Token (可选)
-      </label>
-      <div className="relative">
-        <input
-          type={showToken ? "text" : "password"}
-          value={token}
-          onChange={(e) => setToken(e.target.value)}
-          placeholder="输入认证令牌"
-          className="input-field pr-12"
-        />
-        <button
-          onClick={() => setShowToken(!showToken)}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white"
-        >
-          {showToken ? '🙈' : '👁️'}
-        </button>
-      </div>
-    </div>
-  </div>
-);
-```
+**表单字段**:
+- 项目名称 (必填)
+- 工作目录 (必填，使用 `DirectoryPicker`)
+- 配置模式: `claude` / `codex` / `custom` 三选一
+  - Claude 账号: 代理地址 (可选)
+  - Codex 账号: 代理地址 (可选)
+  - 自定义模型: CLI 工具选择 (claude/codex，codex 暂不支持)、Model Name、Base URL、Auth Token
+- 启动模式: 普通模式 / 跳过确认模式
+- 置顶设置 (非默认项目时显示)
+
+**验证规则**: 项目名称和工作目录必填，代理地址和 Base URL 必须以 `http://` 或 `https://` 开头。
+
+**响应外部变化**: 通过 `useEffect` 监听 `initialWorkingDirectory`、`initialConfig`、`initialIsPinned` 的变化并同步到内部状态 (支持异步加载和拖拽更新)。
+
+### 5.5 DirectoryPicker
+
+**文件**: `src/components/DirectoryPicker.tsx`
+
+文本输入 + "选择或拖入"按钮的目录选择器。
+
+| Prop | 类型 | 说明 |
+|------|------|------|
+| `value` | `string` | 当前路径 |
+| `onChange` | `(value: string) => void` | 路径变更回调 |
+| `placeholder` | `string` | 可选，占位文本 |
+| `disabled` | `boolean` | 可选，禁用状态 |
+
+点击按钮调用 `dialogApi.selectDirectory()` 打开系统目录选择对话框。
+
+### 5.6 ConfirmDialog
+
+**文件**: `src/components/ConfirmDialog.tsx`
+
+模态确认对话框，支持 `danger` 和 `default` 两种变体。
+
+| Prop | 类型 | 说明 |
+|------|------|------|
+| `isOpen` | `boolean` | 是否显示 |
+| `title` | `string` | 标题 |
+| `message` | `string` | 内容 (支持 `\n` 换行) |
+| `confirmLabel` | `string` | 可选，确认按钮文本 |
+| `cancelLabel` | `string` | 可选，取消按钮文本 |
+| `onConfirm` | `() => void` | 确认回调 |
+| `onCancel` | `() => void` | 取消回调 |
+| `variant` | `'danger' \| 'default'` | 可选，按钮风格 |
+
+点击背景遮罩触发 `onCancel`。
+
+### 5.7 ConfigPanel
+
+**文件**: `src/components/ConfigPanel.tsx`
+
+独立的配置参数面板，用于无项目上下文时的配置管理 (legacy 组件)。
+
+接收完整的配置状态和回调 Props (mode, proxy, model, baseUrl, token, skipPermissions, codexProxy, customCli) 以及启动和复制命令的回调。内部仅管理 `showToken` 状态。
+
+### 5.8 DependencyFrame
+
+**文件**: `src/components/DependencyFrame.tsx`
+
+依赖检测面板，三种显示状态:
+
+| 状态 | 显示 |
+|------|------|
+| 折叠 | 一行状态栏: 依赖就绪/有更新 + 各依赖版本 + "检查更新"/"CC修复"按钮 |
+| 展开 | 详细面板: 每个依赖的安装/更新按钮 |
+| CC配置 | `CcConfigPanel` 配置冲突检测面板 |
+
+| Prop | 类型 | 说明 |
+|------|------|------|
+| `projects` | `Project[]` | 可选，项目列表 (传给 CC 配置检测) |
+| `platform` | `string` | 可选，操作系统 |
+
+**检测的依赖**: Node.js、Git、Claude Code、Codex
+
+**行为逻辑**:
+- 挂载时并行静默检测四个依赖，结果缓存到 `sessionStorage`
+- 有依赖未安装时自动展开面板
+- "检查更新"按钮刷新 PATH 后使用 WithUpdate 版 API 重新检测
+- 安装/更新后延迟 2 秒再重新检测
+
+### 5.9 CcConfigPanel
+
+**文件**: `src/components/CcConfigPanel.tsx`
+
+CC (Claude Code) 配置检测面板，扫描并修复配置问题。
+
+| Prop | 类型 | 说明 |
+|------|------|------|
+| `projects` | `Project[]` | 项目列表 |
+| `platform` | `string` | 操作系统 |
+| `onClose` | `() => void` | 关闭回调 |
+
+**检测内容**:
+1. **配置冲突** — 环境变量 / Shell 配置 / settings.json 中的冲突项 (按来源分组显示)
+2. **JSON BOM 问题** — UTF-8 BOM 导致配置不生效
+3. **MCP 位置问题** — mcpServers 放在 settings.json 而非 .mcp.json
+
+**API 调用**:
+- `ccConfigApi.scan(projects)` — 扫描所有配置
+- `ccConfigApi.cleanField(filePath, key)` — 清理单个字段
+- `ccConfigApi.cleanAll(targets)` — 批量清理
+- `ccConfigApi.fixBom(filePath)` — 修复 BOM
+- `ccConfigApi.fixMcpMisplaced(filePath, targetPath)` — 迁移 MCP 到 .mcp.json
+- `ccConfigApi.removeMcpServers(filePath)` — 移除全局 mcpServers
+- `ccConfigApi.openFile(filePath)` — 打开文件
+
+支持"一键修复"批量处理所有可修复的问题。
+
+### 5.10 LocalSetupWizard
+
+**文件**: `src/components/LocalSetupWizard.tsx`
+
+首次使用的本地环境安装向导。
+
+| Prop | 类型 | 说明 |
+|------|------|------|
+| `onComplete` | `() => void` | 完成回调 |
+
+按顺序安装: Node.js -> Git -> Claude Code -> Codex。每一步先检测是否已安装，已安装则跳过。未安装时打开安装程序并轮询等待安装完成 (每 3 秒检查，最多 60 次)。
+
+完成后写入 `localStorage('local_deps_ok', '1')`。失败时显示"重试"和"跳过"按钮。
+
+### 5.11 MobotSetupWizard
+
+**文件**: `src/components/MobotSetupWizard.tsx`
+
+Mobot Bridge 安装向导，四步流程。
+
+| Prop | 类型 | 说明 |
+|------|------|------|
+| `onComplete` | `(bridgePath: string, pythonPath: string) => void` | 完成回调 |
+| `onCancel` | `() => void` | 取消回调 |
+
+**步骤**:
+1. 释放 mobot-bridge — `mobotApi.install()`
+2. 检测 Python — `mobotApi.detectPython()`
+3. 安装依赖 — `mobotApi.installDeps(path, python)`，监听 `mobot-deps-progress` 事件实时显示进度
+4. 启动服务 — `mobotApi.startService(path, python, 8000)`，轮询健康检查 (最多 15 次，每次 2 秒)
+
+底部显示实时安装日志 (保留最近 50 条)。
+
+### 5.12 OnboardingOverlay
+
+**文件**: `src/components/OnboardingOverlay.tsx`
+
+新手引导遮罩，6 步聚光灯引导。
+
+| Prop | 类型 | 说明 |
+|------|------|------|
+| `onComplete` | `() => void` | 完成/跳过回调 |
+
+**引导步骤**:
+1. `welcome` — 欢迎介绍 (居中)
+2. `dependencies` — 依赖检测栏 (底部定位)
+3. `default-project` — 默认项目卡片 (底部定位)
+4. `create` — 新建项目按钮 (底部定位)
+5. `launch` — 启动按钮区域 (顶部定位)
+6. `finish` — 完成引导 (居中)
+
+通过 `data-onboarding` 属性定位目标元素，使用 CSS `clip-path` 实现聚光灯剪裁效果。工具提示自动保持在视口内。
+
+### 5.13 OnboardingTrigger
+
+**文件**: `src/components/OnboardingTrigger.tsx`
+
+右下角固定定位的问号图标按钮 (32x32)，点击触发新手引导。
+
+| Prop | 类型 | 说明 |
+|------|------|------|
+| `onClick` | `() => void` | 点击回调 |
+
+### 5.14 UpdateNotification
+
+**文件**: `src/components/UpdateNotification.tsx`
+
+顶部更新通知条。
+
+| Prop | 类型 | 说明 |
+|------|------|------|
+| `status` | `UpdateStatus` | 更新状态 |
+| `version` | `string \| null` | 新版本号 |
+| `progress` | `number` | 下载进度 0-100 |
+| `error` | `string \| null` | 错误信息 |
+| `isPortable` | `boolean` | 是否便携版 |
+| `onUpdate` | `() => void` | 更新/下载回调 |
+| `onDismiss` | `() => void` | 关闭回调 |
+| `onRetry` | `() => void` | 重试回调 |
+
+三种显示状态:
+- `available`: 显示版本号 + "稍后再说" + "立即更新"/"前往下载" (portable)
+- `downloading`: 显示进度条
+- `error`: 显示错误 + "关闭" + "重试"
+- `idle`/`checking`: 不渲染
 
 ---
 
-## 4. 状态管理
+## 6. Hooks
 
-### 4.1 状态架构
+### 6.1 useUpdateChecker
 
-```
-App (根组件)
-├── mode (工作模式)
-├── proxy (代理地址)
-├── model (模型名称)
-├── baseUrl (API 地址)
-├── token (认证令牌)
-└── copySuccess (复制提示)
+**文件**: `src/hooks/useUpdateChecker.ts`
 
-DependencyFrame (依赖检测)
-├── nodejsStatus (Node.js 状态)
-├── claudeStatus (Claude Code 状态)
-└── loading (加载状态)
+自动更新检测 Hook，3 秒延迟后检查更新。
 
-ConfigPanel (配置面板)
-├── showToken (显示密码)
-└── isCustomModel (自定义模型)
-```
+**返回值**:
 
-### 4.2 状态提升模式
+| 属性 | 类型 | 说明 |
+|------|------|------|
+| `status` | `'idle' \| 'checking' \| 'available' \| 'downloading' \| 'error'` | 更新状态 |
+| `version` | `string \| null` | 新版本号 |
+| `progress` | `number` | 下载进度 |
+| `error` | `string \| null` | 错误信息 |
+| `isPortable` | `boolean` | 是否便携版 |
+| `downloadAndInstall` | `() => Promise<void>` | 执行更新 |
+| `dismiss` | `() => void` | 关闭通知 |
+| `retry` | `() => void` | 重试更新 |
 
-**ConfigPanel** 组件不持有配置状态，而是通过 Props 接收状态和更新函数：
+**双模式更新**:
+- **Installer 模式**: 使用 Tauri 内置 updater (`@tauri-apps/plugin-updater`)，下载后自动 `relaunch()`
+- **Portable 模式**: 手动从 GitHub 的 `latest.json` 获取版本，有更新时打开浏览器下载页
 
-```tsx
-// App.tsx
-<ConfigPanel
-  mode={mode}
-  setMode={setMode}
-  proxy={proxy}
-  setProxy={setProxy}
-  // ... 其他 props
-/>
-
-// ConfigPanel.tsx
-export default function ConfigPanel({
-  mode,
-  setMode,
-  proxy,
-  setProxy,
-  // ... 其他 props
-}: ConfigPanelProps) {
-  // 组件不持有这些状态，直接使用 props
-  return (
-    <input value={proxy} onChange={(e) => setProxy(e.target.value)} />
-  );
-}
-```
-
-**优势**:
-- ✅ 单一数据源（Single Source of Truth）
-- ✅ 配置状态在 App 组件统一管理
-- ✅ 便于实现配置持久化
-- ✅ 组件间数据共享简单
-
-### 4.3 副作用管理
-
-**配置持久化副作用**:
-
-```tsx
-useEffect(() => {
-  const handleBeforeUnload = () => {
-    saveConfig();
-  };
-
-  window.addEventListener('beforeunload', handleBeforeUnload);
-
-  return () => {
-    window.removeEventListener('beforeunload', handleBeforeUnload);
-    saveConfig(); // 清理时也保存
-  };
-}, [mode, proxy, model, baseUrl, token]); // 依赖所有配置状态
-```
-
-**自动检测副作用**:
-
-```tsx
-useEffect(() => {
-  const timer = setTimeout(() => {
-    checkDependencies();
-  }, 100); // 延迟 100ms 避免闪烁
-
-  return () => clearTimeout(timer); // 清理定时器
-}, []); // 仅挂载时执行
-```
+通过 `invoke('is_portable_mode')` 判断模式。使用 `compareSemver()` 函数比较语义版本号。
 
 ---
 
-## 5. API 调用
+## 7. API 层
 
-### 5.1 API 封装 (api.ts)
+**文件**: `src/api.ts`
+
+所有 API 通过 Tauri 的 `invoke()` 调用 Rust 后端命令。共 7 个 API 对象:
+
+### 7.1 api — 通用 API
 
 ```typescript
-import { invoke } from "@tauri-apps/api/core";
-import { AppConfig, DependencyStatus } from "./types";
-
 export const api = {
-  // 依赖检测
-  checkNodejs: () => invoke<DependencyStatus>('check_nodejs'),
-  checkClaude: () => invoke<DependencyStatus>('check_claude'),
-  checkGitbash: () => invoke<DependencyStatus>('check_gitbash'),
-  checkNodejsWithUpdate: () =>
-    invoke<DependencyStatus>('check_nodejs_with_update'),
-  checkClaudeWithUpdate: () =>
-    invoke<DependencyStatus>('check_claude_with_update'),
-  checkGitbashWithUpdate: () =>
-    invoke<DependencyStatus>('check_gitbash_with_update'),
-  refreshSystemPath: () => invoke('refresh_system_path'),
+  // 依赖检测 (6 个，含 WithUpdate 版)
+  checkNodejs, checkClaude, checkGitbash,
+  checkNodejsWithUpdate, checkClaudeWithUpdate, checkGitbashWithUpdate,
+  checkCodex, checkCodexWithUpdate,
+  refreshSystemPath,
 
-  // 安装/更新
-  installNodejs: () => invoke('install_nodejs'),
-  updateNodejs: () => invoke('update_nodejs'),
-  installClaude: () => invoke('install_claude'),
-  updateClaude: () => invoke('update_claude'),
-  installGitbash: () => invoke('install_gitbash'),
-  updateGitbash: () => invoke('update_gitbash'),
+  // 安装/更新 (8 个)
+  installNodejs, updateNodejs, installClaude, updateClaude,
+  installGitbash, updateGitbash, installCodex, updateCodex,
 
   // 启动
-  launchClaudeCode: (config: Record<string, string>) =>
-    invoke('launch_claude_code', { config }),
+  launchClaudeCode(config: Record<string, string>),
 
   // 命令生成
-  generatePowershellCommand: (config: Record<string, string>) =>
-    invoke<string>('generate_powershell_command', { config }),
-  generateCmdCommand: (config: Record<string, string>) =>
-    invoke<string>('generate_cmd_command', { config }),
-  generateBashCommand: (config: Record<string, string>) =>
-    invoke<string>('generate_bash_command', { config }),
+  generatePowershellCommand, generateCmdCommand, generateBashCommand,
 
-  // 平台检测
-  getPlatform: () => invoke<string>('get_platform'),
+  // 平台
+  getPlatform() => string,
 
   // 设置管理
-  saveToSettings: (config: Record<string, string>) =>
-    invoke('save_to_settings', { config }),
-  resetSettings: () => invoke('reset_settings'),
-  openSettingsFile: () => invoke('open_settings_file'),
+  saveToSettings, resetSettings, openSettingsFile,
 
-  // 应用配置
-  saveAppConfig: (config: AppConfig) =>
-    invoke('save_app_config', { config }),
-  loadAppConfig: () => invoke<AppConfig>('load_app_config'),
+  // 应用配置 (legacy)
+  saveAppConfig(config: AppConfig), loadAppConfig() => AppConfig,
 };
 ```
 
-**新增 API 说明**:
-
-| API | 说明 |
-|-----|------|
-| `checkGitbash()` | 检测 Git Bash 安装状态 |
-| `checkGitbashWithUpdate()` | 检测 Git Bash 并获取最新版本 |
-| `installGitbash()` | 安装 Git Bash |
-| `updateGitbash()` | 更新 Git Bash |
-| `generateBashCommand()` | 生成 Bash 格式命令 |
-| `getPlatform()` | 获取当前操作系统平台 |
-
-### 5.2 错误处理模式
-
-**基础错误处理**:
-
-```tsx
-try {
-  const result = await api.someCommand();
-  // 成功处理
-} catch (error) {
-  console.error('操作失败:', error);
-  alert(`操作失败: ${error}`);
-}
-```
-
-**带加载状态的错误处理**:
-
-```tsx
-setLoading('some-operation');
-try {
-  const result = await api.someCommand();
-  // 成功处理
-} catch (error) {
-  alert(`操作失败: ${error}`);
-} finally {
-  setLoading(null); // 确保加载状态被清除
-}
-```
-
-**并发请求错误处理**:
-
-```tsx
-try {
-  const [result1, result2] = await Promise.all([
-    api.command1(),
-    api.command2(),
-  ]);
-  // 两个请求都成功
-} catch (error) {
-  // 任一请求失败都会进入这里
-  console.error('操作失败:', error);
-}
-```
-
-### 5.3 类型安全
-
-**类型推断**:
-
-```tsx
-// ✅ 正确：TypeScript 推断返回类型
-const status: DependencyStatus = await api.checkNodejs();
-
-// ❌ 错误：类型不匹配会编译报错
-const status: string = await api.checkNodejs(); // 编译错误
-```
-
-**泛型支持**:
-
-```tsx
-// invoke 函数支持泛型指定返回类型
-invoke<DependencyStatus>('check_nodejs');  // 返回 Promise<DependencyStatus>
-invoke<string>('generate_powershell_command', { config });  // 返回 Promise<string>
-invoke('refresh_system_path');  // 返回 Promise<void>
-```
-
----
-
-## 6. 类型系统
-
-### 6.1 类型定义 (types.ts)
+### 7.2 projectApi — 项目管理
 
 ```typescript
-// 依赖状态
-export interface DependencyStatus {
-  installed: boolean;           // 是否已安装
-  version: string | null;        // 当前版本号
-  meets_requirement: boolean;    // 是否满足最低版本要求
-  latest_version: string | null; // 最新可用版本
-  update_available: boolean;     // 是否有可用更新
-  error: string | null;          // 错误信息
-}
-
-// 应用配置
-export interface AppConfig {
-  mode: 'claude' | 'custom';  // 工作模式
-  proxy: string;              // 代理地址
-  model: string;              // 模型名称
-  base_url: string;           // API Base URL
-  token: string;              // 认证令牌
-  skip_permissions: boolean;  // 是否跳过权限确认
-}
-
-// 默认配置
-export const DEFAULT_CONFIG: AppConfig = {
-  mode: 'claude',
-  proxy: '',
-  model: '',                    // 留空使用默认模型
-  base_url: 'http://litellm.uattest.weoa.com',
-  token: '',
-  skip_permissions: true,     // 默认启用跳过权限
+export const projectApi = {
+  getAll() => Project[],
+  get(id) => Project,
+  create(name, workingDirectory, config) => Project,
+  update(id, name?, workingDirectory?, config?, isPinned?) => Project,
+  delete(id) => void,
+  launch(id) => void,
+  generatePowershellCommand(id) => string,
+  generateCmdCommand(id) => string,
+  generateBashCommand(id) => string,
+  updateProjectsOrder(orders: ProjectOrderItem[]) => void,
+  updatePinnedOrder(orders: PinnedOrderItem[]) => void,
+  togglePinned(id, isPinned) => Project,
 };
 ```
 
-**`skip_permissions` 说明**:
-- `true`: 启动时添加 `--dangerously-skip-permissions` 参数
-- `false`: 普通模式，需要权限确认
-- 配合 UI 中的启动模式选择使用
+### 7.3 mobotApi — Mobot Bridge 管理
 
-### 6.2 类型使用示例
-
-**组件 Props 类型**:
-
-```tsx
-interface ConfigPanelProps {
-  mode: 'claude' | 'custom';
-  setMode: (mode: 'claude' | 'custom') => void;
-  proxy: string;
-  setProxy: (proxy: string) => void;
-  // ...
-}
-
-export default function ConfigPanel(props: ConfigPanelProps) {
-  // TypeScript 确保 props 类型正确
-}
+```typescript
+export const mobotApi = {
+  detectInstallation() => InstallStatus,
+  install() => string,                     // 返回安装路径
+  detectPython() => string | null,
+  checkDepsInstalled(bridgePath) => boolean,
+  installDeps(bridgePath, python) => string, // 返回 python 路径
+  startService(bridgePath, python, port) => number, // 返回 PID
+  stopService() => void,
+  checkHealth(port) => HealthStatus,
+  getStatus(port) => MobotServiceStatus,
+  getLogs(maxLines?) => string[],
+  getHostname() => string,
+  getUsername() => string,
+  isUpdating() => boolean,
+};
 ```
 
-**状态类型注解**:
+### 7.4 ccConfigApi — CC 配置检测
 
-```tsx
-const [mode, setMode] = useState<'claude' | 'custom'>('claude');
-const [status, setStatus] = useState<DependencyStatus | null>(null);
+```typescript
+export const ccConfigApi = {
+  scan(projects: {name, working_directory}[]) => ConfigScanResult,
+  cleanField(filePath, key) => void,
+  cleanAll(targets: {file_path, key}[]) => number,
+  openFile(filePath) => void,
+  fixBom(filePath) => void,
+  fixMcpMisplaced(filePath, targetPath) => void,
+  removeMcpServers(filePath) => void,
+};
 ```
 
-**函数返回类型**:
+### 7.5 claudeLoginApi — Claude 登录检查
 
-```tsx
-const getConfig = (): Record<string, string> => {
-  // 返回类型明确，增强代码可读性
-  const config: Record<string, string> = {};
-  // ...
-  return config;
+```typescript
+export const claudeLoginApi = {
+  checkLogin() => boolean,
+  launchForLogin(proxy?) => void,
+};
+```
+
+### 7.6 dialogApi — 对话框
+
+```typescript
+export const dialogApi = {
+  selectDirectory() => string | null,
+};
+```
+
+### 7.7 systemApi — 系统
+
+```typescript
+export const systemApi = {
+  getHomeDirectory() => string,
+};
+```
+
+### 7.8 onboardingApi — 新手引导
+
+```typescript
+export const onboardingApi = {
+  getStatus() => boolean,        // 是否已完成引导
+  setCompleted() => void,
 };
 ```
 
 ---
 
-## 7. 样式设计
+## 8. 类型系统
 
-### 7.1 Tailwind CSS 主题
+### 8.1 types.ts — 全局类型
 
-**自定义颜色**:
+```typescript
+// 依赖检测结果
+interface DependencyStatus {
+  installed: boolean;
+  version: string | null;
+  meets_requirement: boolean;
+  latest_version: string | null;
+  update_available: boolean;
+  error: string | null;
+}
+
+// 应用配置 (legacy，用于 saveAppConfig/loadAppConfig)
+interface AppConfig {
+  mode: 'claude' | 'custom';
+  proxy: string;
+  model: string;
+  base_url: string;
+  token: string;
+  skip_permissions: boolean;
+}
+
+// 默认应用配置
+const DEFAULT_CONFIG: AppConfig = {
+  mode: 'claude',
+  proxy: '',
+  model: 'qwen3-coder-480b-a35b',
+  base_url: 'http://litellm.uattest.weoa.com',
+  token: '',
+  skip_permissions: true,
+};
+
+// 模型选项列表
+const MODEL_OPTIONS = ['deepseek-v3', 'qwen3-235b-a22b', 'qwen3-coder-480b-a35b'];
+```
+
+### 8.2 types/project.ts — 项目类型
+
+```typescript
+// 项目配置
+interface ProjectConfig {
+  mode: 'claude' | 'custom' | 'codex' | 'remote';
+  proxy: string;
+  model: string;
+  base_url: string;
+  token: string;
+  skip_permissions: boolean;
+  codex_api_key: string;
+  custom_cli: 'claude' | 'codex';
+  mobot_bridge_path: string | null;
+  mobot_bridge_port: number;
+}
+
+// 项目实体
+interface Project {
+  id: string;
+  name: string;
+  working_directory: string;
+  config: ProjectConfig;
+  is_default: boolean;
+  created_at: number;           // Unix timestamp
+  updated_at: number;
+  last_launched_at?: number;
+  is_pinned: boolean;
+  pinned_at?: number;
+  sort_order: number;
+}
+
+// 排序项
+interface ProjectOrderItem { id: string; sort_order: number; }
+interface PinnedOrderItem { id: string; pinned_at: number; }
+
+// Mobot 安装状态 (tagged union)
+type InstallStatus =
+  | 'NotInstalled'
+  | { Installed: { path: string } }
+  | { Running: { path: string; port: number } };
+
+// 健康检查
+interface HealthStatus { healthy: boolean; details: string; }
+
+// Mobot 服务状态
+interface MobotServiceStatus {
+  installed: boolean;
+  running: boolean;
+  pid: number | null;
+  port: number;
+  install_path: string | null;
+  healthy: boolean;
+  started_at: number | null;
+}
+
+// CC 配置检测结果
+interface ConfigScanResult {
+  conflicts: ConfigConflict[];
+  bom_files: BomFileIssue[];
+  mcp_misplaced: McpMisplaced[];
+}
+
+interface ConfigConflict {
+  source: string;               // 'shell_profile' | 'registry_user' | 'registry_system' | 'global' | 'project:xxx'
+  file_path: string | null;
+  key: string;
+  value: string;
+  can_clean: boolean;
+}
+
+interface BomFileIssue { file_path: string; }
+
+interface McpMisplaced {
+  file_path: string;
+  target_path: string;
+  keys: string[];
+  can_fix: boolean;
+}
+
+// 默认项目配置
+const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
+  mode: 'claude',
+  proxy: '',
+  model: 'qwen3-coder-480b-a35b',
+  base_url: 'http://litellm.uattest.weoa.com',
+  token: '',
+  skip_permissions: true,
+  codex_api_key: '',
+  custom_cli: 'claude',
+  mobot_bridge_path: null,
+  mobot_bridge_port: 8000,
+};
+```
+
+---
+
+## 9. 样式系统
+
+### 9.1 Tailwind 配置
+
+**文件**: `tailwind.config.js`
 
 ```javascript
-// tailwind.config.js
 export default {
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
       colors: {
-        primary: '#007ACC',    // 主色（蓝色）
-        success: '#5a7c5c',    // 成功（绿色）
-        error: '#8b5a5a',      // 错误（红色）
-        warning: '#FF9800',    // 警告（橙色）
+        primary: '#007ACC',
+        'primary-hover': '#005a9e',
+        success: '#5a7c5c',
+        'success-hover': '#4a6c4c',
+        error: '#8b5a5a',
+        'error-hover': '#7b4a4a',
+        warning: '#FF9800',
+        'warning-hover': '#e68900',
+      },
+      fontFamily: {
+        sans: ['Microsoft YaHei', 'sans-serif'],
       },
     },
   },
-}
+  darkMode: 'class',
+};
 ```
 
-**自定义字体**:
+### 9.2 全局样式 (index.css)
 
-```javascript
-fontFamily: {
-  sans: ['Microsoft YaHei', 'sans-serif'],  // 微软雅黑
-}
-```
+**基础设置**:
+- 字体: Microsoft YaHei
+- 背景: `#212121` (深灰)
+- 前景: `#DCE4EE` (浅蓝灰)
+- 全局 `box-sizing: border-box`
 
-### 7.2 全局样式 (index.css)
+**自定义 CSS 类**:
 
-**Tailwind 指令**:
+| 类名 | 用途 |
+|------|------|
+| `.card-frame` | 卡片容器：渐变背景 (#2B2B2B -> #252525)、12px 圆角、阴影 |
+| `.btn-primary` | 主按钮：蓝色背景 (#3b82f6)、悬停上移 1px + 蓝色阴影 |
+| `.btn-secondary` | 次要按钮：灰色背景 (#565B5E) |
+| `.dropdown-menu` | 下拉菜单动画：从上方滑入 (slideDown) |
 
-```css
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
-```
+**自定义滚动条**: 宽 8px，轨道 #2B2B2B，滑块 #565B5E (hover: #7A8488)，圆角 4px。
 
-**自定义组件类**:
+**输入框聚焦**: 蓝色边框 (#3b82f6) + 蓝色光晕 (box-shadow)。
 
-```css
-/* 卡片容器 */
-.card {
-  @apply bg-gray-800 rounded-xl p-6 shadow-lg;
-  @apply border border-gray-700;
-  @apply hover:shadow-xl transition-all duration-300;
-}
+### 9.3 常用内联颜色
 
-/* 输入框 */
-.input-field {
-  @apply w-full px-4 py-3 rounded-lg;
-  @apply bg-gray-700 text-white;
-  @apply border border-gray-600;
-  @apply focus:border-primary focus:ring-2 focus:ring-primary/50;
-  @apply transition-all duration-200;
-}
+项目中大量使用 Tailwind 的 arbitrary values 而非主题色:
 
-/* 主按钮 */
-.btn-primary {
-  @apply px-6 py-3 rounded-lg font-semibold;
-  @apply bg-primary text-white;
-  @apply hover:bg-blue-600 active:scale-95;
-  @apply disabled:opacity-50 disabled:cursor-not-allowed;
-  @apply transition-all duration-200;
-}
-
-/* 次要按钮 */
-.btn-secondary {
-  @apply px-6 py-3 rounded-lg font-semibold;
-  @apply bg-gray-700 text-gray-300;
-  @apply hover:bg-gray-600 active:scale-95;
-  @apply disabled:opacity-50 disabled:cursor-not-allowed;
-  @apply transition-all duration-200;
-}
-
-/* 启动按钮 */
-.btn-launch {
-  @apply w-full py-4 rounded-xl text-xl font-bold;
-  @apply bg-gradient-to-r from-primary to-blue-600;
-  @apply text-white shadow-lg;
-  @apply hover:shadow-2xl hover:scale-105;
-  @apply active:scale-95;
-  @apply transition-all duration-300;
-}
-```
-
-**自定义滚动条**:
-
-```css
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  @apply bg-gray-800;
-}
-
-::-webkit-scrollbar-thumb {
-  @apply bg-gray-600 rounded-full;
-  @apply hover:bg-gray-500;
-}
-```
-
-### 7.3 响应式设计
-
-**容器最大宽度**:
-
-```tsx
-<div className="max-w-4xl mx-auto">
-  {/* 内容居中，最大宽度 4xl */}
-</div>
-```
-
-**网格布局**:
-
-```tsx
-<div className="grid grid-cols-2 gap-4">
-  {/* 两列等宽布局 */}
-</div>
-
-<div className="grid grid-cols-3 gap-4">
-  {/* 三列等宽布局 */}
-</div>
-```
-
-**间距控制**:
-
-```tsx
-<div className="space-y-4">
-  {/* 垂直方向子元素间距 1rem */}
-</div>
-
-<div className="space-y-6">
-  {/* 垂直方向子元素间距 1.5rem */}
-</div>
-```
-
-### 7.4 动画效果
-
-**过渡动画**:
-
-```css
-/* 通用过渡 */
-.transition-all {
-  transition-property: all;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 150ms;
-}
-
-/* 自定义持续时间 */
-.duration-200 { transition-duration: 200ms; }
-.duration-300 { transition-duration: 300ms; }
-```
-
-**缩放动画**:
-
-```tsx
-<button className="hover:scale-105 active:scale-95">
-  {/* 鼠标悬停时放大 5%，点击时缩小 5% */}
-</button>
-```
-
-**阴影动画**:
-
-```tsx
-<div className="shadow-lg hover:shadow-2xl">
-  {/* 鼠标悬停时阴影增强 */}
-</div>
-```
+| 颜色 | 用途 |
+|------|------|
+| `#212121` | 页面背景 |
+| `#2a2a2a` | 卡片/按钮背景 |
+| `#3a3a3a` | 边框 |
+| `#3b82f6` | 主要操作蓝色 |
+| `#2563eb` | 蓝色 hover |
+| `#10b981` | 成功/健康绿色 |
+| `#f59e0b` | 置顶标签黄色 |
+| `#565B5E` | 次要按钮灰色 |
+| `#999999` | 辅助文字 |
+| `#DCE4EE` | 主要文字 |
 
 ---
 
-## 8. 开发实践
+## 10. 状态管理
 
-### 8.1 最佳实践
+### 10.1 DragContext — 全局拖拽上下文
 
-**1. 组件拆分原则**:
-- ✅ 单一职责：每个组件只负责一个功能
-- ✅ 可复用：通过 Props 传递配置，避免硬编码
-- ✅ 小而精：组件代码控制在 300 行以内
+**定义在**: `App.tsx`
 
-**2. 状态管理原则**:
-- ✅ 状态提升：共享状态放在最近的公共父组件
-- ✅ 最小化状态：能通过计算得出的数据不要存为状态
-- ✅ 不可变更新：使用新对象替代，不要直接修改状态
-
-**3. 类型安全原则**:
-- ✅ 显式类型注解：复杂类型要明确声明
-- ✅ 避免 `any`：使用具体类型或 `unknown`
-- ✅ 接口优先：定义清晰的接口契约
-
-**4. 性能优化原则**:
-- ✅ 合理使用 `useEffect` 依赖
-- ✅ 避免不必要的重新渲染
-- ✅ 大型列表使用虚拟化
-
-### 8.2 常见模式
-
-**条件渲染**:
-
-```tsx
-{mode === 'claude' ? (
-  <ClaudeModeForm />
-) : (
-  <CustomModeForm />
-)}
-
-{status && status.update_available && (
-  <button>更新</button>
-)}
+```typescript
+interface DragContextType {
+  droppedPath: string | null;
+  setDroppedPath: (path: string | null) => void;
+  registerDragHandler: (handler: DragHandler) => void;
+  unregisterDragHandler: (handler: DragHandler) => void;
+}
 ```
 
-**列表渲染**:
+- **droppedPath**: 拖入窗口的文件夹路径。默认行为是导航到 `/local/project/new` 并传递路径创建新项目。
+- **registerDragHandler**: 注册自定义处理器，返回 `true` 表示已处理 (阻止默认行为)。`ProjectEditPage` 用此机制将拖入的路径更新到工作目录。
+- 拖拽事件通过 Tauri 的 `tauri://drag-drop` 事件获取文件路径。
 
-```tsx
-{MODEL_OPTIONS.map((option) => (
-  <option key={option} value={option}>
-    {option}
-  </option>
-))}
-```
+### 10.2 组件状态模式
 
-**事件处理**:
+**无全局状态库**。各页面独立管理自身状态，通过 URL 参数 (`useParams`) 和导航 (`useNavigate`) 传递上下文。
 
-```tsx
-// 内联箭头函数
-<button onClick={() => handleClick(param)}>
+**常见模式**:
+- 页面挂载时加载数据 (`useEffect` + async)
+- 加载/错误/数据三态渲染
+- 乐观更新 + 失败回滚 (拖拽排序)
+- `sessionStorage` 缓存依赖检测结果
+- `localStorage` 持久化首次安装完成标记
+- `useRef` 防止 React StrictMode 双重执行 (`hasStarted.current`)
+- `useMemo` 缓存排序/分组结果
 
-// 直接传递函数引用
-<button onClick={handleClick}>
+### 10.3 @dnd-kit 拖拽排序
 
-// 事件对象
-<input onChange={(e) => setValue(e.target.value)} />
-```
+在 `ProjectListPage` 中:
 
-### 8.3 调试技巧
-
-**1. 控制台日志**:
-
-```tsx
-console.log('状态:', { mode, proxy, model });
-console.error('错误:', error);
-```
-
-**2. React DevTools**:
-- 查看组件树
-- 检查 Props 和 State
-- 分析渲染性能
-
-**3. Tauri DevTools**:
-```bash
-npm run tauri dev
-# 打开应用后按 F12 或 Ctrl+Shift+I
-```
-
-**4. TypeScript 类型检查**:
-
-```bash
-# 编译检查
-npm run build
-
-# 或使用 VSCode 实时检查
-```
-
-### 8.4 代码规范
-
-**命名约定**:
-- 组件：PascalCase (`DependencyFrame`)
-- 函数：camelCase (`handleClick`)
-- 常量：UPPER_SNAKE_CASE (`MODEL_OPTIONS`)
-- 文件：kebab-case 或 PascalCase
-
-**导入顺序**:
-```tsx
-// 1. React 相关
-import { useEffect, useState } from "react";
-
-// 2. 第三方库
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-
-// 3. 本地组件
-import DependencyFrame from "./components/DependencyFrame";
-
-// 4. 本地模块
-import { api } from "./api";
-import { AppConfig } from "./types";
-```
-
-**注释规范**:
-```tsx
-// 单行注释：说明代码意图
-
-/**
- * 多行注释：函数文档
- * @param config 配置对象
- * @returns 命令字符串
- */
-```
+- `DndContext` 包裹列表，使用 `closestCenter` 碰撞检测
+- 置顶项目和普通项目分别用各自的 `SortableContext`
+- `DragOverlay` 显示拖拽中的卡片副本
+- 拖拽限制: 不可拖拽默认项目，不可跨组拖拽
+- 排序持久化: 置顶项目用 `pinned_at` (时间戳)，普通项目用 `sort_order` (索引)
 
 ---
 
-## 9. 总结
+## 11. 依赖列表
 
-### 9.1 前端架构特点
+### 11.1 运行时依赖
 
-- 🎯 **组件化**: 清晰的组件职责划分
-- 🔄 **单向数据流**: Props Down, Events Up
-- 🛡️ **类型安全**: 全面的 TypeScript 类型
-- 🎨 **现代 UI**: Tailwind CSS 实用优先
-- ⚡ **高性能**: Vite 快速开发和构建
-- 🖥️ **跨平台**: 根据平台动态调整 UI
+| 包名 | 版本 | 用途 |
+|------|------|------|
+| `react` | ^19.1.0 | UI 框架 |
+| `react-dom` | ^19.1.0 | DOM 渲染 |
+| `react-router-dom` | ^7.13.0 | 客户端路由 |
+| `@dnd-kit/core` | ^6.3.1 | 拖拽核心 |
+| `@dnd-kit/sortable` | ^10.0.0 | 列表排序 |
+| `@dnd-kit/utilities` | ^3.2.2 | 工具函数 (CSS.Transform) |
+| `@tauri-apps/api` | ^2.10.1 | Tauri 核心 API (invoke, event, window, app) |
+| `@tauri-apps/plugin-clipboard-manager` | ^2.3.2 | 剪贴板操作 (writeText) |
+| `@tauri-apps/plugin-opener` | ^2 | 打开 URL |
+| `@tauri-apps/plugin-process` | ^2 | 应用重启 (relaunch) |
+| `@tauri-apps/plugin-updater` | ^2 | 应用自动更新 (check, Update) |
 
-### 9.2 技术亮点
+### 11.2 开发依赖
 
-- ✨ React 19 最新特性
-- ✨ Tauri IPC 高效通信 (37 个 API)
-- ✨ 响应式设计和动画
-- ✨ 完善的错误处理
-- ✨ 优雅的状态管理
-- ✨ 平台检测和 UI 适配
-- ✨ 多 Shell 命令生成 (PowerShell/CMD/Bash)
-- ✨ 多项目管理支持
-- ✨ 跳过权限确认模式
+| 包名 | 版本 | 用途 |
+|------|------|------|
+| `@tauri-apps/cli` | ^2.10.0 | Tauri CLI 工具 |
+| `@types/react` | ^19.1.8 | React 类型定义 |
+| `@types/react-dom` | ^19.1.6 | React DOM 类型定义 |
+| `@types/react-router-dom` | ^5.3.3 | React Router 类型定义 |
+| `@vitejs/plugin-react` | ^4.6.0 | Vite React 插件 |
+| `autoprefixer` | ^10.4.22 | CSS 前缀自动化 |
+| `postcss` | ^8.5.6 | CSS 处理器 |
+| `tailwindcss` | ^3.4.0 | 原子化 CSS 框架 |
+| `typescript` | ~5.8.3 | TypeScript 编译器 |
+| `vite` | ^7.0.4 | 构建工具 |
 
-### 9.3 API 统计
+### 11.3 NPM Scripts
 
-| 分类 | 函数数量 |
-|------|----------|
-| 依赖检测 | 7 |
-| 安装/更新 | 6 |
-| 启动器 | 4 |
-| 平台/工具 | 2 |
-| 设置管理 | 3 |
-| 应用配置 | 2 |
-| 项目管理 | 10 |
-| 桥接管理 | 3 |
-| **总计** | **37** |
-
-### 9.4 后续优化方向
-
-- 🔮 添加更多自定义主题
-- 🔮 支持配置导入/导出
-- 🔮 优化加载状态显示
-- 🔮 添加配置验证提示
-- 🔮 支持 Linux 平台
+| 命令 | 说明 |
+|------|------|
+| `npm run dev` | 启动 Vite 开发服务器 (端口 1420) |
+| `npm run build` | TypeScript 编译 + Vite 构建 |
+| `npm run preview` | 预览构建产物 |
+| `npm run tauri:dev` | 启动 Tauri 开发模式 |
+| `npm run tauri:build` | 构建 Tauri 应用 |
+| `npm run tauri:build-clean` | 清理后构建 Tauri 应用 |
 
 ---
 

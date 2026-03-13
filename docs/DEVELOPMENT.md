@@ -1,234 +1,94 @@
-# 开发指南
+# Mobot Launcher - 开发指南
 
-> **从零开始的完整开发指南**
-> **最后更新**: 2026-02-26
+> **项目版本**: 1.0.4
+> **最后更新**: 2026-03-13
 > **支持平台**: Windows 10/11, macOS 10.13+
 
 ---
 
-## 📋 目录
+## 目录
 
 - [1. 环境准备](#1-环境准备)
 - [2. 项目初始化](#2-项目初始化)
 - [3. 开发工作流](#3-开发工作流)
-- [4. 调试技巧](#4-调试技巧)
-- [5. 常见问题](#5-常见问题)
-- [6. 最佳实践](#6-最佳实践)
-- [7. 远程桥接开发](#7-远程桥接开发)
-- [8. CI/CD 自动化构建](#8-cicd-自动化构建)
-- [9. 发布流程](#9-发布流程)
-- [10. 总结](#10-总结)
+- [4. 项目配置](#4-项目配置)
+- [5. 资源管理](#5-资源管理)
+- [6. CI/CD (GitHub Actions)](#6-cicd-github-actions)
+- [7. 发布流程](#7-发布流程)
+- [8. NSIS 安装器](#8-nsis-安装器)
+- [9. 便携模式](#9-便携模式)
+- [10. 调试技巧](#10-调试技巧)
+- [11. 常见问题](#11-常见问题)
 
 ---
 
 ## 1. 环境准备
 
-### 1.1 系统要求
+### 1.1 Node.js 18+
 
-**操作系统**:
-- ✅ Windows 10/11 (完全支持)
-- ✅ macOS 10.13+ High Sierra (完全支持)
-- ⚠️ Linux (需要适配)
+CI 使用 Node.js 20，本地开发 18+ 即可。
 
-**硬件要求**:
-- CPU: 双核及以上
-- 内存: 8GB 及以上
-- 磁盘: 2GB 可用空间
-
----
-
-### 1.2 必需工具
-
-#### 1.2.1 Node.js
-
-**版本要求**: ≥ 18.0.0
-
-**安装方法**:
-
-**Windows (winget)**:
+**Windows**:
 ```bash
 winget install OpenJS.NodeJS.LTS
 ```
 
-**Windows (手动下载)**:
-- 下载地址: https://nodejs.org/
-- 选择 LTS 版本
-- 运行安装程序
-
-**验证安装**:
+**macOS**:
+从 https://nodejs.org/ 下载 LTS 版本，或使用 Homebrew：
 ```bash
-node --version
-# v20.10.0
-
-npm --version
-# 10.2.3
+brew install node@20
 ```
 
----
-
-#### 1.2.2 Rust
-
-**版本要求**: ≥ 1.75.0
-
-**安装方法**:
-
-**Windows**:
-- 下载地址: https://rustup.rs/
-- 运行 `rustup-init.exe`
-- 按提示完成安装
-
-**macOS/Linux**:
+**验证**:
 ```bash
+node --version   # v20.x.x
+npm --version    # 10.x.x
+```
+
+### 1.2 Rust (stable)
+
+**Windows / macOS / Linux**:
+```bash
+# Windows: 下载并运行 https://rustup.rs/ 的 rustup-init.exe
+# macOS/Linux:
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-**验证安装**:
+macOS 构建 universal binary 需要额外 target：
+```bash
+rustup target add aarch64-apple-darwin x86_64-apple-darwin
+```
+
+**验证**:
 ```bash
 rustc --version
-# rustc 1.75.0
-
 cargo --version
-# cargo 1.75.0
 ```
 
-**更新 Rust**:
-```bash
-rustup update
-```
+### 1.3 平台特定依赖
 
----
+**Windows**: 需要 Visual Studio C++ Build Tools。安装时勾选：
+- Desktop development with C++
+- MSVC v142+
+- Windows 10/11 SDK
 
-#### 1.2.3 Xcode Command Line Tools (macOS)
-
-**说明**: macOS 上需要 Xcode 命令行工具
-
-**安装方法**:
-```bash
-xcode-select --install
-```
-
-**验证安装**:
-```bash
-xcode-select -p
-# /Library/Developer/CommandLineTools
-```
-
----
-
-#### 1.2.4 Homebrew (macOS 推荐)
-
-**说明**: macOS 包管理器，用于安装依赖
-
-**安装方法**:
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-```
-
-**验证安装**:
-```bash
-brew --version
-# Homebrew 4.2.0
-```
-
----
-
-#### 1.2.5 Visual Studio C++ Build Tools (Windows)
-
-**说明**: Rust 在 Windows 上需要 C++ 编译工具链
-
-**安装方法**:
-
-1. 下载 Visual Studio Build Tools:
-   - https://visualstudio.microsoft.com/visual-cpp-build-tools/
-
-2. 安装时选择:
-   - ✅ Desktop development with C++
-   - ✅ MSVC v142+ (或更高版本)
-   - ✅ Windows 10/11 SDK
-
-**或使用 winget**:
 ```bash
 winget install Microsoft.VisualStudio.2022.BuildTools
 ```
 
----
-
-#### 1.2.6 Python (远程桥接模式)
-
-**说明**: 远程桥接 (Mobot Bridge) 模式需要 Python 运行时。
-
-- **Windows**: Python 3.11 嵌入式发行版已随应用打包，**无需手动安装**。Launcher 会自动将嵌入式 Python 和预构建 wheels 复制到用户数据目录并离线安装依赖。
-- **macOS**: 需要系统安装 Python ≥ 3.10。
-
-**macOS 安装方法 (Homebrew)**:
+**macOS**: 需要 Xcode Command Line Tools：
 ```bash
-brew install python@3.12
+xcode-select --install
 ```
 
-**验证安装 (macOS)**:
+### 1.4 Git
+
 ```bash
-python3 --version
-# Python 3.12.x
-```
-
-> **注意**: 在中文 Windows 系统上，Launcher 会自动设置 `PYTHONUTF8=1` 环境变量避免 GBK 编码问题。
-
----
-
-#### 1.2.7 Git
-
-**安装方法**:
-
-**Windows (winget)**:
-```bash
+# Windows
 winget install Git.Git
-```
 
-**macOS**:
-```bash
+# macOS (xcode-select 已包含 git，或使用 Homebrew)
 brew install git
-```
-
-**验证安装**:
-```bash
-git --version
-# git version 2.40.0
-```
-
----
-
-### 1.3 推荐工具
-
-#### 1.3.1 Visual Studio Code
-
-**扩展推荐**:
-- **Tauri**: tauri-apps.tauri-vscode
-- **rust-analyzer**: rust-lang.rust-analyzer
-- **Prettier**: esbenp.prettier-vscode
-- **ESLint**: dbaeumer.vscode-eslint
-- **Tailwind CSS IntelliSense**: bradlc.vscode-tailwindcss
-
-**安装扩展**:
-```bash
-code --install-extension tauri-apps.tauri-vscode
-code --install-extension rust-lang.rust-analyzer
-code --install-extension esbenp.prettier-vscode
-code --install-extension dbaeumer.vscode-eslint
-code --install-extension bradlc.vscode-tailwindcss
-```
-
----
-
-#### 1.3.2 其他工具
-
-**Windows Terminal** (推荐):
-```bash
-winget install Microsoft.WindowsTerminal
-```
-
-**PowerShell 7**:
-```bash
-winget install Microsoft.PowerShell
 ```
 
 ---
@@ -238,1054 +98,456 @@ winget install Microsoft.PowerShell
 ### 2.1 克隆项目
 
 ```bash
-cd D:\
 git clone <repository-url> claude-code-launcher-tauri
 cd claude-code-launcher-tauri
 ```
 
-**或者从现有项目复制**:
-```bash
-# 假设项目已在 D:\claude-code-launcher-tauri
-cd D:\claude-code-launcher-tauri
-```
-
----
-
-### 2.2 安装依赖
-
-#### 2.2.1 安装前端依赖
+### 2.2 安装前端依赖
 
 ```bash
 npm install
 ```
 
-**输出示例**:
-```
-added 123 packages in 15s
-```
+主要依赖（见 `package.json`）：
+- **运行时**: React 19, react-router-dom 7, @dnd-kit/core + sortable, @tauri-apps/api 2, @tauri-apps/plugin-clipboard-manager, @tauri-apps/plugin-opener, @tauri-apps/plugin-process, @tauri-apps/plugin-updater
+- **开发时**: @tauri-apps/cli 2, Vite 7, @vitejs/plugin-react, TypeScript 5.8, Tailwind CSS 3.4, PostCSS, Autoprefixer
 
-**依赖说明**:
-- `@tauri-apps/api`: Tauri 前端 API
-- `react`: UI 框架
-- `vite`: 构建工具
-- `tailwindcss`: CSS 框架
-
----
-
-#### 2.2.2 检查 Rust 依赖
+### 2.3 检查 Rust 依赖
 
 ```bash
 cd src-tauri
 cargo check
-```
-
-**首次运行会下载并编译所有依赖**:
-```
-Updating crates.io index
-Downloaded tauri v2.0.0
-Downloaded serde v1.0.0
-...
-Compiling 150 crates
-Finished dev [unoptimized + debuginfo] target(s) in 3m 45s
-```
-
-**返回项目根目录**:
-```bash
 cd ..
 ```
 
----
-
-### 2.3 项目结构验证
-
-```bash
-# Windows
-dir /s /b
-
-# Linux/macOS
-find . -type f
-```
-
-**关键文件检查**:
-- ✅ `package.json`
-- ✅ `vite.config.ts`
-- ✅ `tailwind.config.js`
-- ✅ `src-tauri/Cargo.toml`
-- ✅ `src-tauri/tauri.conf.json`
-- ✅ `src/main.tsx`
+首次运行会下载并编译所有 crate，耗时约 3-5 分钟。主要 Rust 依赖（见 `Cargo.toml`）：
+- **Tauri 生态**: tauri 2, tauri-plugin-opener, tauri-plugin-dialog, tauri-plugin-clipboard-manager, tauri-plugin-updater 2.10, tauri-plugin-process 2.3
+- **序列化**: serde, serde_json
+- **异步/网络**: tokio (full), reqwest 0.12 (json + blocking)
+- **工具**: regex, base64 0.22, dirs 5, once_cell, log, zip 2
+- **Windows 专用**: winreg 0.52, windows 0.58 (Win32_Foundation, Win32_UI_WindowsAndMessaging, Win32_System_Threading)
 
 ---
 
 ## 3. 开发工作流
 
-### 3.1 启动开发模式
+### 3.1 npm scripts
 
-```bash
-npm run tauri dev
-```
+| 命令 | 说明 |
+|------|------|
+| `npm run tauri:dev` | 启动开发模式（Vite dev server + Rust debug 编译 + 桌面窗口） |
+| `npm run tauri:build` | 构建生产版本（前端 build + Rust release 编译 + 打包安装器） |
+| `npm run tauri:build-clean` | 清理后重新构建（等同 `tauri build -- --clean`） |
+| `npm run dev` | 仅启动 Vite 前端开发服务器（不启动 Tauri） |
+| `npm run build` | 仅构建前端（tsc + vite build，输出到 `dist/`） |
+| `npm run preview` | 预览前端构建产物 |
 
-**执行流程**:
-1. Vite 启动开发服务器 (http://localhost:1420)
-2. 编译 Rust 代码 (Debug 模式)
-3. 启动 Tauri 桌面应用
-4. 热重载已启用
+> **注意**: 使用带冒号的脚本名 `npm run tauri:dev`，而非 `npm run tauri dev`。
 
-**输出示例**:
-```
-> claude-code-launcher-tauri@0.1.0 dev
-> vite
+### 3.2 开发模式详情
 
-  VITE v7.0.4  ready in 500 ms
+运行 `npm run tauri:dev` 后的流程：
 
-  ➜  Local:   http://localhost:1420/
-  ➜  Network: use --host to expose
-
-   Compiling tauri v2.0.0
-   Compiling claude-code-launcher-tauri v0.1.0
-    Finished dev [unoptimized + debuginfo] target(s) in 12.34s
-```
-
-**应用窗口**: 自动打开桌面应用窗口
-
----
-
-### 3.2 开发流程
-
-#### 3.2.1 前端开发
-
-**修改 React 组件**:
-```typescript
-// src/App.tsx
-function App() {
-  return (
-    <div>
-      <h1>修改后自动热重载</h1>
-    </div>
-  );
-}
-```
-
-**保存文件后**:
-- Vite 自动检测变化
-- 浏览器自动刷新
-- 无需手动重启
-
-**修改样式**:
-```css
-/* src/index.css */
-.card {
-  @apply bg-gray-900;  /* 修改后立即生效 */
-}
-```
-
----
-
-#### 3.2.2 后端开发
-
-**修改 Rust 代码**:
-```rust
-// src-tauri/src/commands/mod.rs
-#[tauri::command]
-pub fn new_command() -> String {
-    "Hello from Rust!".to_string()
-}
-```
-
-**保存文件后**:
-- Cargo 自动重新编译
-- 应用自动重启
-- 可能需要 10-30 秒
-
-**注册新 Command**:
-```rust
-// src-tauri/src/lib.rs
-.invoke_handler(tauri::generate_handler![
-    // ... 现有 commands
-    commands::new_command,  // 添加新 command
-])
-```
-
-**前端调用**:
-```typescript
-const result = await invoke<string>('new_command');
-console.log(result);  // "Hello from Rust!"
-```
-
----
+1. Tauri CLI 执行 `beforeDevCommand`（即 `npm run dev`），启动 Vite 开发服务器
+2. Vite 监听 `localhost:1420`（strictPort，端口被占用会直接报错）
+3. HMR WebSocket 端口 `1421`（当设置了 `TAURI_DEV_HOST` 环境变量时启用远程 HMR）
+4. Rust 代码以 debug 模式编译并启动桌面窗口
+5. 前端代码修改后 Vite HMR 即时热更新，无需重启
+6. Rust 代码修改后 Cargo 自动重编译并重启应用（约 10-30 秒）
+7. Vite 配置了忽略 `**/src-tauri/**` 目录的文件监听，避免 Rust 编译触发前端刷新
 
 ### 3.3 构建生产版本
 
+运行 `npm run tauri:build` 后的流程：
+
+1. 执行 `beforeBuildCommand`（即 `npm run build`），TypeScript 编译 + Vite 构建前端到 `dist/`
+2. Cargo 以 release 模式编译 Rust 代码
+3. 根据平台生成安装包：
+   - **Windows**: NSIS 安装器 (`Mobot.Launcher_1.0.4_x64-setup.exe`) + NSIS ZIP
+   - **macOS**: `.app` 应用包 + `.dmg` 磁盘映像
+
+构建产物位于 `src-tauri/target/release/bundle/`。
+
+---
+
+## 4. 项目配置
+
+### 4.1 tauri.conf.json
+
+核心 Tauri 配置文件，位于 `src-tauri/tauri.conf.json`：
+
+- **productName**: `Mobot Launcher`
+- **identifier**: `com.claudecode.launcher`
+- **窗口**: 750x700 默认大小，最小 700x600，可调整大小，居中显示
+- **CSP**: 设为 `null`（不限制）
+- **bundle targets**: `nsis`（Windows 安装器）、`app`（macOS .app）、`dmg`（macOS 磁盘映像）
+- **publisher**: 微众银行
+- **resources**: 打包 `resources/bridge/**/*` 到安装目录
+- **macOS minimumSystemVersion**: 10.13
+- **createUpdaterArtifacts**: `true`，构建时自动生成 updater 签名文件
+- **WebView2 安装模式**: `embedBootstrapper`，将 WebView2 引导安装程序嵌入 NSIS 安装器，用户安装时若缺少 WebView2 会自动引导安装
+- **NSIS hooks**: `./windows/hooks.nsh`，自定义安装/卸载钩子
+- **Updater**: 配置了公钥和 GitHub Releases 端点，Windows 更新使用 `basicUi` 模式（显示 NSIS 安装界面）
+
+### 4.2 vite.config.ts
+
+```typescript
+// 关键配置：
+server: {
+  port: 1420,          // Tauri 期望的固定端口
+  strictPort: true,    // 端口被占用时直接报错而非自动换端口
+  host: host || false, // 默认仅本地访问，设置 TAURI_DEV_HOST 可暴露
+  hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
+  watch: {
+    ignored: ["**/src-tauri/**"],  // 忽略 Rust 目录变化
+  },
+}
+```
+
+### 4.3 TypeScript 配置
+
+`tsconfig.json` 配置：
+- **target**: ES2020
+- **module**: ESNext，bundler 模式解析
+- **jsx**: react-jsx
+- **strict**: true，启用 noUnusedLocals、noUnusedParameters、noFallthroughCasesInSwitch
+- **include**: 仅 `src/` 目录
+
+### 4.4 Tailwind CSS 配置
+
+`tailwind.config.js` 配置：
+- **content**: `./index.html` + `./src/**/*.{js,ts,jsx,tsx}`
+- **darkMode**: `class`
+- **自定义颜色**: primary (#007ACC), success (#5a7c5c), error (#8b5a5a), warning (#FF9800) 及各自的 hover 色
+- **字体**: Microsoft YaHei 为首选 sans-serif 字体
+
+---
+
+## 5. 资源管理
+
+### 5.1 Bridge 资源打包
+
+`src-tauri/resources/bridge/` 目录下的所有文件随应用打包（通过 `tauri.conf.json` 的 `bundle.resources` 配置）。包含：
+
+- `app/` -- FastAPI Agent 服务代码
+- `bridge/` -- WebSocket 桥接客户端
+- `defaults/` -- 首次运行的默认配置模板
+- `requirements.txt` -- Python 依赖声明
+- `bridge_admin.json` -- Admin API 凭据（**gitignored**，CI 通过 `secrets.BRIDGE_ADMIN_JSON` 注入）
+
+### 5.2 MinGit 打包
+
+`src-tauri/resources/bridge/mingit/` 目录包含 MinGit 便携版 Git。
+
+`.gitignore` 中全局排除了 `*.exe`，但通过例外规则允许 MinGit 的可执行文件：
+```
+*.exe
+!src-tauri/resources/bridge/mingit/**/*.exe
+```
+
+Rust 后端在运行时设置 MinGit 相关环境变量，确保子进程（claude CLI、bridge agents）能使用打包的 Git。
+
+### 5.3 嵌入式 Python (python-embed/)
+
+`src-tauri/resources/bridge/python-embed/` 包含 Python 3.11 嵌入式发行版（仅 Windows）。
+
+由于 `.gitignore` 排除 `*.exe`，`python.exe` 和 `pythonw.exe` 以 `.bin` 后缀存储在仓库中。运行时 `bridge_manager.rs` 将文件复制到用户数据目录后自动将 `.bin` 重命名回 `.exe`。
+
+**添加新的 .exe 资源时务必使用相同方案**，否则文件不会被 Git 跟踪，CI 构建中将缺失。
+
+### 5.4 Wheel 包 (wheels/)
+
+`src-tauri/resources/bridge/wheels/` 包含预构建的 Python 依赖包（.whl 文件），用于离线安装 Python 依赖，避免用户安装时需要网络连接。
+
+---
+
+## 6. CI/CD (GitHub Actions)
+
+工作流文件：`.github/workflows/build.yml`
+
+### 6.1 触发条件
+
+- **标签推送**: 推送 `v*` 格式的 tag（如 `v1.0.4`）自动触发
+- **手动触发**: 支持 `workflow_dispatch`，可在 GitHub Actions 页面手动运行
+
+### 6.2 check-version job
+
+运行于 `ubuntu-latest`，校验三个文件的版本号一致性：
+
+| 文件 | 提取方式 |
+|------|----------|
+| `src-tauri/tauri.conf.json` | JSON 中的 `version` 字段 |
+| `src-tauri/Cargo.toml` | `version = "x.x.x"` |
+| `package.json` | JSON 中的 `version` 字段 |
+
+任何一处版本不一致，构建直接失败并报错 `Version mismatch!`。
+
+### 6.3 build-windows job
+
+运行于 `windows-latest`，依赖 `check-version` 通过。
+
+步骤：
+1. **checkout** 代码
+2. **注入 bridge_admin.json**: 从 `secrets.BRIDGE_ADMIN_JSON` 写入 `src-tauri/resources/bridge/bridge_admin.json`
+3. **Setup Node.js 20** + **Setup Rust stable**
+4. **npm ci** 安装前端依赖
+5. **tauri-apps/tauri-action@v0.5.25** 构建：
+   - 使用 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 签名 updater 产物
+   - `releaseDraft: true` 创建 Draft Release
+   - `updaterJsonPreferNsis: true` updater 的 `latest.json` 优先指向 NSIS 安装器
+6. **创建便携版 ZIP**（PowerShell 脚本）：
+   - 复制 `target/release/mobot-launcher-tauri.exe` 为 `Mobot Launcher.exe`
+   - 复制 `target/release/resources/` 目录
+   - 创建 `.portable` 标记文件
+   - 压缩为 `Mobot-Launcher_{version}_x64_portable.zip`
+7. **上传便携版 ZIP** 到 GitHub Release（使用 `gh release upload --clobber`）
+
+### 6.4 build-macos job
+
+运行于 `macos-latest`，依赖 `check-version` 通过。
+
+步骤与 Windows 类似，区别在于：
+- Rust 安装时添加 `aarch64-apple-darwin` 和 `x86_64-apple-darwin` 两个 target
+- tauri-action 使用 `args: --target universal-apple-darwin` 构建 universal binary（同时支持 ARM 和 Intel Mac）
+- 同样注入 `bridge_admin.json`
+- 不构建便携版
+
+### 6.5 Updater 签名
+
+构建时通过环境变量 `TAURI_SIGNING_PRIVATE_KEY` 和 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 对安装包签名。生成的 `.sig` 文件和 `latest.json` 随 Release 上传，客户端 updater 使用 `tauri.conf.json` 中配置的公钥验证签名。
+
+### 6.6 Release 产物汇总
+
+| 平台 | 产物 |
+|------|------|
+| Windows | NSIS 安装器 `.exe`、NSIS `.zip`、updater `.sig`、便携版 `_portable.zip` |
+| macOS | `.app`（在 `.dmg` 内）、`.dmg`、updater `.sig` |
+| 通用 | `latest.json`（updater 端点） |
+
+---
+
+## 7. 发布流程
+
+### 7.1 版本号更新
+
+**三个文件必须同步修改**（CI 会校验一致性）：
+
+| 文件 | 字段 |
+|------|------|
+| `package.json` | `"version": "x.x.x"` |
+| `src-tauri/Cargo.toml` | `version = "x.x.x"` |
+| `src-tauri/tauri.conf.json` | `"version": "x.x.x"` |
+
+> 版本不一致的后果：`Cargo.toml` 的版本编译进 exe 文件元数据，`tauri.conf.json` 的版本写入 `latest.json`。两者不一致会导致自动更新死循环 -- exe 报告的版本始终"低于" latest.json 中的版本，每次启动都提示更新。
+
+### 7.2 发布步骤
+
 ```bash
-npm run tauri build
+# 1. 修改三处版本号
+# 2. 提交
+git add package.json src-tauri/Cargo.toml src-tauri/tauri.conf.json
+git commit -m "release: v1.0.5"
+
+# 3. 打 tag 并推送
+git tag v1.0.5
+git push origin master --tags
 ```
 
-**执行流程**:
-1. 执行 `npm run build`
-   - TypeScript 编译
-   - Vite 构建前端
-   - 输出到 `dist/`
-2. Cargo 编译 Rust (Release 模式)
-3. 生成安装包
+### 7.3 CI 自动构建与发布
 
-**构建输出**:
-```
-src-tauri/target/release/
-├── claude-code-launcher-tauri.exe       # 可执行文件
-└── bundle/
-    └── nsis/
-        ├── claude-code-launcher-tauri_0.1.0_x64-setup.exe
-        └── claude-code-launcher-tauri_0.1.0_x64.nsis.zip
-```
-
-**构建时间**: 首次约 5-10 分钟，后续 1-3 分钟
+1. 推送 tag 后，GitHub Actions 自动触发 `Build and Release` 工作流
+2. `check-version` 校验版本一致性
+3. `build-windows` 和 `build-macos` 并行构建
+4. 构建完成后自动创建 **Draft Release**，上传所有产物
+5. 前往 GitHub Releases 页面，编辑 Draft Release，补充 Release Notes
+6. 点击 **Publish release** 正式发布
+7. 已安装的客户端下次启动时通过 updater 端点检测到新版本，提示用户更新
 
 ---
 
-## 4. 调试技巧
+## 8. NSIS 安装器
 
-### 4.1 前端调试
+### 8.1 hooks.nsh 迁移钩子
 
-#### 4.1.1 浏览器 DevTools
+`src-tauri/windows/hooks.nsh` 实现了从旧版 "Claude Code Launcher" 到 "Mobot Launcher" 的自动迁移：
 
-**打开方式**:
-- 按 `F12`
-- 或 `Ctrl + Shift + I` (Windows)
-- 或 `Cmd + Option + I` (macOS)
+**NSIS_HOOK_PREINSTALL**（安装前）：
+- 检查注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\Claude Code Launcher`
+- 若找到旧版，读取安装路径，静默运行旧版卸载程序 (`/S`)
+- 等待 2 秒后清理残留文件和注册表项
+- 删除旧版桌面和开始菜单快捷方式
 
-**功能**:
-- **Console**: 查看日志和错误
-- **Network**: 查看 Tauri IPC 调用
-- **Elements**: 检查 DOM 和样式
-- **Sources**: 断点调试
+**NSIS_HOOK_POSTINSTALL**（安装后）：
+- 仅在检测到旧版迁移时（`$MigratedFromOld == 1`）创建新快捷方式
+- 正常的 Mobot->Mobot 更新不会触发快捷方式创建（尊重用户自定义）
 
----
+### 8.2 WebView2 embedBootstrapper
 
-#### 4.1.2 控制台日志
+`tauri.conf.json` 配置了 `webviewInstallMode: { type: "embedBootstrapper" }`，将 WebView2 Evergreen Bootstrapper 嵌入 NSIS 安装器。安装时若系统缺少 WebView2 Runtime，会自动引导用户下载安装。
 
-```typescript
-console.log('调试信息:', variable);
-console.error('错误:', error);
-console.warn('警告:', warning);
-console.table(arrayData);
-```
+### 8.3 createUpdaterArtifacts
 
-**查看 Tauri IPC 调用**:
-```typescript
-const result = await invoke('some_command');
-console.log('Command result:', result);
-```
+`tauri.conf.json` 中 `bundle.createUpdaterArtifacts: true`，构建时自动生成 `.sig` 签名文件和 `latest.json`，供客户端 updater 使用。
 
 ---
 
-### 4.2 后端调试
+## 9. 便携模式
 
-#### 4.2.1 打印调试
+### 9.1 工作原理
 
+便携模式通过在可执行文件同级目录放置 `.portable` 标记文件来激活。应用启动时通过 `is_portable_mode` 命令检测该文件是否存在。
+
+便携模式下，应用数据存储在程序目录而非 `%APPDATA%`。
+
+### 9.2 CI 构建便携版
+
+`build-windows` job 的最后一步自动创建便携版 ZIP：
+
+1. 创建 `portable-staging/` 临时目录
+2. 复制 `target/release/mobot-launcher-tauri.exe` 为 `Mobot Launcher.exe`
+3. 复制 `target/release/resources/` 目录（包含 bridge 资源）
+4. 创建 `.portable` 标记文件，内容为 `Mobot Launcher Portable v{version}`
+5. 压缩为 `Mobot-Launcher_{version}_x64_portable.zip`
+6. 上传到 GitHub Release
+
+### 9.3 本地测试便携模式
+
+构建完成后：
+```bash
+# 在构建输出目录创建 .portable 标记文件
+echo "portable" > src-tauri/target/release/.portable
+# 然后直接运行 exe
+```
+
+---
+
+## 10. 调试技巧
+
+### 10.1 Rust 日志
+
+项目使用 `log` crate。开发模式下：
 ```rust
-// 输出到 stderr (开发模式控制台可见)
+log::info!("信息: {}", variable);
+log::warn!("警告: {}", variable);
+log::error!("错误: {}", variable);
+
+// 或直接输出到 stderr（开发模式终端可见）
 eprintln!("调试信息: {:?}", variable);
-eprintln!("执行到此处");
 ```
 
-**查看输出**:
-- 开发模式: 在启动 `npm run tauri dev` 的终端查看
-- 生产模式: 需要重定向 stderr 到文件
+日志输出在启动 `npm run tauri:dev` 的终端中查看。
 
----
+### 10.2 前端 DevTools
 
-#### 4.2.2 Rust 调试器
+开发模式下可打开 WebView DevTools：
+- Windows: `F12` 或 `Ctrl+Shift+I`
+- macOS: `Cmd+Option+I`
 
-**使用 VS Code 调试**:
+功能：Console 日志、Network 查看 IPC 调用、Elements 检查 DOM/样式、Sources 断点调试。
 
-1. 安装 `CodeLLDB` 扩展:
-```bash
-code --install-extension vadimcn.vscode-lldb
-```
+### 10.3 Tauri IPC 调试
 
-2. 创建 `.vscode/launch.json`:
-```json
-{
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "type": "lldb",
-      "request": "launch",
-      "name": "Tauri Debug",
-      "cargo": {
-        "args": [
-          "build",
-          "--manifest-path=src-tauri/Cargo.toml",
-          "--no-default-features"
-        ]
-      },
-      "cwd": "${workspaceFolder}"
-    }
-  ]
-}
-```
-
-3. 设置断点并按 `F5` 启动调试
-
----
-
-#### 4.2.3 单元测试
-
-```rust
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_version_compare() {
-        assert_eq!(compare_versions("2.0.0", "1.0.0"), 1);
-    }
-}
-```
-
-**运行测试**:
-```bash
-cd src-tauri
-cargo test
-```
-
----
-
-### 4.3 调试 Tauri IPC
-
-**前端日志**:
 ```typescript
+// 前端调用 Rust 命令
+import { invoke } from '@tauri-apps/api/core';
+
 try {
-  console.log('调用 command...');
-  const result = await invoke('some_command', { param: value });
-  console.log('Command 返回:', result);
+  const result = await invoke('command_name', { param: value });
+  console.log('返回:', result);
 } catch (error) {
-  console.error('Command 失败:', error);
+  console.error('失败:', error);
 }
 ```
 
-**后端日志**:
 ```rust
+// Rust 端日志
 #[tauri::command]
-pub fn some_command(param: String) -> Result<String, String> {
+pub fn command_name(param: String) -> Result<String, String> {
     eprintln!("收到参数: {}", param);
-
-    let result = do_something(&param)?;
-
-    eprintln!("返回结果: {}", result);
-    Ok(result)
+    // ...
 }
 ```
 
----
+### 10.4 应用初始化流程
 
-## 5. 常见问题
-
-### 5.1 编译错误
-
-#### 问题 1: Node.js 版本过低
-
-**错误信息**:
-```
-error: package requires node >=18.0.0
-```
-
-**解决方法**:
-```bash
-# 更新 Node.js
-winget upgrade OpenJS.NodeJS.LTS
-```
+`src-tauri/src/lib.rs` 中的 `run()` 函数：
+1. 清除 `CLAUDECODE` 环境变量（防止子进程认为在嵌套 Claude Code 会话中）
+2. 设置 `NO_PROXY` 包含 `127.0.0.1,localhost`（确保 WebView2 不走 HTTP 代理访问本地地址）
+3. 初始化插件：opener, dialog, clipboard-manager, process, updater
+4. macOS: 检测并删除旧版 `Claude Code Launcher.app`（迁移清理）
+5. 注册所有 Tauri 命令
+6. 应用退出时调用 `BridgeManager::stop_all()` 停止所有 bridge 服务
 
 ---
 
-#### 问题 2: Rust 编译失败
+## 11. 常见问题
 
-**错误信息**:
-```
-error: linking with `link.exe` failed
-```
+### 11.1 端口 1420 被占用
 
-**解决方法**:
-1. 确认已安装 Visual Studio C++ Build Tools
-2. 重启终端
-3. 重新编译
-
----
-
-#### 问题 3: 依赖安装失败
-
-**错误信息**:
-```
-npm ERR! network timeout
-```
-
-**解决方法**:
-```bash
-# 使用国内镜像
-npm config set registry https://registry.npmmirror.com
-
-# 或使用代理
-npm config set proxy http://127.0.0.1:7890
-```
-
----
-
-### 5.2 运行时错误
-
-#### 问题 1: Tauri Command 未找到
-
-**错误信息**:
-```
-Command not found: some_command
-```
-
-**解决方法**:
-1. 确认 Command 已在 `commands/mod.rs` 定义
-2. 确认已在 `lib.rs` 中注册
-3. 重新编译后端
-
----
-
-#### 问题 2: 权限错误
-
-**错误信息**:
-```
-Access denied
-```
-
-**解决方法**:
-1. 检查 `capabilities/default.json` 权限配置
-2. 确认操作系统权限
-3. 使用管理员权限运行（仅调试）
-
----
-
-#### 问题 3: 端口被占用
-
-**错误信息**:
 ```
 Error: Port 1420 is already in use
 ```
 
-**解决方法**:
-```bash
-# 查找占用端口的进程
-netstat -ano | findstr :1420
+Vite 配置了 `strictPort: true`，端口被占用时直接报错。解决方法：
 
+```bash
+# Windows - 查找占用端口的进程
+netstat -ano | findstr :1420
 # 结束进程
 taskkill /PID <PID> /F
 
-# 或修改 vite.config.ts 中的端口
-```
-
----
-
-### 5.3 打包问题
-
-#### 问题 1: NSIS 错误
-
-**错误信息**:
-```
-NSIS executable not found
-```
-
-**解决方法**:
-1. Tauri 会自动下载 NSIS
-2. 如果失败，手动下载: https://nsis.sourceforge.io/
-3. 设置环境变量: `TAURI_BUNDLER_NSIS_BIN`
-
----
-
-#### 问题 2: 图标错误
-
-**错误信息**:
-```
-Invalid icon format
-```
-
-**解决方法**:
-1. 确认图标尺寸正确 (32x32, 128x128, 256x256)
-2. 使用 PNG 格式
-3. 使用工具生成 `.ico` 文件
-
----
-
-#### 问题 3: .exe 文件被 .gitignore 排除 (CRITICAL)
-
-**背景**: `.gitignore` 中有 `*.exe` 规则，导致 `src-tauri/resources/bridge/python-embed/` 下的 `python.exe` 和 `pythonw.exe` 不会被 Git 跟踪。CI 构建时这些文件不存在，用户安装后运行远程桥接会报错：
-
-```
-Embedded Python not found at: ...\resources\bridge\python-embed
-```
-
-**解决方法（已实施的 .bin 重命名方案）**:
-
-1. 在 `resources/bridge/python-embed/` 中，将 `.exe` 重命名为 `.bin`：
-   - `python.exe` → `python.bin`
-   - `pythonw.exe` → `pythonw.bin`
-
-2. `bridge_manager.rs` 的 `ensure_python_env()` 在将文件复制到用户数据目录后，自动将 `.bin` 重命名回 `.exe`。
-
-**添加新的 .exe 资源文件时**: 必须使用相同的重命名方案，否则文件会被 `.gitignore` 排除而不会出现在 CI 构建中。
-
-**验证方法**:
-```bash
-# 检查文件是否被 gitignore 排除
-git check-ignore -v src-tauri/resources/bridge/python-embed/python.exe
-# 如果有输出说明被忽略
-
-# 确认 .bin 文件已被跟踪
-git ls-files src-tauri/resources/bridge/python-embed/python.bin
-```
-
----
-
-## 6. 最佳实践
-
-### 6.1 代码规范
-
-#### 6.1.1 前端代码
-
-**命名规范**:
-```typescript
-// 组件: PascalCase
-function DependencyFrame() {}
-
-// 函数: camelCase
-function handleClick() {}
-
-// 常量: UPPER_SNAKE_CASE
-const DEFAULT_CONFIG = {};
-
-// 文件: kebab-case 或 PascalCase
-// dependency-frame.tsx 或 DependencyFrame.tsx
-```
-
-**导入顺序**:
-```typescript
-// 1. React 相关
-import { useState } from 'react';
-
-// 2. 第三方库
-import { invoke } from '@tauri-apps/api/core';
-
-// 3. 本地组件
-import DependencyFrame from './components/DependencyFrame';
-
-// 4. 类型和常量
-import { AppConfig } from './types';
-```
-
----
-
-#### 6.1.2 后端代码
-
-**Rust 命名规范**:
-```rust
-// 函数和变量: snake_case
-fn check_nodejs() {}
-let user_name = "test";
-
-// 类型和 Trait: PascalCase
-struct DependencyStatus {}
-trait Checkable {}
-
-// 常量: SCREAMING_SNAKE_CASE
-const DEFAULT_TIMEOUT: u64 = 30;
-```
-
-**错误处理**:
-```rust
-// ✅ 推荐: 返回 Result
-pub fn do_something() -> Result<String, String> {
-    match operation() {
-        Ok(result) => Ok(result),
-        Err(e) => Err(format!("操作失败: {}", e)),
-    }
-}
-
-// ❌ 避免: 使用 unwrap()
-let result = operation().unwrap();  // 可能 panic
-```
-
----
-
-### 6.2 性能优化
-
-#### 6.2.1 前端优化
-
-**避免不必要的重新渲染**:
-```typescript
-// ✅ 使用 memo
-const MemoizedComponent = React.memo(ExpensiveComponent);
-
-// ✅ 使用 useMemo
-const expensiveValue = useMemo(() => {
-  return computeExpensiveValue(a, b);
-}, [a, b]);
-
-// ✅ 使用 useCallback
-const handleClick = useCallback(() => {
-  doSomething(value);
-}, [value]);
-```
-
-**懒加载组件**:
-```typescript
-const HeavyComponent = React.lazy(() => import('./HeavyComponent'));
-
-<Suspense fallback={<Loading />}>
-  <HeavyComponent />
-</Suspense>
-```
-
----
-
-#### 6.2.2 后端优化
-
-**避免不必要的克隆**:
-```rust
-// ❌ 不必要的克隆
-fn process(data: String) -> String {
-    data.to_uppercase()
-}
-
-// ✅ 使用引用
-fn process(data: &str) -> String {
-    data.to_uppercase()
-}
-```
-
-**使用异步 I/O**:
-```rust
-// ✅ 异步读取文件
-#[tauri::command]
-pub async fn read_large_file() -> Result<String, String> {
-    tokio::fs::read_to_string("large_file.txt")
-        .await
-        .map_err(|e| e.to_string())
-}
-```
-
----
-
-### 6.3 安全性
-
-**前端验证**:
-```typescript
-// ✅ 验证用户输入
-if (!url.startsWith('http://') && !url.startsWith('https://')) {
-  return alert('URL 格式不正确');
-}
-
-// ✅ 转义特殊字符
-const safeValue = escapeHtml(userInput);
-```
-
-**后端验证**:
-```rust
-// ✅ 后端也要验证
-#[tauri::command]
-pub fn save_url(url: String) -> Result<(), String> {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err("URL 格式不正确".to_string());
-    }
-    // ...
-    Ok(())
-}
-```
-
----
-
-### 6.4 Git 工作流
-
-**提交信息规范**:
-```bash
-# 功能: feat
-git commit -m "feat: 添加自动更新功能"
-
-# 修复: fix
-git commit -m "fix: 修复依赖检测失败的问题"
-
-# 文档: docs
-git commit -m "docs: 更新开发指南"
-
-# 样式: style
-git commit -m "style: 优化按钮样式"
-
-# 重构: refactor
-git commit -m "refactor: 重构依赖检测逻辑"
-
-# 测试: test
-git commit -m "test: 添加版本比较测试"
-
-# 构建: build
-git commit -m "build: 升级 Tauri 到 2.1.0"
-```
-
-**分支管理**:
-```bash
-# 功能分支
-git checkout -b feature/auto-update
-
-# 修复分支
-git checkout -b fix/dependency-check
-
-# 完成后合并到 main
-git checkout main
-git merge feature/auto-update
-```
-
----
-
-## 7. 远程桥接开发
-
-### 7.1 Python 桥接代码
-
-桥接代码位于 `src-tauri/resources/bridge/`，随应用打包分发。修改后需重新构建。
-
-**目录结构**:
-- `app/` — FastAPI Agent 服务（配置、API 路由、SDK 封装、会话管理）
-- `bridge/` — WebSocket 桥接客户端
-- `defaults/` — 首次运行的默认配置模板
-- `python-embed/` — Python 3.11 嵌入式发行版（Windows 专用）
-- `wheels/` — 预构建 Python 依赖包（离线安装用）
-- `requirements.txt` — Python 依赖
-
-> **重要**: `python-embed/` 中的 `python.exe` 和 `pythonw.exe` 已重命名为 `.bin` 后缀以绕过 `.gitignore` 的 `*.exe` 规则。详见 [5.3 问题 3](#问题-3-exe-文件被-gitignore-排除-critical)。
-
-### 7.2 运行时数据目录
-
-用户数据在 `%APPDATA%/claude-launcher/agent/`（不在项目中）。首次启动 bridge 时由 `bridge_manager.rs` 初始化：
-
-1. 从 `defaults/` 复制默认配置文件
-2. 从 `python-embed/` 复制嵌入式 Python 到 `agent/python/`
-3. 将 `.bin` 文件重命名回 `.exe`（NSIS 打包绕过方案）
-4. 从 `wheels/` 离线安装 Python 依赖
-
-### 7.3 Bridge Admin API
-
-Launcher 通过 Rust 后端直接调用 Bridge Admin API 实现一键获取 Bind Key：
-
-| API | 方法 | 说明 |
-|-----|------|------|
-| `/api/login` | POST | 登录获取 admin_token Cookie |
-| `/api/admin/users/{user_id}` | GET | 查询用户及其 api_key |
-| `/api/admin/users` | POST | 创建新用户并返回 api_key |
-
-**Rust 实现要点**:
-- Admin URL/凭据: 从 `bridge_admin.json` 读取（编译时嵌入，gitignored）
-- 认证: Cookie-based `admin_token`
-- **必须使用 `.no_proxy()`**: 系统可能配置了外部 HTTP 代理，会导致内网 API 请求失败
-- 用户 ID 和名称均使用系统用户名的小写形式
-
-### 7.4 环境变量约定
-
-所有 Python 配置使用 `WECOM_` 前缀（pydantic-settings `env_prefix`）：
-
-| 环境变量 | 说明 |
-|----------|------|
-| `WECOM_CLAUDE_AUTH_MODE` | `oauth` 或 `proxy` |
-| `WECOM_HTTP_PROXY` | 代理地址（仅 oauth 模式传给 CLI） |
-| `WECOM_CLAUDE_API_BASE` | 自定义 API 地址 |
-| `WECOM_CLAUDE_API_KEY` | 自定义 API Key |
-| `WECOM_CLAUDE_MODEL` | 自定义模型名 |
-| `WECOM_PORT` | Agent 服务端口（默认 5000） |
-| `WECOM_AGENT_MAX_TURNS` | SDK 最大轮数 |
-
-### 7.5 调试桥接
-
-```bash
-# 手动启动 Agent 服务（在 agent 数据目录下）
-cd %APPDATA%/claude-launcher/agent
-python\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 5000
-
-# 查看日志
-# Launcher 启动后日志在 BridgeStatusPanel 中实时显示
-```
-
-### 7.6 注意事项
-
-- **PYTHONUTF8=1**: 必须在所有 Python 进程上设置（中文 Windows）
-- **端口冲突**: `kill_process_on_port()` 在每次启动前清理
-- **代理隔离**: `_cli_proxy_env` 仅传给 `ClaudeAgentOptions.env`，不设置在 Agent 进程级别
-- **会话恢复**: SDK resume 失败时自动清除 session_id 并重试
-- **Admin API 代理绕过**: `bridge_get_or_create_key` 必须使用 `.no_proxy()` 构建 HTTP 客户端，否则系统代理会拦截内网请求
-
----
-
-## 8. CI/CD 自动化构建
-
-### 8.1 GitHub Actions 工作流
-
-**工作流文件**: `.github/workflows/build.yml`
-
-```yaml
-name: Build and Release
-
-on:
-  push:
-    tags:
-      - 'v*'
-  workflow_dispatch:
-
-jobs:
-  check-version:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Check version consistency
-        run: |
-          TAURI_VER=$(grep -oP '"version":\s*"\K[^"]+' src-tauri/tauri.conf.json | head -1)
-          CARGO_VER=$(grep -oP '^version\s*=\s*"\K[^"]+' src-tauri/Cargo.toml)
-          PKG_VER=$(grep -oP '"version":\s*"\K[^"]+' package.json | head -1)
-          if [ "$TAURI_VER" != "$CARGO_VER" ] || [ "$TAURI_VER" != "$PKG_VER" ]; then
-            echo "::error::Version mismatch!"
-            exit 1
-          fi
-
-  build-windows:
-    needs: check-version
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install dependencies
-        run: npm ci
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0.5.25
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Claude Code Launcher ${{ github.ref_name }}'
-          releaseDraft: true
-          updaterJsonPreferNsis: true
-
-  build-macos:
-    needs: check-version
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install dependencies
-        run: npm ci
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0.5.25
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Claude Code Launcher ${{ github.ref_name }}'
-          releaseDraft: true
-```
-
-> **重要**: `check-version` job 会在构建前校验 `tauri.conf.json`、`Cargo.toml`、`package.json` 三处版本号是否一致。不一致会直接阻止构建，避免因版本号不同步导致自动更新死循环。
-
-### 8.2 触发构建
-
-**方式 1: 推送标签**
-```bash
-git tag v0.2.0
-git push origin v0.2.0
-```
-
-**方式 2: 手动触发**
-1. 打开 GitHub 仓库 → Actions
-2. 选择 "Build and Release" 工作流
-3. 点击 "Run workflow"
-
-### 8.3 构建产物
-
-| 平台 | 产物 |
-|------|------|
-| Windows | `.exe` 安装包 (NSIS) |
-| macOS | `.app` 应用包 + `.dmg` 磁盘映像 |
-
-### 8.4 重要限制
-
-**跨平台打包限制**:
-- ⚠️ Windows 无法直接打包 macOS 应用
-- ⚠️ macOS 无法直接打包 Windows 应用
-- ✅ 必须通过 CI/CD 在对应平台构建
-
-**解决方案**:
-1. **推荐**: 使用 GitHub Actions CI/CD
-2. 在 Mac 上本地打包 macOS 版本
-3. 在 Windows 上本地打包 Windows 版本
-
----
-
-## 9. 发布流程
-
-### 9.1 版本管理
-
-**三处版本号必须同步修改**（CI 会自动校验一致性）：
-
-| 文件 | 作用 |
-|------|------|
-| `package.json` | 前端包版本 |
-| `src-tauri/Cargo.toml` | Rust 编译嵌入 exe 的版本号（Windows updater 用此比对） |
-| `src-tauri/tauri.conf.json` | Tauri 配置，`latest.json` 的版本来源 |
-
-> **警告**: `Cargo.toml` 与 `tauri.conf.json` 版本不一致会导致自动更新死循环——exe 报告的版本（来自 Cargo.toml）始终低于 `latest.json`（来自 tauri.conf.json），用户每次启动都会被提示更新。
-
-**版本号规范** (语义化版本):
-- **主版本**: 不兼容的 API 变更
-- **次版本**: 向下兼容的功能新增
-- **修订版本**: 向下兼容的 Bug 修复
-
----
-
-### 9.2 构建发布版本
-
-```bash
-# 1. 清理旧构建
-npm run tauri build -- --clean
-
-# 2. 构建新版本
-npm run tauri build
-```
-
-**检查构建产物**:
-```bash
-# Windows
-cd src-tauri/target/release/bundle/nsis
-ls -lh
-
 # macOS
-cd src-tauri/target/release/bundle/macos
-ls -lh
-cd ../dmg
-ls -lh
+lsof -i :1420
+kill <PID>
 ```
 
----
+### 11.2 Cargo 编译失败
 
-### 9.3 测试发布版本
+**链接器错误** (`linking with 'link.exe' failed`):
+- 确认已安装 Visual Studio C++ Build Tools
+- 重启终端使环境变量生效
 
-**Windows 安装测试**:
-1. 运行 `claude-code-launcher-tauri_0.2.0_x64-setup.exe`
-2. 测试所有功能
-3. 检查是否有错误
+**依赖下载超时**:
+```bash
+# 使用国内镜像（在 ~/.cargo/config.toml 中配置）
+[source.crates-io]
+replace-with = 'ustc'
 
-**macOS 安装测试**:
-1. 双击 `.dmg` 文件挂载
-2. 拖拽 `.app` 到 Applications 文件夹
-3. 首次运行需要右键 → 打开 (绕过 Gatekeeper)
-4. 测试所有功能
+[source.ustc]
+registry = "sparse+https://mirrors.ustc.edu.cn/crates.io-index/"
+```
 
-**便携版测试**:
-1. 解压 `.nsis.zip` 或直接使用 `.app`
-2. 直接运行程序
-3. 测试功能
+### 11.3 版本不一致错误
 
----
+CI 报错 `Version mismatch! All three files must have the same version.`
 
-### 9.4 发布到 GitHub
+检查并同步以下三个文件的版本号：
+- `package.json` -- `"version"`
+- `src-tauri/Cargo.toml` -- `version`
+- `src-tauri/tauri.conf.json` -- `"version"`
+
+### 11.4 npm 依赖安装失败
 
 ```bash
-# 1. 提交代码
-git add .
-git commit -m "release: v0.2.0"
+# 使用国内镜像
+npm config set registry https://registry.npmmirror.com
 
-# 2. 创建标签并推送（推送标签会自动触发 CI 构建）
-git tag v0.2.0
-git push origin master --tags
+# 清理缓存后重试
+npm cache clean --force
+npm install
 ```
 
-**发布流程**:
-1. 推送标签后，GitHub Actions 自动构建 + 签名 + 创建 Draft Release
-2. 构建完成后访问 [Releases 页面](https://github.com/Earthling18/claude-code-launcher/releases)
-3. 点击 Draft Release 的编辑按钮，确认 Release Notes
-4. 点击 **Publish release** 发布
-5. 已安装的旧版应用下次启动时自动收到更新通知
+### 11.5 bridge_admin.json 缺失
 
-> **注意**: Windows 自动更新使用 `basicUi` 安装模式，更新时会显示 NSIS 安装界面，支持自定义安装路径原地覆盖更新。
+本地开发时 `src-tauri/resources/bridge/bridge_admin.json` 被 `.gitignore` 排除。需要手动创建该文件（向团队获取内容），否则 Bridge Admin API 相关功能无法工作。CI 中通过 `secrets.BRIDGE_ADMIN_JSON` 自动注入。
 
----
+### 11.6 .exe 资源文件被 .gitignore 排除
 
-### 9.5 更新文档
+`.gitignore` 全局排除 `*.exe`。若需要在 `src-tauri/resources/` 下添加新的 `.exe` 文件：
+- 方法一：在 `.gitignore` 中添加 `!path/to/your.exe` 例外规则（参考 MinGit 的做法）
+- 方法二：将 `.exe` 重命名为 `.bin` 存储，运行时再重命名回来（参考 python-embed 的做法）
 
-**更新 CHANGELOG.md**:
-```markdown
-## [0.2.0] - 2025-11-18
-
-### Added
-- 添加自动更新功能
-- 支持更多自定义模型
-
-### Fixed
-- 修复依赖检测失败的问题
-- 修复配置保存错误
-
-### Changed
-- 优化 UI 设计
-- 改进错误提示
+验证文件是否被忽略：
+```bash
+git check-ignore -v path/to/file.exe
 ```
-
----
-
-## 10. 总结
-
-### 10.1 开发检查清单
-
-**环境准备**:
-- ✅ Node.js ≥ 18.0.0
-- ✅ Rust ≥ 1.75.0
-- ✅ C++ Build Tools (Windows)
-- ✅ Python ≥ 3.10（远程桥接模式，Windows 已内置嵌入式 Python）
-- ✅ Git
-
-**项目初始化**:
-- ✅ 克隆/创建项目
-- ✅ 安装前端依赖 (`npm install`)
-- ✅ 检查 Rust 依赖 (`cargo check`)
-
-**开发工作流**:
-- ✅ 启动开发模式 (`npm run tauri dev`)
-- ✅ 修改代码 (自动热重载)
-- ✅ 调试错误 (DevTools + eprintln!)
-
-**构建发布**:
-- ✅ 更新版本号
-- ✅ 构建生产版本 (`npm run tauri build`)
-- ✅ 测试安装包
-- ✅ 发布到 GitHub
-
----
-
-### 10.2 相关资源
-
-**官方文档**:
-- [Tauri 官方文档](https://v2.tauri.app/)
-- [React 官方文档](https://react.dev/)
-- [Rust 官方文档](https://doc.rust-lang.org/)
-
-**项目文档**:
-- [项目总览](./PROJECT_DOCUMENTATION.md)
-- [前端开发指南](./FRONTEND_GUIDE.md)
-- [后端开发指南](./BACKEND_GUIDE.md)
-- [API 参考](./API_REFERENCE.md)
-
-**社区支持**:
-- [Tauri Discord](https://discord.com/invite/tauri)
-- [Rust 中文社区](https://rust.cc/)
-- [React 中文文档](https://react.nodejs.cn/)
-
----
-
-**祝开发顺利！**
