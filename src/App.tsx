@@ -82,28 +82,30 @@ function AppContent() {
     };
   }, [navigate, location.pathname]);
 
-  // 处理拖拽视觉效果（dragover/dragleave 用于显示拖拽遮罩）
+  // 处理拖拽视觉效果 — 仅本地模式拦截，远程模式放行让 iframe 处理
   useEffect(() => {
+    const isLocal = () => location.pathname.startsWith('/local');
+
     const handleDragOver = (e: DragEvent) => {
+      if (!isLocal()) return; // 远程模式不拦截，让 iframe 原生拖拽生效
       e.preventDefault();
       e.stopPropagation();
       setIsDragging(true);
     };
 
     const handleDragLeave = (e: DragEvent) => {
+      if (!isLocal()) return;
       e.preventDefault();
       e.stopPropagation();
-      // 只有离开窗口时才取消拖拽状态
       if (e.relatedTarget === null) {
         setIsDragging(false);
       }
     };
 
     const handleDrop = (e: DragEvent) => {
+      if (!isLocal()) return;
       e.preventDefault();
       e.stopPropagation();
-      // 注意：实际的文件路径处理由 Tauri 的 drag-drop 事件处理
-      // 这里只需要阻止默认行为
       setIsDragging(false);
     };
 
@@ -116,7 +118,7 @@ function AppContent() {
       window.removeEventListener('dragleave', handleDragLeave);
       window.removeEventListener('drop', handleDrop);
     };
-  }, []);
+  }, [location.pathname]);
 
   return (
     <DragContext.Provider value={{ droppedPath, setDroppedPath, registerDragHandler, unregisterDragHandler }}>
