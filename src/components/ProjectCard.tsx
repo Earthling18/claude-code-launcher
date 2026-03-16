@@ -112,7 +112,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
       </p>
 
       {/* Buttons row */}
-      <div className="flex items-center gap-2" data-onboarding={project.is_default ? "launch-buttons" : undefined}>
+      <div className="flex items-center gap-2">
         <button
           onClick={() => onLaunch(project.id)}
           className="px-3 py-1.5 text-[12px] bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded transition-colors"

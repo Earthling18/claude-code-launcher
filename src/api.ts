@@ -135,8 +135,3 @@ export const systemApi = {
   getHomeDirectory: () => invoke<string>('get_home_directory'),
 };
 
-// Onboarding API
-export const onboardingApi = {
-  getStatus: () => invoke<boolean>('get_onboarding_status'),
-  setCompleted: () => invoke<void>('set_onboarding_completed'),
-};

@@ -26,7 +26,7 @@ Mobot Launcher 桌面启动器完整源码，Tauri 2应用，支持多项目管�
   - App.tsx — 应用入口（路由 + 拖拽上下文）
 - src-tauri/ — Rust后端
   - Cargo.toml — Rust依赖配置
-  - tauri.conf.json — Tauri配置（v1.0.4）
+  - tauri.conf.json — Tauri配置（v1.0.5）
   - src/commands/ — 70个Tauri命令
   - src/services/ — 8个服务模块（~5000行）
   - resources/bridge/ — Python Bridge源码 + MinGit + 嵌入式Python
@@ -74,4 +74,4 @@ Mobot Launcher 桌面启动器完整源码，Tauri 2应用，支持多项目管�
 - MobotAgentService (桌面) — Agent服务
 
 ## 备注
-Tauri 2全栈桌面应用，前端React + 后端Rust，支持多种Claude Code启动模式。发布版本号v1.0.4，GitHub Releases自动构建。
+Tauri 2全栈桌面应用，前端React + 后端Rust，支持多种Claude Code启动模式。发布版本号v1.0.5，GitHub Releases自动构建。

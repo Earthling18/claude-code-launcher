@@ -92,9 +92,6 @@ pub fn run() {
             commands::update_projects_order,
             commands::update_pinned_order,
             commands::toggle_project_pinned,
-            // Onboarding commands
-            commands::get_onboarding_status,
-            commands::set_onboarding_completed,
             // Mobot bridge management commands
             commands::detect_mobot_installation,
             commands::install_mobot_bridge,

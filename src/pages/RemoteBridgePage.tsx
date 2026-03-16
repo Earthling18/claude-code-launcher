@@ -13,7 +13,6 @@ export const RemoteBridgePage: React.FC = () => {
   const [viewState, setViewState] = useState<ViewState>('loading');
   const [status, setStatus] = useState<MobotServiceStatus | null>(null);
   const [bridgePath, setBridgePath] = useState('');
-  const [pythonPath, setPythonPath] = useState('');
   const [port] = useState(DEFAULT_PORT);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -24,11 +23,8 @@ export const RemoteBridgePage: React.FC = () => {
   const logsRef = useRef<HTMLDivElement>(null);
   const isUserScrolling = useRef(false);
   const pollRef = useRef<number | null>(null);
-  const lastAutoStartRef = useRef<number>(0);
   const hasEverLoaded = useRef(false);
   const iframeMountedAt = useRef<number>(0);
-  const consecutiveFailures = useRef(0);
-  const MAX_FAILURES_BEFORE_STOP = 5; // 5 × 3s = 15s grace period for hot-update restart
 
   useEffect(() => {
     getCurrentWindow().maximize().catch(() => {});
@@ -57,8 +53,6 @@ export const RemoteBridgePage: React.FC = () => {
       if (typeof installStatus === 'object') {
         if ('Running' in installStatus) {
           setBridgePath(installStatus.Running.path);
-          // Pre-cache python path for potential auto-restart after hot-update
-          mobotApi.detectPython().then(p => { if (p) setPythonPath(p); }).catch(() => {});
           setViewState('running');
           startPolling();
           return;
@@ -69,8 +63,6 @@ export const RemoteBridgePage: React.FC = () => {
           try {
             const health = await mobotApi.checkHealth(port);
             if (health?.healthy) {
-              // Pre-cache python path for potential auto-restart after hot-update
-              mobotApi.detectPython().then(p => { if (p) setPythonPath(p); }).catch(() => {});
               setViewState('running');
               startPolling();
               return;
@@ -79,7 +71,6 @@ export const RemoteBridgePage: React.FC = () => {
           // Detect python and auto-start
           const python = await mobotApi.detectPython();
           if (python) {
-            setPythonPath(python);
             autoStart(installStatus.Installed.path, python);
           } else {
             setViewState('installed_stopped');
@@ -108,43 +99,20 @@ export const RemoteBridgePage: React.FC = () => {
           try {
             const health = await mobotApi.checkHealth(port);
             if (health?.healthy) {
-              consecutiveFailures.current = 0;
               setViewState('running');
               return; // keep polling, service is alive
             }
           } catch {}
-          // Skip auto-restart if mobot is updating itself
+          // Keep polling if mobot is updating itself (hot-update restart)
           try {
             const updating = await mobotApi.isUpdating();
             if (updating) {
-              consecutiveFailures.current = 0;
               return; // keep polling, update in progress
             }
           } catch {}
-          // Grace period: during hot-update restart, service may be briefly
-          // unavailable. Keep polling for a while before giving up.
-          consecutiveFailures.current++;
-          if (consecutiveFailures.current < MAX_FAILURES_BEFORE_STOP) {
-            return; // keep polling, wait for service to come back
-          }
-          // Grace period exhausted — give up and try auto-restart
-          consecutiveFailures.current = 0;
+          // Service is down and not updating — show stopped state with restart button.
           if (pollRef.current) clearInterval(pollRef.current);
-          // Auto-restart with 10s cooldown to prevent rapid loops
-          const now = Date.now();
-          if (now - lastAutoStartRef.current < 10000) {
-            setViewState('installed_stopped');
-            return;
-          }
-          const python = pythonPath || await mobotApi.detectPython();
-          if (python && bridgePath) {
-            autoStart(bridgePath, python);
-          } else {
-            setViewState('installed_stopped');
-          }
-        } else {
-          // Service is running — reset failure counter
-          consecutiveFailures.current = 0;
+          setViewState('installed_stopped');
         }
       } catch {}
     };
@@ -153,9 +121,8 @@ export const RemoteBridgePage: React.FC = () => {
     pollRef.current = window.setInterval(poll, 3000);
   };
 
-  const handleSetupComplete = (installPath: string, python: string) => {
+  const handleSetupComplete = (installPath: string, _python: string) => {
     setBridgePath(installPath);
-    setPythonPath(python);
     setError(null);
     setIframeLoaded(false);
     hasEverLoaded.current = false;
@@ -165,7 +132,6 @@ export const RemoteBridgePage: React.FC = () => {
   };
 
   const autoStart = async (path: string, python: string) => {
-    lastAutoStartRef.current = Date.now();
     setLoading(true);
     setError(null);
     try {
@@ -314,7 +280,23 @@ export const RemoteBridgePage: React.FC = () => {
                   </button>
                 </>
               ) : (
-                <p className="text-[14px] text-[#999999]">未找到 Python 3.10+，请先安装</p>
+                <>
+                  <p className="text-[14px] text-[#999999]">服务未运行</p>
+                  <button
+                    onClick={async () => {
+                      setError(null);
+                      const python = await mobotApi.detectPython();
+                      if (python && bridgePath) {
+                        autoStart(bridgePath, python);
+                      } else {
+                        setError('未找到 Python 3.10+，请重装');
+                      }
+                    }}
+                    className="px-4 py-1.5 text-[12px] bg-[#10b981] hover:bg-[#059669] text-white rounded-lg transition-colors"
+                  >
+                    重新启动
+                  </button>
+                </>
               )}
               <p className="text-[11px] text-[#666666]">安装路径: {bridgePath}</p>
             </div>

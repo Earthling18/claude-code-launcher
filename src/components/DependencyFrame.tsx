@@ -159,7 +159,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
   // Show CC config panel
   if (showCcConfig) {
     return (
-      <div className="px-5 py-2" data-onboarding="dependencies">
+      <div className="px-5 py-2">
         <CcConfigPanel
           projects={projects}
           platform={platform}
@@ -172,7 +172,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
   // Show expanded dependency detail panel
   if (expanded) {
     return (
-      <div className="px-5 py-2" data-onboarding="dependencies">
+      <div className="px-5 py-2">
         <div className="card-frame">
           <div className="flex items-center justify-between mb-2">
             <h2 className="text-[13px] font-bold">
@@ -235,7 +235,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
 
   // Collapsed — show minimal bar with two buttons
   return (
-    <div className="px-5 py-1" data-onboarding="dependencies">
+    <div className="px-5 py-1">
       <div className="flex items-center justify-between py-1">
         <div className="flex items-center gap-2">
           {isInstalling

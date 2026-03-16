@@ -262,7 +262,6 @@ export const ProjectListPage: React.FC = () => {
           <button
             onClick={handleCreate}
             className="px-4 py-2 text-[12px] bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded"
-            data-onboarding="create-btn"
           >
             + 新建项目
           </button>
@@ -315,7 +314,7 @@ export const ProjectListPage: React.FC = () => {
                     <div className="grid grid-cols-2 gap-4">
                       {/* Default project - not draggable */}
                       {defaultProject && (
-                        <div data-onboarding="default-project">
+                        <div>
                           <ProjectCard
                             project={defaultProject}
                             platform={platform}

@@ -36,6 +36,11 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
   useEffect(() => {
     if (initialWorkingDirectory) {
       setWorkingDirectory(initialWorkingDirectory);
+      // Auto-fill project name from folder name if name is empty
+      if (!name) {
+        const folderName = initialWorkingDirectory.replace(/[\\/]+$/, '').split(/[\\/]/).pop();
+        if (folderName) setName(folderName);
+      }
     }
   }, [initialWorkingDirectory]);
 
