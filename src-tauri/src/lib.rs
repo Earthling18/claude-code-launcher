@@ -118,6 +118,7 @@ pub fn run() {
             // Portable mode commands
             commands::is_portable_mode,
             commands::get_portable_download_url,
+            commands::download_and_run_installer,
             // Utility commands
             commands::get_hostname,
             commands::get_username,

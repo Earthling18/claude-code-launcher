@@ -513,6 +513,69 @@ pub fn get_portable_download_url() -> String {
     "https://github.com/erthman18/claude-code-launcher/releases/latest".to_string()
 }
 
+/// Download a file from URL to temp directory and launch it.
+/// Used for downloading and running installer from a specific GitHub release.
+#[tauri::command]
+pub async fn download_and_run_installer(url: String, filename: String) -> Result<(), String> {
+    use std::io::Write;
+
+    let result = tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(300))
+            .build()
+            .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+        let mut resp = client
+            .get(&url)
+            .header("User-Agent", "MobotLauncher")
+            .send()
+            .map_err(|e| format!("Download failed: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("Download returned HTTP {}", resp.status()));
+        }
+
+        let temp_dir = std::env::temp_dir().join("mobot-launcher-update");
+        std::fs::create_dir_all(&temp_dir)
+            .map_err(|e| format!("Failed to create temp dir: {}", e))?;
+
+        let file_path = temp_dir.join(&filename);
+        let mut file = std::fs::File::create(&file_path)
+            .map_err(|e| format!("Failed to create file: {}", e))?;
+
+        resp.copy_to(&mut file)
+            .map_err(|e| format!("Failed to write file: {}", e))?;
+        file.flush()
+            .map_err(|e| format!("Failed to flush file: {}", e))?;
+        drop(file);
+
+        log::info!("Downloaded installer to: {}", file_path.display());
+
+        // Launch the installer
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new(&file_path)
+                .creation_flags(0x08000000)
+                .spawn()
+                .map_err(|e| format!("Failed to launch installer: {}", e))?;
+        }
+        #[cfg(not(windows))]
+        {
+            std::process::Command::new("open")
+                .arg(&file_path)
+                .spawn()
+                .map_err(|e| format!("Failed to open installer: {}", e))?;
+        }
+
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Task error: {}", e))?;
+
+    result
+}
+
 // ============ Utility Commands ============
 
 #[tauri::command]

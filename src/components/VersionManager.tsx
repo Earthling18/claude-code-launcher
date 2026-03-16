@@ -1,6 +1,14 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
+import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
+import { exit } from '@tauri-apps/plugin-process';
+
+interface GitHubAsset {
+  name: string;
+  browser_download_url: string;
+  size: number;
+}
 
 interface GitHubRelease {
   tag_name: string;
@@ -8,15 +16,19 @@ interface GitHubRelease {
   published_at: string;
   prerelease: boolean;
   html_url: string;
+  body: string;
+  assets: GitHubAsset[];
 }
 
 export const VersionManager: React.FC = () => {
-  const [currentVersion, setCurrentVersion] = useState<string>('');
+  const [currentVersion, setCurrentVersion] = useState('');
   const [releases, setReleases] = useState<GitHubRelease[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasFetched, setHasFetched] = useState(false);
+  const [expandedTag, setExpandedTag] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState<string | null>(null);
 
   const popupRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -45,24 +57,16 @@ export const VersionManager: React.FC = () => {
 
   const handleOpen = useCallback(() => {
     setIsOpen(true);
-    if (!hasFetched) {
-      fetchReleases();
-    }
+    if (!hasFetched) fetchReleases();
   }, [hasFetched, fetchReleases]);
-
-  const handleCheckUpdate = useCallback(() => {
-    fetchReleases();
-  }, [fetchReleases]);
 
   // Close on click outside
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: MouseEvent) => {
       if (
-        popupRef.current &&
-        !popupRef.current.contains(e.target as Node) &&
-        buttonRef.current &&
-        !buttonRef.current.contains(e.target as Node)
+        popupRef.current && !popupRef.current.contains(e.target as Node) &&
+        buttonRef.current && !buttonRef.current.contains(e.target as Node)
       ) {
         setIsOpen(false);
       }
@@ -76,12 +80,52 @@ export const VersionManager: React.FC = () => {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  const handleDownload = async (url: string) => {
-    try {
-      await openUrl(url);
-    } catch {
-      window.open(url, '_blank');
+  const formatSize = (bytes: number): string => {
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  // Find the NSIS installer asset for this release
+  const findInstaller = (release: GitHubRelease): GitHubAsset | undefined => {
+    return release.assets.find(a => a.name.endsWith('_x64-setup.exe'));
+  };
+
+  const handleInstall = async (release: GitHubRelease) => {
+    const asset = findInstaller(release);
+    if (!asset) {
+      // Fallback: open release page
+      try { await openUrl(release.html_url); } catch { window.open(release.html_url, '_blank'); }
+      return;
     }
+
+    setDownloading(release.tag_name);
+    try {
+      await invoke('download_and_run_installer', {
+        url: asset.browser_download_url,
+        filename: asset.name,
+      });
+      // Installer launched, exit app to let it proceed
+      await exit(0);
+    } catch (e: any) {
+      setError(e?.toString() || 'Download failed');
+      setDownloading(null);
+    }
+  };
+
+  // Simple markdown-ish rendering: bold, lines
+  const renderBody = (body: string) => {
+    if (!body) return null;
+    return body.split('\n').map((line, i) => {
+      const trimmed = line.trim();
+      if (!trimmed) return <br key={i} />;
+      // Headings
+      if (trimmed.startsWith('## ')) return <div key={i} className="text-[12px] font-semibold text-[#DCE4EE] mt-2 mb-1">{trimmed.slice(3)}</div>;
+      if (trimmed.startsWith('### ')) return <div key={i} className="text-[11px] font-semibold text-[#DCE4EE] mt-1.5 mb-0.5">{trimmed.slice(4)}</div>;
+      // List items
+      if (trimmed.startsWith('- ') || trimmed.startsWith('* '))
+        return <div key={i} className="text-[11px] text-[#aaaaaa] pl-3 leading-relaxed">{trimmed.slice(2)}</div>;
+      return <div key={i} className="text-[11px] text-[#aaaaaa] leading-relaxed">{trimmed}</div>;
+    });
   };
 
   return (
@@ -103,7 +147,7 @@ export const VersionManager: React.FC = () => {
       {isOpen && (
         <div
           ref={popupRef}
-          className="fixed bottom-14 right-4 w-80 max-h-96 bg-[#2a2a2a] border border-[#3a3a3a]
+          className="fixed bottom-14 right-4 w-96 max-h-[70vh] bg-[#2a2a2a] border border-[#3a3a3a]
                      rounded-lg shadow-lg z-50 flex flex-col overflow-hidden"
         >
           {/* Header */}
@@ -113,7 +157,7 @@ export const VersionManager: React.FC = () => {
                 当前版本：<span className="font-semibold text-[#3b82f6]">v{currentVersion}</span>
               </span>
               <button
-                onClick={handleCheckUpdate}
+                onClick={fetchReleases}
                 disabled={loading}
                 className="px-3 py-1 text-[12px] bg-[#3b82f6] hover:bg-[#2563eb]
                            disabled:bg-[#565B5E] disabled:cursor-not-allowed
@@ -136,7 +180,7 @@ export const VersionManager: React.FC = () => {
               <div className="px-4 py-4 text-center">
                 <p className="text-[13px] text-[#ef4444] mb-2">{error}</p>
                 <button
-                  onClick={handleCheckUpdate}
+                  onClick={() => { setError(null); fetchReleases(); }}
                   className="px-3 py-1 text-[12px] bg-[#565B5E] hover:bg-[#7A8488]
                              text-white rounded transition-colors"
                 >
@@ -156,40 +200,59 @@ export const VersionManager: React.FC = () => {
                 {releases.map((release) => {
                   const tag = release.tag_name.replace(/^v/, '');
                   const isCurrent = tag === currentVersion;
+                  const isExpanded = expandedTag === release.tag_name;
+                  const installer = findInstaller(release);
+                  const isDownloading = downloading === release.tag_name;
+
                   return (
-                    <div
-                      key={release.tag_name}
-                      className={`px-4 py-2.5 flex items-center justify-between hover:bg-[#333333] transition-colors ${
-                        isCurrent ? 'bg-[#1a2a3a]' : ''
-                      }`}
-                    >
-                      <div className="flex flex-col gap-0.5 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-[13px] text-[#DCE4EE] font-medium truncate">
-                            {release.tag_name}
-                          </span>
-                          {isCurrent && (
-                            <span className="text-[10px] px-1.5 py-0.5 bg-[#3b82f6] text-white rounded shrink-0">
-                              当前
-                            </span>
-                          )}
-                          {release.prerelease && (
-                            <span className="text-[10px] px-1.5 py-0.5 bg-[#f59e0b] text-black rounded shrink-0">
-                              Pre-release
-                            </span>
-                          )}
-                        </div>
-                        <span className="text-[11px] text-[#999999]">
-                          {formatDate(release.published_at)}
-                        </span>
-                      </div>
-                      <button
-                        onClick={() => handleDownload(release.html_url)}
-                        className="px-2.5 py-1 text-[11px] bg-[#565B5E] hover:bg-[#7A8488]
-                                   text-white rounded transition-colors shrink-0 ml-2"
+                    <div key={release.tag_name} className={isCurrent ? 'bg-[#1a2a3a]' : ''}>
+                      {/* Version row */}
+                      <div
+                        className="px-4 py-2.5 flex items-center justify-between hover:bg-[#333333] transition-colors cursor-pointer"
+                        onClick={() => setExpandedTag(isExpanded ? null : release.tag_name)}
                       >
-                        下载
-                      </button>
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-[#666666]">{isExpanded ? '\u25BC' : '\u25B6'}</span>
+                            <span className="text-[13px] text-[#DCE4EE] font-medium truncate">
+                              {release.tag_name}
+                            </span>
+                            {isCurrent && (
+                              <span className="text-[10px] px-1.5 py-0.5 bg-[#3b82f6] text-white rounded shrink-0">
+                                当前
+                              </span>
+                            )}
+                            {release.prerelease && (
+                              <span className="text-[10px] px-1.5 py-0.5 bg-[#f59e0b] text-black rounded shrink-0">
+                                Pre-release
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] text-[#999999] ml-5">
+                            {formatDate(release.published_at)}
+                          </span>
+                        </div>
+                        {!isCurrent && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleInstall(release); }}
+                            disabled={!!downloading}
+                            className="px-2.5 py-1 text-[11px] bg-[#10b981] hover:bg-[#059669]
+                                       disabled:bg-[#565B5E] disabled:cursor-not-allowed
+                                       text-white rounded transition-colors shrink-0 ml-2"
+                          >
+                            {isDownloading ? '下载中...' : installer ? `安装 (${formatSize(installer.size)})` : '查看'}
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Expanded release notes */}
+                      {isExpanded && release.body && (
+                        <div className="px-4 pb-3 pt-0">
+                          <div className="bg-[#1e1e1e] border border-[#333333] rounded p-3 max-h-48 overflow-y-auto">
+                            {renderBody(release.body)}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
