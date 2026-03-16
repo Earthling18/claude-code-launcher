@@ -52,6 +52,7 @@ export const VersionManager: React.FC = () => {
       setError(e instanceof Error ? e.message : 'Failed to fetch releases');
     } finally {
       setLoading(false);
+      setHasFetched(true);
     }
   }, []);
 
