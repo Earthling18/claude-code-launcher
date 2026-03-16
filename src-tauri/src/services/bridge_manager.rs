@@ -582,6 +582,9 @@ impl BridgeManager {
         // Repair font files if missing
         Self::repair_fonts_if_needed();
 
+        // Fix skills junction: ensure agent_root/.claude/skills/ -> bridge/.claude/skills/
+        Self::fix_skills_junction(bridge_dir);
+
         // Stop existing service if running
         let _ = Self::stop_service();
 
@@ -766,6 +769,124 @@ impl BridgeManager {
                 None => {
                     log::warn!("ensure_bundled_resources: find_resource_dir() returned None");
                 }
+            }
+        }
+    }
+
+    /// Fix skills junction: ensure ~/.mobot-bridge-agent/.claude/skills/ points to
+    /// the current bridge's .claude/skills/ directory.
+    ///
+    /// The bridge's Python code (`_init_agent_root`) should do this on startup, but
+    /// its `_is_junction_or_symlink()` detection fails on Windows junctions with
+    /// embedded Python 3.12, leaving stale junctions from other bridge installs.
+    /// We fix it in Rust before bridge starts so it always points to the right place.
+    fn fix_skills_junction(bridge_dir: &Path) {
+        let agent_root = match dirs::home_dir() {
+            Some(home) => home.join(".mobot-bridge-agent"),
+            None => {
+                log::warn!("fix_skills_junction: cannot determine home directory");
+                return;
+            }
+        };
+
+        let link_path = agent_root.join(".claude").join("skills");
+        let target_path = bridge_dir.join(".claude").join("skills");
+
+        // Target skills dir must exist in the bridge
+        if !target_path.exists() {
+            log::info!("fix_skills_junction: bridge has no .claude/skills/, skipping");
+            return;
+        }
+
+        // Ensure .claude/ directory exists
+        let claude_dir = agent_root.join(".claude");
+        if !claude_dir.exists() {
+            if let Err(e) = std::fs::create_dir_all(&claude_dir) {
+                log::error!("fix_skills_junction: cannot create .claude dir: {}", e);
+                return;
+            }
+        }
+
+        // Check if link already points to the correct target
+        if link_path.exists() {
+            // On Windows, junctions resolve via canonicalize/read_link
+            let current_target = std::fs::read_link(&link_path)
+                .ok()
+                .or_else(|| link_path.canonicalize().ok());
+
+            let target_canonical = target_path.canonicalize().ok();
+
+            if let (Some(current), Some(expected)) = (&current_target, &target_canonical) {
+                if current == expected {
+                    log::info!("fix_skills_junction: already correct -> {}", expected.display());
+                    return;
+                }
+                log::info!(
+                    "fix_skills_junction: stale junction {} -> {}, expected {}",
+                    link_path.display(), current.display(), expected.display()
+                );
+            }
+
+            // Remove stale junction/directory
+            #[cfg(windows)]
+            {
+                // Windows junction: use rmdir (doesn't delete target contents)
+                let status = Command::new("cmd")
+                    .args(["/c", "rmdir", &link_path.to_string_lossy()])
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
+                match status {
+                    Ok(s) if s.success() => {
+                        log::info!("fix_skills_junction: removed old junction");
+                    }
+                    _ => {
+                        log::error!("fix_skills_junction: failed to remove old junction");
+                        return;
+                    }
+                }
+            }
+            #[cfg(not(windows))]
+            {
+                if link_path.is_symlink() {
+                    let _ = std::fs::remove_file(&link_path);
+                } else {
+                    log::warn!("fix_skills_junction: skills/ is a real dir, not touching it");
+                    return;
+                }
+            }
+        }
+
+        // Create junction (Windows) or symlink (Unix)
+        #[cfg(windows)]
+        {
+            let status = Command::new("cmd")
+                .args(["/c", "mklink", "/J",
+                    &link_path.to_string_lossy(),
+                    &target_path.to_string_lossy()])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            match status {
+                Ok(s) if s.success() => {
+                    log::info!(
+                        "fix_skills_junction: created junction {} -> {}",
+                        link_path.display(), target_path.display()
+                    );
+                }
+                _ => {
+                    log::error!("fix_skills_junction: mklink /J failed");
+                }
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            match std::os::unix::fs::symlink(&target_path, &link_path) {
+                Ok(_) => log::info!(
+                    "fix_skills_junction: created symlink {} -> {}",
+                    link_path.display(), target_path.display()
+                ),
+                Err(e) => log::error!("fix_skills_junction: symlink failed: {}", e),
             }
         }
     }
