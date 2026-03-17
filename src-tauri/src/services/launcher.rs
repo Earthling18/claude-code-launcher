@@ -368,31 +368,65 @@ impl Launcher {
         let encoded = Self::encode_powershell_encoded_command(&ps);
         Self::log_line(&format!("encoded_command length: {}", encoded.len()));
 
-        // Start a new console window and keep it open for interactive use and debugging.
-        Command::new("cmd.exe")
-            .current_dir(&work_dir)
-            .args(&[
-                "/c",
-                "start",
-                &cli_label,
-                "powershell.exe",
-                "-NoExit",
-                "-NoLogo",
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-EncodedCommand",
-                &encoded,
-            ])
-            // Hide the intermediate `cmd.exe` window; `start` will create the visible PowerShell window.
+        // Prefer Windows Terminal (wt.exe) for better ANSI/TUI rendering;
+        // fall back to cmd.exe /c start for systems without it.
+        let has_wt = Command::new("where.exe")
+            .arg("wt.exe")
             .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-            .map_err(|e| {
-                Self::log_line(&format!("spawn cmd.exe failed: {}", e));
-                format!("无法启动CMD: {}", e)
-            })?;
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
 
-        Self::log_line("spawned cmd.exe start OK");
+        Self::log_line(&format!("Windows Terminal available: {}", has_wt));
+
+        if has_wt {
+            let work_dir_str = work_dir.to_string_lossy();
+            Command::new("wt.exe")
+                .args(&[
+                    "new-tab",
+                    "--title", cli_label,
+                    "-d", &work_dir_str,
+                    "powershell.exe",
+                    "-NoExit",
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-EncodedCommand",
+                    &encoded,
+                ])
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .map_err(|e| {
+                    Self::log_line(&format!("spawn wt.exe failed: {}", e));
+                    format!("无法启动Windows Terminal: {}", e)
+                })?;
+            Self::log_line("spawned wt.exe OK");
+        } else {
+            Command::new("cmd.exe")
+                .current_dir(&work_dir)
+                .args(&[
+                    "/c",
+                    "start",
+                    cli_label,
+                    "powershell.exe",
+                    "-NoExit",
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-EncodedCommand",
+                    &encoded,
+                ])
+                // Hide the intermediate `cmd.exe` window; `start` will create the visible PowerShell window.
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .map_err(|e| {
+                    Self::log_line(&format!("spawn cmd.exe failed: {}", e));
+                    format!("无法启动CMD: {}", e)
+                })?;
+            Self::log_line("spawned cmd.exe start OK");
+        }
         Self::log_line("=== launch end ===");
         Ok(())
     }
