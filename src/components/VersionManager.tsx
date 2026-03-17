@@ -198,9 +198,10 @@ export const VersionManager: React.FC = () => {
 
             {releases.length > 0 && (
               <div className="py-1">
-                {releases.map((release) => {
+                {releases.slice(0, 5).map((release) => {
                   const tag = release.tag_name.replace(/^v/, '');
                   const isCurrent = tag === currentVersion;
+                  const hasNotes = !!release.body?.trim();
                   const isExpanded = expandedTag === release.tag_name;
                   const installer = findInstaller(release);
                   const isDownloading = downloading === release.tag_name;
@@ -209,29 +210,29 @@ export const VersionManager: React.FC = () => {
                     <div key={release.tag_name} className={isCurrent ? 'bg-[#1a2a3a]' : ''}>
                       {/* Version row */}
                       <div
-                        className="px-4 py-2.5 flex items-center justify-between hover:bg-[#333333] transition-colors cursor-pointer"
-                        onClick={() => setExpandedTag(isExpanded ? null : release.tag_name)}
+                        className={`px-4 py-2.5 flex items-center justify-between hover:bg-[#333333] transition-colors${hasNotes ? ' cursor-pointer' : ''}`}
+                        onClick={hasNotes ? () => setExpandedTag(isExpanded ? null : release.tag_name) : undefined}
                       >
-                        <div className="flex flex-col gap-0.5 min-w-0">
-                          <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {hasNotes && (
                             <span className="text-[11px] text-[#666666]">{isExpanded ? '\u25BC' : '\u25B6'}</span>
-                            <span className="text-[13px] text-[#DCE4EE] font-medium truncate">
-                              {release.tag_name}
-                            </span>
-                            {isCurrent && (
-                              <span className="text-[10px] px-1.5 py-0.5 bg-[#3b82f6] text-white rounded shrink-0">
-                                当前
-                              </span>
-                            )}
-                            {release.prerelease && (
-                              <span className="text-[10px] px-1.5 py-0.5 bg-[#f59e0b] text-black rounded shrink-0">
-                                Pre-release
-                              </span>
-                            )}
-                          </div>
-                          <span className="text-[11px] text-[#999999] ml-5">
+                          )}
+                          <span className="text-[13px] text-[#DCE4EE] font-medium truncate">
+                            {release.tag_name}
+                          </span>
+                          <span className="text-[11px] text-[#666666] shrink-0">
                             {formatDate(release.published_at)}
                           </span>
+                          {isCurrent && (
+                            <span className="text-[10px] px-1.5 py-0.5 bg-[#3b82f6] text-white rounded shrink-0">
+                              当前
+                            </span>
+                          )}
+                          {release.prerelease && (
+                            <span className="text-[10px] px-1.5 py-0.5 bg-[#f59e0b] text-black rounded shrink-0">
+                              Pre
+                            </span>
+                          )}
                         </div>
                         {!isCurrent && (
                           <button
@@ -247,7 +248,7 @@ export const VersionManager: React.FC = () => {
                       </div>
 
                       {/* Expanded release notes */}
-                      {isExpanded && release.body && (
+                      {isExpanded && hasNotes && (
                         <div className="px-4 pb-3 pt-0">
                           <div className="bg-[#1e1e1e] border border-[#333333] rounded p-3 max-h-48 overflow-y-auto">
                             {renderBody(release.body)}
