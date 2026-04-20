@@ -14,6 +14,7 @@ Usage:
         updater.apply(staging)
 """
 
+import asyncio
 import hashlib
 import logging
 import os
@@ -337,13 +338,13 @@ class Updater:
                 raise ValueError("update.zip not found inside wheel")
             with whl.open(names[0]) as src, open(update_zip_path, "wb") as dst:
                 shutil.copyfileobj(src, dst)
-        whl_path.unlink()
+        await self._unlink_retry(whl_path)
 
         # Extract update.zip (result is identical to GitHub download)
         logger.info(f"[UPDATE] Extracting update package ({downloaded} bytes)")
         with zipfile.ZipFile(update_zip_path, "r") as zf:
             zf.extractall(self.staging_path)
-        update_zip_path.unlink()
+        await self._unlink_retry(update_zip_path)
 
         logger.info(f"[UPDATE] Download complete (PyPI): {self.staging_path}")
         return self.staging_path
@@ -414,10 +415,27 @@ class Updater:
             zf.extractall(self.staging_path)
 
         # Remove the zip to save space
-        zip_path.unlink()
+        await self._unlink_retry(zip_path)
 
         logger.info(f"[UPDATE] Download complete (GitHub): {self.staging_path}")
         return self.staging_path
+
+    @staticmethod
+    async def _unlink_retry(path: Path, retries: int = 5, delay: float = 0.5):
+        """Delete a file with retries for Windows file-lock delays (antivirus/indexer)."""
+        import gc
+        for attempt in range(retries):
+            try:
+                gc.collect()
+                path.unlink()
+                return
+            except PermissionError:
+                if attempt == retries - 1:
+                    raise
+                logger.warning(
+                    f"[UPDATE] File locked, retry {attempt + 1}/{retries}: {path.name}"
+                )
+                await asyncio.sleep(delay * (attempt + 1))
 
     @staticmethod
     def _on_rmtree_error(func, path, exc_info):
@@ -538,9 +556,12 @@ class Updater:
         if mismatches:
             logger.error(f"[UPDATE] {len(mismatches)} file(s) failed verification: {mismatches}")
 
-        # Cleanup staging
+        # Cleanup staging (non-critical — don't fail the update)
         if self.staging_path.exists():
-            shutil.rmtree(self.staging_path)
+            try:
+                shutil.rmtree(self.staging_path, onerror=self._on_rmtree_error)
+            except Exception as e:
+                logger.warning(f"[UPDATE] Staging cleanup failed (will retry next run): {e}")
 
         new_version = get_version()
         logger.info(f"[UPDATE] Update applied successfully. Version: {new_version}")
