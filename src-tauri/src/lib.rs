@@ -29,12 +29,16 @@ pub fn run() {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
 
-            // macOS: remove old "Claude Code Launcher.app" after rename migration
+            // macOS: remove old "Mobot Launcher.app" / "Claude Code Launcher.app" after rename
             #[cfg(target_os = "macos")]
             {
-                let mut paths = vec![std::path::PathBuf::from("/Applications/Claude Code Launcher.app")];
-                if let Some(home) = dirs::home_dir() {
-                    paths.push(home.join("Applications/Claude Code Launcher.app"));
+                let old_names = ["Mobot Launcher.app", "Claude Code Launcher.app"];
+                let mut paths = Vec::new();
+                for name in old_names {
+                    paths.push(std::path::PathBuf::from(format!("/Applications/{}", name)));
+                    if let Some(home) = dirs::home_dir() {
+                        paths.push(home.join(format!("Applications/{}", name)));
+                    }
                 }
                 for old_app in &paths {
                     if old_app.exists() {
@@ -92,18 +96,6 @@ pub fn run() {
             commands::update_projects_order,
             commands::update_pinned_order,
             commands::toggle_project_pinned,
-            // Mobot bridge management commands
-            commands::detect_mobot_installation,
-            commands::install_mobot_bridge,
-            commands::check_mobot_deps_installed,
-            commands::detect_python,
-            commands::install_mobot_deps,
-            commands::start_mobot_service,
-            commands::stop_mobot_service,
-            commands::check_mobot_health,
-            commands::get_mobot_status,
-            commands::get_mobot_logs,
-            commands::is_mobot_updating,
             // Claude login check commands
             commands::check_claude_login,
             commands::launch_claude_for_login,
@@ -119,15 +111,7 @@ pub fn run() {
             commands::is_portable_mode,
             commands::get_portable_download_url,
             commands::download_and_run_installer,
-            // Utility commands
-            commands::get_hostname,
-            commands::get_username,
         ])
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application")
-        .run(|_app, event| {
-            if let tauri::RunEvent::Exit = event {
-                services::BridgeManager::stop_all();
-            }
-        });
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
 }

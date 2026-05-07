@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { DependencyStatus, AppConfig } from './types';
-import type { Project, ProjectConfig, ProjectOrderItem, PinnedOrderItem, InstallStatus, HealthStatus, MobotServiceStatus, ConfigScanResult } from './types/project';
+import type { Project, ProjectConfig, ProjectOrderItem, PinnedOrderItem, ConfigScanResult } from './types/project';
 
 export const api = {
   // 依赖检测
@@ -79,26 +79,6 @@ export const projectApi = {
     invoke<void>('update_pinned_order', { orders }),
   togglePinned: (id: string, isPinned: boolean) =>
     invoke<Project>('toggle_project_pinned', { id, isPinned }),
-};
-
-// Mobot bridge management API
-export const mobotApi = {
-  detectInstallation: () => invoke<InstallStatus>('detect_mobot_installation'),
-  install: () => invoke<string>('install_mobot_bridge'),
-  detectPython: () => invoke<string | null>('detect_python'),
-  checkDepsInstalled: (bridgePath: string) =>
-    invoke<boolean>('check_mobot_deps_installed', { bridgePath }),
-  installDeps: (bridgePath: string, python: string) =>
-    invoke<string>('install_mobot_deps', { bridgePath, python }),
-  startService: (bridgePath: string, python: string, port: number) =>
-    invoke<number>('start_mobot_service', { bridgePath, python, port }),
-  stopService: () => invoke<void>('stop_mobot_service'),
-  checkHealth: (port: number) => invoke<HealthStatus>('check_mobot_health', { port }),
-  getStatus: (port: number) => invoke<MobotServiceStatus>('get_mobot_status', { port }),
-  getLogs: (maxLines?: number) => invoke<string[]>('get_mobot_logs', { maxLines }),
-  getHostname: () => invoke<string>('get_hostname'),
-  getUsername: () => invoke<string>('get_username'),
-  isUpdating: () => invoke<boolean>('is_mobot_updating'),
 };
 
 // CC config checker API

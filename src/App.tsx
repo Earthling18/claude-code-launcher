@@ -1,12 +1,10 @@
 import { useState, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { listen } from '@tauri-apps/api/event';
 import { ProjectListPage } from './pages/ProjectListPage';
-import { ModeSelectPage } from './pages/ModeSelectPage';
 import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { ProjectEditPage } from './pages/ProjectEditPage';
 import { ProjectCreatePage } from './pages/ProjectCreatePage';
-import { RemoteBridgePage } from './pages/RemoteBridgePage';
 import { UpdateNotification } from './components/UpdateNotification';
 import { VersionManager } from './components/VersionManager';
 import { useUpdateChecker } from './hooks/useUpdateChecker';
@@ -36,7 +34,6 @@ export const useDragContext = () => useContext(DragContext);
 
 function AppContent() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [isDragging, setIsDragging] = useState(false);
   const [droppedPath, setDroppedPath] = useState<string | null>(null);
   const updateChecker = useUpdateChecker();
@@ -69,8 +66,7 @@ function AppContent() {
           }
         }
 
-        // 如果没有自定义处理器处理，使用默认行为（仅本地模式）
-        if (!handled && location.pathname.startsWith('/local')) {
+        if (!handled) {
           setDroppedPath(path);
           navigate('/local/project/new');
         }
@@ -80,21 +76,16 @@ function AppContent() {
     return () => {
       unlisten.then(fn => fn());
     };
-  }, [navigate, location.pathname]);
+  }, [navigate]);
 
-  // 处理拖拽视觉效果 — 仅本地模式拦截，远程模式放行让 iframe 处理
   useEffect(() => {
-    const isLocal = () => location.pathname.startsWith('/local');
-
     const handleDragOver = (e: DragEvent) => {
-      if (!isLocal()) return; // 远程模式不拦截，让 iframe 原生拖拽生效
       e.preventDefault();
       e.stopPropagation();
       setIsDragging(true);
     };
 
     const handleDragLeave = (e: DragEvent) => {
-      if (!isLocal()) return;
       e.preventDefault();
       e.stopPropagation();
       if (e.relatedTarget === null) {
@@ -103,7 +94,6 @@ function AppContent() {
     };
 
     const handleDrop = (e: DragEvent) => {
-      if (!isLocal()) return;
       e.preventDefault();
       e.stopPropagation();
       setIsDragging(false);
@@ -118,7 +108,7 @@ function AppContent() {
       window.removeEventListener('dragleave', handleDragLeave);
       window.removeEventListener('drop', handleDrop);
     };
-  }, [location.pathname]);
+  }, []);
 
   return (
     <DragContext.Provider value={{ droppedPath, setDroppedPath, registerDragHandler, unregisterDragHandler }}>
@@ -133,8 +123,7 @@ function AppContent() {
           onDismiss={updateChecker.dismiss}
           onRetry={updateChecker.retry}
         />
-        {/* 拖拽遮罩层 — 仅本地模式显示 */}
-        {isDragging && location.pathname.startsWith('/local') && (
+        {isDragging && (
           <div className="fixed inset-0 z-50 bg-[#212121]/90 flex items-center justify-center pointer-events-none">
             <div className="border-2 border-dashed border-[#3b82f6] rounded-xl p-12 text-center">
               <div className="text-[48px] mb-4">📁</div>
@@ -145,16 +134,14 @@ function AppContent() {
         )}
 
         <Routes>
-          <Route path="/" element={<ModeSelectPage />} />
+          <Route path="/" element={<Navigate to="/local" replace />} />
           <Route path="/local" element={<ProjectListPage />} />
           <Route path="/local/project/new" element={<ProjectCreatePage />} />
           <Route path="/local/project/:id" element={<ProjectDetailPage />} />
           <Route path="/local/project/:id/edit" element={<ProjectEditPage />} />
-          <Route path="/remote" element={<RemoteBridgePage />} />
         </Routes>
 
-        {/* Version manager button — only on local mode pages */}
-        {location.pathname.startsWith('/local') && <VersionManager />}
+        <VersionManager />
       </div>
     </DragContext.Provider>
   );

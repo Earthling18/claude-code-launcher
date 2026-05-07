@@ -21,7 +21,6 @@ import { DependencyFrame } from '../components/DependencyFrame';
 import { LocalSetupWizard } from '../components/LocalSetupWizard';
 import { ProjectCard } from '../components/ProjectCard';
 import { SortableProjectCard } from '../components/SortableProjectCard';
-import { ModeSwitch } from '../components/ModeSwitch';
 import type { Project } from '../types/project';
 
 // Sort projects according to the priority rules
@@ -239,7 +238,6 @@ export const ProjectListPage: React.FC = () => {
       <div className="h-screen bg-[#212121] text-[#DCE4EE] flex flex-col overflow-hidden">
         <div className="flex-shrink-0 px-6 py-3 border-b border-[#3a3a3a]">
           <div className="flex items-center gap-3">
-            <ModeSwitch active="local" />
             <h2 className="text-base font-bold">本地启动</h2>
           </div>
         </div>
@@ -256,7 +254,6 @@ export const ProjectListPage: React.FC = () => {
       <div className="flex-shrink-0 px-6 py-3 border-b border-[#3a3a3a]">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <ModeSwitch active="local" />
             <h2 className="text-base font-bold">本地启动</h2>
           </div>
           <button

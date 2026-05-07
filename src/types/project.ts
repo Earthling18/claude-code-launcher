@@ -1,5 +1,5 @@
 export interface ProjectConfig {
-  mode: 'claude' | 'custom' | 'codex' | 'remote';
+  mode: 'claude' | 'custom' | 'codex';
   proxy: string;
   model: string;
   base_url: string;
@@ -7,10 +7,6 @@ export interface ProjectConfig {
   skip_permissions: boolean;
   codex_api_key: string;
   custom_cli: 'claude' | 'codex';
-
-  // Mobot bridge fields (simplified)
-  mobot_bridge_path: string | null;
-  mobot_bridge_port: number;
 }
 
 export interface Project {
@@ -50,27 +46,6 @@ export interface PinnedOrderItem {
   pinned_at: number;
 }
 
-// Mobot bridge types
-export type InstallStatus =
-  | 'NotInstalled'
-  | { Installed: { path: string } }
-  | { Running: { path: string; port: number } };
-
-export interface HealthStatus {
-  healthy: boolean;
-  details: string;
-}
-
-export interface MobotServiceStatus {
-  installed: boolean;
-  running: boolean;
-  pid: number | null;
-  port: number;
-  install_path: string | null;
-  healthy: boolean;
-  started_at: number | null;
-}
-
 // CC config checker types
 export interface ConfigConflict {
   source: string;
@@ -106,6 +81,4 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   skip_permissions: true,
   codex_api_key: '',
   custom_cli: 'claude',
-  mobot_bridge_path: null,
-  mobot_bridge_port: 8000,
 };

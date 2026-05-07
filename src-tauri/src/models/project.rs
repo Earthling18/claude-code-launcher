@@ -12,35 +12,33 @@ fn default_custom_cli() -> String {
     "claude".to_string()
 }
 
-fn default_mobot_bridge_port() -> u16 {
-    8000
-}
-
-/// Project-specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProjectConfig {
     #[serde(default = "default_mode")]
-    pub mode: String,                    // "claude", "custom", "codex", or "remote"
+    pub mode: String,                    // "claude", "custom", or "codex"
     #[serde(default)]
-    pub proxy: String,                   // HTTP/HTTPS proxy for Claude mode
+    pub proxy: String,
     #[serde(default)]
-    pub model: String,                   // Model name for custom mode
+    pub model: String,
     #[serde(default)]
-    pub base_url: String,                // API base URL for custom mode
+    pub base_url: String,
     #[serde(default)]
-    pub token: String,                   // API token (Base64 encoded in storage)
+    pub token: String,
     #[serde(default = "default_skip_permissions")]
-    pub skip_permissions: bool,          // Skip permissions flag
+    pub skip_permissions: bool,
     #[serde(default)]
-    pub codex_api_key: String,           // Proxy for Codex mode (legacy field name kept for backward compat)
+    pub codex_api_key: String,
     #[serde(default = "default_custom_cli")]
-    pub custom_cli: String,              // CLI tool for custom mode: "claude" or "codex"
+    pub custom_cli: String,
+}
 
-    // Mobot bridge fields (simplified — all config lives in mobot-bridge's own .env / Web UI)
-    #[serde(default)]
-    pub mobot_bridge_path: Option<String>,  // Install path (auto-detected or user-specified)
-    #[serde(default = "default_mobot_bridge_port")]
-    pub mobot_bridge_port: u16,             // Service port (default 8000)
+impl ProjectConfig {
+    /// Coerce legacy mode='remote' (from Mobot Launcher era) to 'claude'.
+    pub fn normalize_legacy_mode(&mut self) {
+        if self.mode == "remote" {
+            self.mode = "claude".to_string();
+        }
+    }
 }
 
 impl Default for ProjectConfig {
@@ -54,8 +52,6 @@ impl Default for ProjectConfig {
             skip_permissions: true,
             codex_api_key: String::new(),
             custom_cli: "claude".to_string(),
-            mobot_bridge_path: None,
-            mobot_bridge_port: 8000,
         }
     }
 }

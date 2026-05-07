@@ -40,13 +40,6 @@ pub struct AppConfigV2 {
     pub projects: Vec<Project>,
     #[serde(default)]
     pub has_seen_onboarding: bool,
-    // mobot_bridge_port is stored globally (not per-project) for the remote mode
-    #[serde(default = "default_mobot_port")]
-    pub mobot_bridge_port: u16,
-}
-
-fn default_mobot_port() -> u16 {
-    8000
 }
 
 impl Default for AppConfigV2 {
@@ -55,7 +48,6 @@ impl Default for AppConfigV2 {
             version: 2,
             projects: vec![Project::default_project()],
             has_seen_onboarding: false,
-            mobot_bridge_port: 8000,
         }
     }
 }
@@ -73,22 +65,40 @@ impl ConfigStorage {
     fn get_config_path() -> Result<PathBuf, String> {
         let base = dirs::config_dir()
             .ok_or("无法获取配置目录")?;
-        let new_dir = base.join("MobotLauncher");
-        let old_dir = base.join("ClaudeCodeLauncher");
+        let new_dir = base.join("CCLauncher");
+        let mobot_dir = base.join("MobotLauncher");
+        let legacy_dir = base.join("ClaudeCodeLauncher");
 
-        // Migrate: rename old config directory to new if old exists and new doesn't
-        if old_dir.exists() && !new_dir.exists() {
-            log::info!(
-                "Migrating config directory: {} -> {}",
-                old_dir.display(),
-                new_dir.display()
-            );
-            if let Err(e) = fs::rename(&old_dir, &new_dir) {
-                log::error!("Config migration failed (will use old path): {}", e);
+        // Three-way migration: pick the most-recent old name and rename to new.
+        if !new_dir.exists() {
+            let src = if mobot_dir.exists() {
+                Some(mobot_dir.clone())
+            } else if legacy_dir.exists() {
+                Some(legacy_dir.clone())
+            } else {
+                None
+            };
+            if let Some(s) = src {
+                log::info!(
+                    "Migrating config directory: {} -> {}",
+                    s.display(),
+                    new_dir.display()
+                );
+                if let Err(e) = fs::rename(&s, &new_dir) {
+                    log::error!("Config migration failed (will use old path): {}", e);
+                }
             }
         }
 
-        let config_dir = if new_dir.exists() { new_dir } else if old_dir.exists() { old_dir } else { new_dir };
+        let config_dir = if new_dir.exists() {
+            new_dir
+        } else if mobot_dir.exists() {
+            mobot_dir
+        } else if legacy_dir.exists() {
+            legacy_dir
+        } else {
+            new_dir
+        };
 
         if !config_dir.exists() {
             fs::create_dir_all(&config_dir)
@@ -125,7 +135,6 @@ impl ConfigStorage {
             version: 2,
             projects: vec![default_project],
             has_seen_onboarding: false,
-            mobot_bridge_port: 8000,
         }
     }
 
@@ -177,9 +186,10 @@ impl ConfigStorage {
             let mut config: AppConfigV2 = serde_json::from_str(&content)
                 .map_err(|e| format!("无法解析v2配置: {}", e))?;
 
-            // Decode tokens
+            // Decode tokens + coerce legacy mode='remote' → 'claude'
             for project in &mut config.projects {
                 Self::decode_project_token(project);
+                project.config.normalize_legacy_mode();
             }
 
             Ok(config)

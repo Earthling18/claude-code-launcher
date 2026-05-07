@@ -116,8 +116,6 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       skip_permissions: skipPermissions,
       codex_api_key: codexApiKey,
       custom_cli: customCli,
-      mobot_bridge_path: null,
-      mobot_bridge_port: 8000,
     };
 
     onSubmit(name.trim(), workingDirectory.trim(), config, isPinned);

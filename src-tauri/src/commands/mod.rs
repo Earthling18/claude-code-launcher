@@ -1,9 +1,7 @@
 use crate::services::*;
-use crate::services::bridge_manager::{InstallStatus, HealthStatus, MobotServiceStatus};
 use crate::services::cc_config_checker::{ConfigScanResult, ProjectInfo, CleanTarget};
 use crate::models::{Project, ProjectConfig, CreateProjectInput, UpdateProjectInput, ProjectOrderItem, PinnedOrderItem};
 use std::collections::HashMap;
-use tauri::Manager;
 
 #[tauri::command]
 pub async fn check_nodejs() -> Result<dependency_checker::DependencyStatus, String> {
@@ -308,127 +306,6 @@ pub fn toggle_project_pinned(id: String, is_pinned: bool) -> Result<Project, Str
     ConfigStorage::toggle_project_pinned(&id, is_pinned)
 }
 
-// ============ Mobot Bridge Management Commands ============
-
-#[tauri::command]
-pub async fn detect_mobot_installation(app_handle: tauri::AppHandle) -> InstallStatus {
-    let status = tokio::task::spawn_blocking(BridgeManager::detect_installation)
-        .await
-        .unwrap_or(InstallStatus::NotInstalled);
-
-    // If installed, ensure bundled resources (e.g. mingit/) exist in the bridge dir.
-    // This must run here (not just in start_service) because the service may already
-    // be running, in which case start_service is never called.
-    if !matches!(status, InstallStatus::NotInstalled) {
-        let bridge_dir = BridgeManager::get_mobot_dir();
-        BridgeManager::ensure_bundled_resources(&bridge_dir);
-    }
-
-    // If installed, compare installed version with bundled version
-    // to force re-install when app is upgraded (e.g. master -> mobot branch)
-    if !matches!(status, InstallStatus::NotInstalled) {
-        if let Ok(resource_dir) = app_handle.path().resource_dir() {
-            let resource_dir_str = resource_dir.to_string_lossy();
-            let resource_dir_clean = resource_dir_str.strip_prefix(r"\\?\").unwrap_or(&resource_dir_str);
-            if let Ok(src) = BridgeManager::find_bridge_source_pub(resource_dir_clean) {
-                let bundled_version = std::fs::read_to_string(src.join("VERSION"))
-                    .unwrap_or_default().trim().to_string();
-                let installed_version = std::fs::read_to_string(
-                    BridgeManager::get_mobot_dir().join(".mobot_version")
-                ).unwrap_or_default().trim().to_string();
-
-                if !bundled_version.is_empty() && bundled_version != installed_version {
-                    log::info!(
-                        "Version mismatch: installed={}, bundled={} — forcing re-install",
-                        installed_version, bundled_version
-                    );
-                    return InstallStatus::NotInstalled;
-                }
-            }
-        }
-    }
-
-    status
-}
-
-#[tauri::command]
-pub async fn install_mobot_bridge(app_handle: tauri::AppHandle) -> Result<String, String> {
-    let resource_dir = app_handle
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
-    let resource_dir_str = resource_dir.to_string_lossy().to_string();
-
-    tokio::task::spawn_blocking(move || BridgeManager::install_mobot_bridge(&resource_dir_str))
-        .await
-        .map_err(|e| format!("Task error: {}", e))?
-}
-
-#[tauri::command]
-pub async fn check_mobot_deps_installed(bridge_path: String) -> bool {
-    BridgeManager::check_deps_installed(&bridge_path)
-}
-
-#[tauri::command]
-pub async fn detect_python() -> Option<String> {
-    tokio::task::spawn_blocking(BridgeManager::detect_python)
-        .await
-        .unwrap_or(None)
-}
-
-#[tauri::command]
-pub async fn install_mobot_deps(app_handle: tauri::AppHandle, bridge_path: String, python: String) -> Result<String, String> {
-    tokio::task::spawn_blocking(move || BridgeManager::install_dependencies(&bridge_path, &python, Some(&app_handle)))
-        .await
-        .map_err(|e| format!("Task error: {}", e))?
-}
-
-#[tauri::command]
-pub async fn start_mobot_service(bridge_path: String, python: String, port: u16) -> Result<u32, String> {
-    tokio::task::spawn_blocking(move || BridgeManager::start_service(&bridge_path, &python, port))
-        .await
-        .map_err(|e| format!("Task error: {}", e))?
-}
-
-#[tauri::command]
-pub async fn stop_mobot_service() -> Result<(), String> {
-    tokio::task::spawn_blocking(BridgeManager::stop_service)
-        .await
-        .map_err(|e| format!("Task error: {}", e))?
-}
-
-#[tauri::command]
-pub async fn check_mobot_health(port: u16) -> HealthStatus {
-    tokio::task::spawn_blocking(move || BridgeManager::check_health(port))
-        .await
-        .unwrap_or(HealthStatus { healthy: false, details: "Task error".to_string() })
-}
-
-#[tauri::command]
-pub async fn get_mobot_status(port: u16) -> MobotServiceStatus {
-    tokio::task::spawn_blocking(move || BridgeManager::get_service_status(port))
-        .await
-        .unwrap_or(MobotServiceStatus {
-            installed: false, running: false, pid: None,
-            port, install_path: None, healthy: false, started_at: None,
-        })
-}
-
-#[tauri::command]
-pub async fn get_mobot_logs(max_lines: Option<usize>) -> Vec<String> {
-    let lines = max_lines.unwrap_or(200);
-    tokio::task::spawn_blocking(move || BridgeManager::get_logs(lines))
-        .await
-        .unwrap_or_default()
-}
-
-#[tauri::command]
-pub async fn is_mobot_updating() -> bool {
-    tokio::task::spawn_blocking(BridgeManager::is_updating)
-        .await
-        .unwrap_or(false)
-}
-
 // ============ Claude Login Check Commands ============
 
 #[tauri::command]
@@ -527,7 +404,7 @@ pub async fn download_and_run_installer(url: String, filename: String) -> Result
 
         let mut resp = client
             .get(&url)
-            .header("User-Agent", "MobotLauncher")
+            .header("User-Agent", "CCLauncher")
             .send()
             .map_err(|e| format!("Download failed: {}", e))?;
 
@@ -535,7 +412,7 @@ pub async fn download_and_run_installer(url: String, filename: String) -> Result
             return Err(format!("Download returned HTTP {}", resp.status()));
         }
 
-        let temp_dir = std::env::temp_dir().join("mobot-launcher-update");
+        let temp_dir = std::env::temp_dir().join("cc-launcher-update");
         std::fs::create_dir_all(&temp_dir)
             .map_err(|e| format!("Failed to create temp dir: {}", e))?;
 
@@ -576,14 +453,3 @@ pub async fn download_and_run_installer(url: String, filename: String) -> Result
     result
 }
 
-// ============ Utility Commands ============
-
-#[tauri::command]
-pub fn get_hostname() -> String {
-    BridgeManager::get_hostname()
-}
-
-#[tauri::command]
-pub fn get_username() -> String {
-    BridgeManager::get_username()
-}
