@@ -32,9 +32,6 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Create bridge admin config
-        run: echo '${{ secrets.BRIDGE_ADMIN_JSON }}' > src-tauri/resources/bridge/bridge_admin.json
-        shell: bash
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -89,8 +86,6 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Create bridge admin config
-        run: echo '${{ secrets.BRIDGE_ADMIN_JSON }}' > src-tauri/resources/bridge/bridge_admin.json
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
