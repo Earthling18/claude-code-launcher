@@ -15,7 +15,20 @@ impl Launcher {
         // Prefer LocalAppData so logs survive across runs and are easy to find on Windows.
         // Fallback to TEMP if LocalAppData is unavailable for some reason.
         let base = dirs::data_local_dir().unwrap_or_else(std::env::temp_dir);
-        base.join("ClaudeCodeLauncher").join("logs").join("launcher.log")
+        let new_dir = base.join("CCLauncher").join("logs");
+        let legacy_dir = base.join("ClaudeCodeLauncher").join("logs");
+
+        // One-time rename: legacy log dir → new dir.
+        if !new_dir.exists() && legacy_dir.exists() {
+            log::info!(
+                "Migrating log directory: {} -> {}",
+                legacy_dir.display(),
+                new_dir.display()
+            );
+            let _ = std::fs::rename(&legacy_dir, &new_dir);
+        }
+
+        new_dir.join("launcher.log")
     }
 
     #[cfg(windows)]

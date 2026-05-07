@@ -15,7 +15,7 @@ if ($LASTEXITCODE -ne 0) {
 
 # 2. 用 rcedit 修复图标
 Write-Host "`n[2/3] Fixing icon with rcedit..." -ForegroundColor Yellow
-$exePath = "src-tauri\target\release\claude-code-launcher-tauri.exe"
+$exePath = "src-tauri\target\release\cc-launcher-tauri.exe"
 $icoPath = "src-tauri\icons\icon.ico"
 $rceditPath = "rcedit.exe"
 

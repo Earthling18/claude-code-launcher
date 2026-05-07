@@ -1,43 +1,55 @@
-; NSIS hook: silently uninstall old "Claude Code Launcher" before installing new "Mobot Launcher"
-; This ensures users upgrading from the old name don't end up with two programs.
+; NSIS hook: silently uninstall older versions ("Mobot Launcher" or legacy
+; "Claude Code Launcher") before installing the new "CC 启动器".
+; Ensures users upgrading from any older name end up with a single clean install.
 
-; Flag variable: set to 1 when old version is detected and removed
+; Flag variable: set to 1 when an older version is detected and removed.
 Var MigratedFromOld
 
 !macro NSIS_HOOK_PREINSTALL
   StrCpy $MigratedFromOld "0"
 
-  ; Check if old "Claude Code Launcher" is installed (current user)
-  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Claude Code Launcher" "UninstallString"
-  StrCmp $0 "" old_not_found
+  ; --- Detect "Mobot Launcher" (the previous app name) ---
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Mobot Launcher" "UninstallString"
+  StrCmp $0 "" mobot_not_found
     StrCpy $MigratedFromOld "1"
-    ; Read the actual install location from registry
-    ReadRegStr $1 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Claude Code Launcher" "InstallLocation"
-    DetailPrint "Found old Claude Code Launcher at $1, removing..."
-    ; Run the old uninstaller silently, pinned to install location
+    ReadRegStr $1 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Mobot Launcher" "InstallLocation"
+    DetailPrint "Found Mobot Launcher at $1, removing..."
     ExecWait '"$0" /S _?=$1'
-    ; Wait for uninstaller to release file locks
     Sleep 2000
-    ; Clean up leftover files (exe may survive uninstall due to file locks)
+    Delete "$1\mobot-launcher-tauri.exe"
+    Delete "$1\uninstall.exe"
+    RMDir /r "$1"
+    DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Mobot Launcher"
+  mobot_not_found:
+
+  ; --- Detect legacy "Claude Code Launcher" ---
+  ReadRegStr $0 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Claude Code Launcher" "UninstallString"
+  StrCmp $0 "" legacy_not_found
+    StrCpy $MigratedFromOld "1"
+    ReadRegStr $1 HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Claude Code Launcher" "InstallLocation"
+    DetailPrint "Found legacy Claude Code Launcher at $1, removing..."
+    ExecWait '"$0" /S _?=$1'
+    Sleep 2000
     Delete "$1\claude-code-launcher-tauri.exe"
     Delete "$1\uninstall.exe"
     RMDir /r "$1"
-    ; Remove registry entry in case uninstaller didn't clean up
     DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\Claude Code Launcher"
-  old_not_found:
+  legacy_not_found:
 
-  ; Clean up old desktop and start menu shortcuts
+  ; --- Clean up old desktop and start menu shortcuts (both old names) ---
+  Delete "$DESKTOP\Mobot Launcher.lnk"
+  Delete "$SMPROGRAMS\Mobot Launcher.lnk"
   Delete "$DESKTOP\Claude Code Launcher.lnk"
   Delete "$SMPROGRAMS\Claude Code Launcher.lnk"
 !macroend
 
-; Post-install hook: only create new shortcuts when migrating from old app name.
+; Post-install hook: only create new shortcuts when migrating from an older app name.
 ; Tauri's NSIS template skips shortcut creation in update mode ($UpdateMode=1),
-; so after removing old shortcuts above, there would be none left without this.
-; For normal Mobot→Mobot updates, don't touch shortcuts (respect user preference).
+; so after removing old shortcuts above there would be none left without this.
+; For normal CC→CC updates, don't touch shortcuts (respect user preference).
 !macro NSIS_HOOK_POSTINSTALL
   StrCmp $MigratedFromOld "1" 0 skip_shortcuts
-    CreateShortCut "$DESKTOP\Mobot Launcher.lnk" "$INSTDIR\mobot-launcher-tauri.exe"
-    CreateShortCut "$SMPROGRAMS\Mobot Launcher.lnk" "$INSTDIR\mobot-launcher-tauri.exe"
+    CreateShortCut "$DESKTOP\CC 启动器.lnk" "$INSTDIR\cc-launcher-tauri.exe"
+    CreateShortCut "$SMPROGRAMS\CC 启动器.lnk" "$INSTDIR\cc-launcher-tauri.exe"
   skip_shortcuts:
 !macroend

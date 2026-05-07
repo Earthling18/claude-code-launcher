@@ -52,7 +52,7 @@ jobs:
 
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Mobot Launcher ${{ github.ref_name }}'
+          releaseName: 'CC 启动器 ${{ github.ref_name }}'
           releaseDraft: true
           updaterJsonPreferNsis: true
 
@@ -64,18 +64,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path $portableDir
 
           # Copy the built exe
-          Copy-Item "src-tauri/target/release/mobot-launcher-tauri.exe" "$portableDir/Mobot Launcher.exe"
-
-          # Copy bundled resources (bridge files)
-          if (Test-Path "src-tauri/target/release/resources") {
-            Copy-Item -Recurse "src-tauri/target/release/resources" "$portableDir/resources"
-          }
+          Copy-Item "src-tauri/target/release/cc-launcher-tauri.exe" "$portableDir/CC 启动器.exe"
 
           # Create .portable marker
-          New-Item -ItemType File -Path "$portableDir/.portable" -Value "Mobot Launcher Portable v$version"
+          New-Item -ItemType File -Path "$portableDir/.portable" -Value "CC 启动器 Portable v$version"
 
           # Create zip
-          $zipName = "Mobot-Launcher_${version}_x64_portable.zip"
+          $zipName = "CC-Launcher_${version}_x64_portable.zip"
           Compress-Archive -Path "$portableDir/*" -DestinationPath $zipName -Force
           echo "PORTABLE_ZIP=$zipName" >> $env:GITHUB_ENV
 
@@ -114,6 +109,6 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'Mobot Launcher ${{ github.ref_name }}'
+          releaseName: 'CC 启动器 ${{ github.ref_name }}'
           releaseDraft: true
           args: --target universal-apple-darwin

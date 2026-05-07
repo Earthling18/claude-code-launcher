@@ -1,8 +1,8 @@
 [package]
-name = "mobot-launcher-tauri"
-version = "1.0.6"
-description = "Mobot Launcher，支持桌面、远程启动claudecode、codex等服务，并对接企微、飞书"
-authors = ["Mobot Team"]
+name = "cc-launcher-tauri"
+version = "1.1.0"
+description = "CC 启动器，本地启动 Claude Code / Codex"
+authors = ["CC Launcher Team"]
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -11,7 +11,7 @@ edition = "2021"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "mobot_launcher_tauri_lib"
+name = "cc_launcher_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
