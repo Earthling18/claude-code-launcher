@@ -3,6 +3,7 @@ import { api } from '../api';
 import type { DependencyStatus } from '../types';
 
 type StepStatus = 'pending' | 'running' | 'done' | 'error' | 'skipped';
+type SkipSignal = 'current' | 'all' | null;
 
 interface Step {
   label: string;
@@ -24,138 +25,115 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
   const [isRunning, setIsRunning] = useState(false);
   const [waitingInstall, setWaitingInstall] = useState<string | null>(null);
   const hasStarted = useRef(false);
+  const skipSignalRef = useRef<SkipSignal>(null);
 
   const updateStep = (index: number, update: Partial<Step>) => {
     setSteps(prev => prev.map((s, i) => (i === index ? { ...s, ...update } : s)));
   };
 
+  // Returns { result, skipped }: result is the dependency status if it became installed,
+  // skipped='current' or 'all' if the user pressed a skip button mid-wait.
   const waitForInstall = async (
     checkFn: () => Promise<DependencyStatus>,
     maxAttempts = 60
-  ): Promise<DependencyStatus | null> => {
+  ): Promise<{ result: DependencyStatus | null; skipped: SkipSignal }> => {
     for (let i = 0; i < maxAttempts; i++) {
+      if (skipSignalRef.current) {
+        return { result: null, skipped: skipSignalRef.current };
+      }
       await new Promise(r => setTimeout(r, 3000));
+      if (skipSignalRef.current) {
+        return { result: null, skipped: skipSignalRef.current };
+      }
       try {
         await api.refreshSystemPath();
         const result = await checkFn();
-        if (result.installed) return result;
+        if (result.installed) return { result, skipped: null };
       } catch {}
     }
-    return null;
+    return { result: null, skipped: null };
   };
 
   const runSetup = async () => {
     setIsRunning(true);
+    skipSignalRef.current = null;
 
-    // Step 0: Node.js
-    updateStep(0, { status: 'running' });
-    try {
-      const node = await api.checkNodejs();
-      if (node.installed) {
-        updateStep(0, { status: 'done', detail: node.version || undefined });
-      } else {
-        updateStep(0, { status: 'running', detail: '正在打开安装程序...' });
-        setWaitingInstall('Node.js');
-        await api.installNodejs();
-        updateStep(0, { detail: '等待安装完成...' });
-        const result = await waitForInstall(api.checkNodejs);
+    type StepDef = {
+      index: number;
+      label: string;
+      check: () => Promise<DependencyStatus>;
+      install: () => Promise<unknown>;
+    };
+
+    const stepDefs: StepDef[] = [
+      { index: 0, label: 'Node.js',     check: api.checkNodejs,  install: api.installNodejs },
+      { index: 1, label: 'Git',         check: api.checkGitbash, install: api.installGitbash },
+      { index: 2, label: 'Claude Code', check: api.checkClaude,  install: api.installClaude },
+      { index: 3, label: 'Codex',       check: api.checkCodex,   install: api.installCodex },
+    ];
+
+    const finishWithSkipAll = (fromIndex: number) => {
+      setSteps(prev =>
+        prev.map((s, i) =>
+          i >= fromIndex && (s.status === 'pending' || s.status === 'running')
+            ? { ...s, status: 'skipped', detail: '已跳过' }
+            : s
+        )
+      );
+      setWaitingInstall(null);
+      setIsRunning(false);
+      localStorage.setItem('local_deps_ok', '1');
+      onComplete();
+    };
+
+    for (const def of stepDefs) {
+      if (skipSignalRef.current === 'all') {
+        finishWithSkipAll(def.index);
+        return;
+      }
+
+      updateStep(def.index, { status: 'running', detail: '正在检测...' });
+
+      try {
+        const status = await def.check();
+        if (status.installed) {
+          updateStep(def.index, { status: 'done', detail: status.version || undefined });
+          continue;
+        }
+
+        updateStep(def.index, { status: 'running', detail: '正在打开安装程序...' });
+        setWaitingInstall(def.label);
+        await def.install();
+        updateStep(def.index, { detail: '等待安装完成...' });
+
+        const { result, skipped } = await waitForInstall(def.check);
         setWaitingInstall(null);
+
+        if (skipped === 'all') {
+          updateStep(def.index, { status: 'skipped', detail: '已跳过' });
+          finishWithSkipAll(def.index + 1);
+          return;
+        }
+        if (skipped === 'current') {
+          updateStep(def.index, { status: 'skipped', detail: '已跳过' });
+          skipSignalRef.current = null;
+          continue;
+        }
         if (result) {
-          updateStep(0, { status: 'done', detail: result.version || undefined });
+          updateStep(def.index, { status: 'done', detail: result.version || undefined });
         } else {
-          updateStep(0, { status: 'error', detail: '安装超时，请手动安装后重试' });
+          updateStep(def.index, { status: 'error', detail: '安装超时，请手动安装后重试' });
           setIsRunning(false);
           return;
         }
-      }
-    } catch (err: any) {
-      updateStep(0, { status: 'error', detail: err?.toString() });
-      setIsRunning(false);
-      return;
-    }
-
-    // Step 1: Git
-    updateStep(1, { status: 'running' });
-    try {
-      const git = await api.checkGitbash();
-      if (git.installed) {
-        updateStep(1, { status: 'done', detail: git.version || undefined });
-      } else {
-        updateStep(1, { status: 'running', detail: '正在打开安装程序...' });
-        setWaitingInstall('Git');
-        await api.installGitbash();
-        updateStep(1, { detail: '等待安装完成...' });
-        const result = await waitForInstall(api.checkGitbash);
+      } catch (err: any) {
         setWaitingInstall(null);
-        if (result) {
-          updateStep(1, { status: 'done', detail: result.version || undefined });
-        } else {
-          updateStep(1, { status: 'error', detail: '安装超时，请手动安装后重试' });
-          setIsRunning(false);
-          return;
-        }
+        updateStep(def.index, { status: 'error', detail: err?.toString() });
+        setIsRunning(false);
+        return;
       }
-    } catch (err: any) {
-      updateStep(1, { status: 'error', detail: err?.toString() });
-      setIsRunning(false);
-      return;
     }
 
-    // Step 2: Claude Code
-    updateStep(2, { status: 'running', detail: '正在检测...' });
-    try {
-      const claude = await api.checkClaude();
-      if (claude.installed) {
-        updateStep(2, { status: 'done', detail: claude.version || undefined });
-      } else {
-        updateStep(2, { status: 'running', detail: '正在打开安装程序...' });
-        setWaitingInstall('Claude Code');
-        await api.installClaude();
-        updateStep(2, { detail: '等待安装完成...' });
-        const result = await waitForInstall(api.checkClaude);
-        setWaitingInstall(null);
-        if (result) {
-          updateStep(2, { status: 'done', detail: result.version || undefined });
-        } else {
-          updateStep(2, { status: 'error', detail: '安装超时，请手动安装后重试' });
-          setIsRunning(false);
-          return;
-        }
-      }
-    } catch (err: any) {
-      updateStep(2, { status: 'error', detail: err?.toString() });
-      setIsRunning(false);
-      return;
-    }
-
-    // Step 3: Codex
-    updateStep(3, { status: 'running', detail: '正在检测...' });
-    try {
-      const codex = await api.checkCodex();
-      if (codex.installed) {
-        updateStep(3, { status: 'done', detail: codex.version || undefined });
-      } else {
-        updateStep(3, { status: 'running', detail: '正在打开安装程序...' });
-        setWaitingInstall('Codex');
-        await api.installCodex();
-        updateStep(3, { detail: '等待安装完成...' });
-        const result = await waitForInstall(api.checkCodex);
-        setWaitingInstall(null);
-        if (result) {
-          updateStep(3, { status: 'done', detail: result.version || undefined });
-        } else {
-          updateStep(3, { status: 'error', detail: '安装超时，请手动安装后重试' });
-          setIsRunning(false);
-          return;
-        }
-      }
-    } catch (err: any) {
-      updateStep(3, { status: 'error', detail: err?.toString() });
-      setIsRunning(false);
-      return;
-    }
-
-    // All done - mark setup complete
     setIsRunning(false);
     localStorage.setItem('local_deps_ok', '1');
     onComplete();
@@ -213,8 +191,27 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
         </div>
 
         {waitingInstall && (
-          <div className="text-center text-[12px] text-[#6b9fff] animate-pulse">
-            请完成 {waitingInstall} 安装程序，安装后将自动继续...
+          <div className="space-y-2">
+            <div className="text-center text-[12px] text-[#6b9fff] animate-pulse">
+              请完成 {waitingInstall} 安装程序，安装后将自动继续...
+            </div>
+            <div className="flex justify-center gap-3">
+              <button
+                onClick={() => { skipSignalRef.current = 'current'; }}
+                className="px-3 py-1 text-[11px] text-[#999999] hover:text-[#DCE4EE] underline-offset-2 hover:underline transition-colors"
+              >
+                跳过此项
+              </button>
+              <button
+                onClick={() => { skipSignalRef.current = 'all'; }}
+                className="px-3 py-1 text-[11px] text-[#999999] hover:text-[#DCE4EE] underline-offset-2 hover:underline transition-colors"
+              >
+                全部跳过
+              </button>
+            </div>
+            <p className="text-center text-[10px] text-[#666666]">
+              网络受限时可跳过 Codex 等耗时项；之后仍可在「项目编辑」内手动配置
+            </p>
           </div>
         )}
 
