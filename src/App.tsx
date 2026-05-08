@@ -2,11 +2,11 @@ import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import { listen } from '@tauri-apps/api/event';
 import { ProjectListPage } from './pages/ProjectListPage';
-import { ProjectDetailPage } from './pages/ProjectDetailPage';
 import { ProjectEditPage } from './pages/ProjectEditPage';
 import { ProjectCreatePage } from './pages/ProjectCreatePage';
 import { UpdateNotification } from './components/UpdateNotification';
 import { VersionManager } from './components/VersionManager';
+import { ToastHost } from './components/ToastHost';
 import { useUpdateChecker } from './hooks/useUpdateChecker';
 import './index.css';
 
@@ -124,11 +124,11 @@ function AppContent() {
           onRetry={updateChecker.retry}
         />
         {isDragging && (
-          <div className="fixed inset-0 z-50 bg-[#212121]/90 flex items-center justify-center pointer-events-none">
-            <div className="border-2 border-dashed border-[#3b82f6] rounded-xl p-12 text-center">
-              <div className="text-[48px] mb-4">📁</div>
-              <div className="text-[18px] text-[#3b82f6] font-semibold">拖放文件夹到此处</div>
-              <div className="text-[14px] text-[#999999] mt-2">将自动创建新项目</div>
+          <div className="fixed inset-0 z-50 bg-surface-base/90 flex items-center justify-center pointer-events-none backdrop-blur-sm">
+            <div className="border border-dashed border-accent rounded-lg px-10 py-8 text-center">
+              <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-text-tertiary mb-2">DROP HERE</div>
+              <div className="text-[16px] text-text-primary font-medium">拖放文件夹到此处</div>
+              <div className="text-[12px] text-text-tertiary mt-1">将自动创建新项目</div>
             </div>
           </div>
         )}
@@ -137,11 +137,12 @@ function AppContent() {
           <Route path="/" element={<Navigate to="/local" replace />} />
           <Route path="/local" element={<ProjectListPage />} />
           <Route path="/local/project/new" element={<ProjectCreatePage />} />
-          <Route path="/local/project/:id" element={<ProjectDetailPage />} />
+          <Route path="/local/project/:id" element={<ProjectEditPage />} />
           <Route path="/local/project/:id/edit" element={<ProjectEditPage />} />
         </Routes>
 
         <VersionManager />
+        <ToastHost />
       </div>
     </DragContext.Provider>
   );

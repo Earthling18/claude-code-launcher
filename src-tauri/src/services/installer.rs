@@ -105,6 +105,158 @@ impl Installer {
         }
     }
 
+    /// Reinstall Claude Code: uninstall + install in one terminal session.
+    /// This fixes broken installations (missing shim, partial install, npm cache issues).
+    pub fn reinstall_claude() -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let script = Self::generate_reinstall_script_windows("@anthropic-ai/claude-code", "Claude Code");
+            Self::execute_cmd_script(&script)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let script = Self::generate_reinstall_script_macos("@anthropic-ai/claude-code", "Claude Code");
+            Self::execute_terminal_script(&script)
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            Err("不支持的操作系统".to_string())
+        }
+    }
+
+    /// Reinstall Codex: uninstall + install in one terminal session.
+    pub fn reinstall_codex() -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            let script = Self::generate_reinstall_script_windows("@openai/codex", "Codex CLI");
+            Self::execute_cmd_script(&script)
+        }
+        #[cfg(target_os = "macos")]
+        {
+            let script = Self::generate_reinstall_script_macos("@openai/codex", "Codex CLI");
+            Self::execute_terminal_script(&script)
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            Err("不支持的操作系统".to_string())
+        }
+    }
+
+    #[cfg(windows)]
+    fn generate_reinstall_script_windows(pkg: &str, label: &str) -> String {
+        // IMPORTANT — keep this script ASCII-only:
+        //   1. The bat file is written as UTF-8 by Rust. Windows cmd reads bat files using
+        //      the system code page (cp936 on Chinese Windows). UTF-8 bytes get
+        //      misinterpreted, breaking script parsing — cmd may silently abort
+        //      ("黑屏啥都没有" symptom). chcp 65001 does NOT fix this; it only affects
+        //      output rendering, not how the bat file itself is decoded.
+        //   2. npm on Windows is `npm.cmd`. Calling another batch from a batch WITHOUT
+        //      `call` causes the parent batch to exit early. Always use `call npm ...`.
+        format!(
+            r#"@echo off
+color 0F
+title Reinstall {label}
+echo.
+echo ============================================
+echo   Reinstall {label}
+echo   {pkg}
+echo ============================================
+echo.
+
+where npm >nul 2>nul
+if %errorlevel% neq 0 (
+    if exist "C:\Program Files\nodejs\npm.cmd" (
+        set "NPM_CMD=C:\Program Files\nodejs\npm.cmd"
+    ) else (
+        echo [ERROR] npm not found. Please install Node.js first.
+        echo.
+        pause
+        exit /b 1
+    )
+) else (
+    set "NPM_CMD=npm"
+)
+
+echo [Step 1/2] Uninstalling existing version...
+echo ^> %NPM_CMD% uninstall -g {pkg}
+echo.
+call %NPM_CMD% uninstall -g {pkg}
+echo.
+echo --------------------------------------------
+echo.
+
+echo [Step 2/2] Installing fresh copy...
+echo ^> %NPM_CMD% install -g {pkg}@latest
+echo.
+call %NPM_CMD% install -g {pkg}@latest
+set RESULT=%errorlevel%
+echo.
+
+echo ============================================
+if %RESULT% equ 0 (
+    echo   [OK] {label} reinstall completed!
+) else (
+    echo   [FAILED] Reinstall failed ^(exit code %RESULT%^).
+    echo   Check the npm error messages above.
+)
+echo ============================================
+echo.
+pause
+"#,
+            pkg = pkg,
+            label = label
+        )
+    }
+
+    #[cfg(target_os = "macos")]
+    fn generate_reinstall_script_macos(pkg: &str, label: &str) -> String {
+        format!(
+            r#"
+echo ""
+echo "============================================"
+echo "  Reinstall {label}"
+echo "  {pkg}"
+echo "============================================"
+echo ""
+
+if ! command -v npm > /dev/null 2>&1; then
+    echo "[ERROR] npm not found. Please install Node.js first."
+    echo ""
+    read -p "Press Enter to close..."
+    exit 1
+fi
+
+echo "[Step 1/2] Uninstalling existing version..."
+echo "> npm uninstall -g {pkg}"
+echo ""
+npm uninstall -g {pkg} || true
+echo ""
+echo "--------------------------------------------"
+echo ""
+
+echo "[Step 2/2] Installing fresh copy..."
+echo "> npm install -g {pkg}@latest"
+echo ""
+npm install -g {pkg}@latest
+RESULT=$?
+echo ""
+
+echo "============================================"
+if [ $RESULT -eq 0 ]; then
+    echo "  [OK] {label} reinstall completed!"
+else
+    echo "  [FAILED] Reinstall failed (exit code $RESULT)."
+    echo "  Check the npm error messages above."
+fi
+echo "============================================"
+echo ""
+read -p "Press Enter to close..."
+"#,
+            pkg = pkg,
+            label = label
+        )
+    }
+
     pub fn install_gitbash() -> Result<(), String> {
         #[cfg(windows)]
         {
@@ -800,12 +952,43 @@ read -p "按回车键关闭此窗口..."
     #[cfg(windows)]
     fn execute_powershell_script(script: &str) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
-        const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+        use std::io::Write;
+        // Hide the launcher cmd; the visible PowerShell window is opened by `start`.
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-        Command::new("powershell")
-            .arg("-Command")
-            .arg(script)
-            .creation_flags(CREATE_NEW_CONSOLE)
+        // Save the script to a .ps1 file so we can launch it via `start` (avoiding
+        // the direct-spawn path that gets intercepted by Windows Terminal). Same
+        // workaround as execute_cmd_script. Unique filename per invocation prevents
+        // concurrent installs from overwriting each other's script mid-run.
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let temp_dir = std::env::temp_dir();
+        let ps1_file = temp_dir.join(format!("cclauncher_install_{}.ps1", stamp));
+
+        {
+            let mut file = std::fs::File::create(&ps1_file)
+                .map_err(|e| format!("无法创建临时 PS 脚本文件: {}", e))?;
+            // PowerShell `-File` reads the script with the system ANSI codepage by default
+            // (cp936 on Chinese Windows), which mangles UTF-8 Chinese into mojibake.
+            // Writing a UTF-8 BOM first makes PowerShell auto-detect UTF-8.
+            file.write_all(&[0xEF, 0xBB, 0xBF])
+                .map_err(|e| format!("无法写入 PS 脚本 BOM: {}", e))?;
+            file.write_all(script.as_bytes())
+                .map_err(|e| format!("无法写入 PS 脚本文件: {}", e))?;
+            file.sync_all().ok();
+        }
+
+        let ps1 = ps1_file.to_str().unwrap();
+        // cmd /c start "" powershell -NoExit -ExecutionPolicy Bypass -File "<ps1>"
+        let cmdline = format!(
+            r#"/c start "" powershell -NoExit -ExecutionPolicy Bypass -File "{}""#,
+            ps1
+        );
+        Command::new("cmd")
+            .raw_arg(&cmdline)
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| format!("无法启动PowerShell: {}", e))?;
 
@@ -816,19 +999,42 @@ read -p "按回车键关闭此窗口..."
     fn execute_cmd_script(script: &str) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
         use std::io::Write;
-        const CREATE_NEW_CONSOLE: u32 = 0x00000010;
+        // The launcher cmd itself runs hidden; the visible console is opened by `start`.
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+        // Unique per invocation so concurrent installs don't overwrite each other's
+        // bat file mid-run (which causes cmd to read corrupted lines like `cho.`).
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
         let temp_dir = std::env::temp_dir();
-        let batch_file = temp_dir.join("claude_install.bat");
+        let batch_file = temp_dir.join(format!("cclauncher_install_{}.bat", stamp));
 
-        let mut file = std::fs::File::create(&batch_file)
-            .map_err(|e| format!("无法创建临时批处理文件: {}", e))?;
-        file.write_all(script.as_bytes())
-            .map_err(|e| format!("无法写入批处理文件: {}", e))?;
+        {
+            let mut file = std::fs::File::create(&batch_file)
+                .map_err(|e| format!("无法创建临时批处理文件: {}", e))?;
+            file.write_all(script.as_bytes())
+                .map_err(|e| format!("无法写入批处理文件: {}", e))?;
+            file.sync_all().ok();
+        } // explicit drop so the file handle is closed before cmd reads it
 
+        // Why this command line:
+        //   Direct `Command::new("cmd").creation_flags(CREATE_NEW_CONSOLE)` can be
+        //   intercepted by the system's "Default Terminal Application" (Windows Terminal)
+        //   and routed to a window that fails to render output. Going through `start`
+        //   uses ShellExecute — the same path Explorer's double-click takes, which works
+        //   reliably even when the direct-spawn path is broken.
+        //
+        // We build the command line via raw_arg so quoting is exact:
+        //   cmd /c start "" cmd /k "C:\path\to\claude_install.bat"
+        // The empty `""` is `start`'s window-title argument (omitting it would treat the
+        // bat path as the title and fail to launch).
+        let bat = batch_file.to_str().unwrap();
+        let cmdline = format!(r#"/c start "" cmd /k "{}""#, bat);
         Command::new("cmd")
-            .args(&["/k", batch_file.to_str().unwrap()])
-            .creation_flags(CREATE_NEW_CONSOLE)
+            .raw_arg(&cmdline)
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| format!("无法启动CMD: {}", e))?;
 
@@ -839,9 +1045,13 @@ read -p "按回车键关闭此窗口..."
     fn execute_terminal_script(script: &str) -> Result<(), String> {
         use std::io::Write;
 
-        // Create temp script file
+        // Unique per invocation so concurrent installs don't overwrite each other.
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
         let temp_dir = std::env::temp_dir();
-        let script_file = temp_dir.join("claude_install.sh");
+        let script_file = temp_dir.join(format!("cclauncher_install_{}.sh", stamp));
 
         let mut file = std::fs::File::create(&script_file)
             .map_err(|e| format!("无法创建临时脚本文件: {}", e))?;

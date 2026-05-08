@@ -30,6 +30,13 @@ pub struct ProjectConfig {
     pub codex_api_key: String,
     #[serde(default = "default_custom_cli")]
     pub custom_cli: String,
+
+    /// Reference to a ProxyPreset (claude/codex modes). When set, takes precedence over `proxy` / `codex_api_key`.
+    #[serde(default)]
+    pub proxy_preset_id: Option<String>,
+    /// Reference to a ModelPreset (custom mode). When set, takes precedence over `model` / `base_url` / `token`.
+    #[serde(default)]
+    pub model_preset_id: Option<String>,
 }
 
 impl ProjectConfig {
@@ -46,12 +53,14 @@ impl Default for ProjectConfig {
         Self {
             mode: "claude".to_string(),
             proxy: String::new(),
-            model: "qwen3-coder-480b-a35b".to_string(),
-            base_url: "http://litellm.uattest.weoa.com".to_string(),
+            model: String::new(),
+            base_url: String::new(),
             token: String::new(),
             skip_permissions: true,
             codex_api_key: String::new(),
             custom_cli: "claude".to_string(),
+            proxy_preset_id: None,
+            model_preset_id: None,
         }
     }
 }

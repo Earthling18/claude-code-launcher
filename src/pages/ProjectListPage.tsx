@@ -16,28 +16,25 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { projectApi, api } from '../api';
+import { projectApi, api, presetsApi } from '../api';
+import { toast } from '../lib/toast';
 import { DependencyFrame } from '../components/DependencyFrame';
 import { LocalSetupWizard } from '../components/LocalSetupWizard';
 import { ProjectCard } from '../components/ProjectCard';
 import { SortableProjectCard } from '../components/SortableProjectCard';
+import { PresetManagerDialog } from '../components/PresetManagerDialog';
 import type { Project } from '../types/project';
+import type { GlobalPresets } from '../types/presets';
 
-// Sort projects according to the priority rules
+// Sort projects:
+//   1. Pinned projects first (sorted by pinned_at desc — newest first)
+//   2. Non-pinned projects (default project included, NOT special-cased) sorted by sort_order asc
 function sortProjects(projects: Project[]): Project[] {
   return [...projects].sort((a, b) => {
-    // 1. Default project fixed at first
-    if (a.is_default !== b.is_default) return a.is_default ? -1 : 1;
-
-    // 2. Pinned projects come before non-pinned
     if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
-
-    // 3. Pinned projects sorted by pinned_at descending (newer first)
     if (a.is_pinned && b.is_pinned) {
       return (b.pinned_at || 0) - (a.pinned_at || 0);
     }
-
-    // 4. Non-pinned projects sorted by sort_order ascending
     return a.sort_order - b.sort_order;
   });
 }
@@ -50,6 +47,8 @@ export const ProjectListPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [showPresets, setShowPresets] = useState(false);
+  const [presets, setPresets] = useState<GlobalPresets | null>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -65,17 +64,12 @@ export const ProjectListPage: React.FC = () => {
   // Sorted projects
   const sortedProjects = useMemo(() => sortProjects(projects), [projects]);
 
-  // Split into groups for drag constraints
+  // Split into groups for drag constraints. Default project sits in its natural group based on is_pinned.
   const { pinnedProjects, normalProjects } = useMemo(() => {
-    const pinned = sortedProjects.filter(p => p.is_pinned && !p.is_default);
-    const normal = sortedProjects.filter(p => !p.is_pinned && !p.is_default);
+    const pinned = sortedProjects.filter(p => p.is_pinned);
+    const normal = sortedProjects.filter(p => !p.is_pinned);
     return { pinnedProjects: pinned, normalProjects: normal };
   }, [sortedProjects]);
-
-  const defaultProject = useMemo(
-    () => sortedProjects.find(p => p.is_default),
-    [sortedProjects]
-  );
 
   const activeProject = useMemo(
     () => (activeId ? projects.find(p => p.id === activeId) : null),
@@ -85,7 +79,10 @@ export const ProjectListPage: React.FC = () => {
   useEffect(() => {
     loadProjects();
     loadPlatform();
+    presetsApi.getAll().then(setPresets).catch(() => setPresets(null));
   }, []);
+
+  const reloadPresets = () => presetsApi.getAll().then(setPresets).catch(() => {});
 
   const loadPlatform = async () => {
     try {
@@ -111,6 +108,12 @@ export const ProjectListPage: React.FC = () => {
 
   const handleLaunch = async (id: string) => {
     try {
+      await presetsApi.validateLaunch(id);
+    } catch (err: any) {
+      toast.error(`${err}`);
+      return;
+    }
+    try {
       await projectApi.launch(id);
       // Silently refresh project data without loading state to preserve scroll position
       try {
@@ -118,11 +121,11 @@ export const ProjectListPage: React.FC = () => {
         setProjects(data);
       } catch (_) {}
     } catch (err: any) {
-      alert(`启动失败: ${err}`);
+      toast.error(`启动失败: ${err}`);
     }
   };
 
-  const handleEdit = (id: string) => {
+  const handleSelect = (id: string) => {
     navigate(`/local/project/${id}/edit`);
   };
 
@@ -144,9 +147,6 @@ export const ProjectListPage: React.FC = () => {
     const overProject = projects.find(p => p.id === over.id);
 
     if (!activeProject || !overProject) return;
-
-    // Don't allow dragging default projects
-    if (activeProject.is_default) return;
 
     // Don't allow dragging between pinned and non-pinned groups
     if (activeProject.is_pinned !== overProject.is_pinned) return;
@@ -235,11 +235,9 @@ export const ProjectListPage: React.FC = () => {
   // Show setup wizard for first-time users
   if (!depsReady) {
     return (
-      <div className="h-screen bg-[#212121] text-[#DCE4EE] flex flex-col overflow-hidden">
-        <div className="flex-shrink-0 px-6 py-3 border-b border-[#3a3a3a]">
-          <div className="flex items-center gap-3">
-            <h2 className="text-base font-bold">本地启动</h2>
-          </div>
+      <div className="h-screen flex flex-col overflow-hidden">
+        <div className="flex-shrink-0 px-6 py-4 border-b border-line">
+          <h2 className="text-[14px] font-semibold text-text-primary tracking-wide">本地启动</h2>
         </div>
         <div className="flex-1">
           <LocalSetupWizard onComplete={() => setDepsReady(true)} />
@@ -248,58 +246,71 @@ export const ProjectListPage: React.FC = () => {
     );
   }
 
+  const totalCount = sortedProjects.length;
+
   return (
-    <div className="h-screen bg-[#212121] text-[#DCE4EE] flex flex-col overflow-hidden">
-      {/* Top bar — fixed */}
-      <div className="flex-shrink-0 px-6 py-3 border-b border-[#3a3a3a]">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <h2 className="text-base font-bold">本地启动</h2>
+    <div className="h-screen flex flex-col overflow-hidden">
+      {/* Top bar */}
+      <div className="flex-shrink-0 px-5 py-2.5 border-b border-line">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-baseline gap-3">
+            <h2 className="text-[13px] font-semibold text-text-primary">本地启动</h2>
+            <span className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-text-tertiary">
+              {totalCount}
+            </span>
           </div>
-          <button
-            onClick={handleCreate}
-            className="px-4 py-2 text-[12px] bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded"
-          >
-            + 新建项目
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowPresets(true)}
+              className="btn btn-secondary"
+              title="管理模型 / 代理配置"
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+              管理模型
+            </button>
+            <button
+              onClick={handleCreate}
+              className="btn btn-primary"
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              新建项目
+            </button>
+          </div>
         </div>
       </div>
 
+      <PresetManagerDialog
+        isOpen={showPresets}
+        kind="model"
+        showTabs
+        onClose={() => { setShowPresets(false); reloadPresets(); }}
+      />
+
       <div className="flex-1 overflow-auto">
-        <div className="max-w-full p-4">
-          {/* 依赖检测面板 — 返回用户静默检测 */}
+        <div className="px-5 pt-2 pb-5">
           <DependencyFrame projects={projects} platform={platform} />
 
-          {/* 项目列表面板 */}
-          <div className="px-5 py-3">
-            <div className="card-frame">
-
-            {/* 加载状态 */}
+          <div className="mt-3">
             {loading && (
-              <div className="text-center py-8 text-[#999999]">
-                加载中...
-              </div>
+              <div className="text-center py-12 text-[12px] text-text-tertiary">加载中…</div>
             )}
 
-            {/* 错误信息 */}
             {error && (
-              <div className="text-center py-8 text-red-500">
+              <div className="text-center py-12 text-[12px] text-error">
                 {error}
-                <button
-                  onClick={loadProjects}
-                  className="ml-2 text-[#3b82f6] hover:underline"
-                >
-                  重试
-                </button>
+                <button onClick={loadProjects} className="ml-2 text-accent hover:underline">重试</button>
               </div>
             )}
 
-            {/* 项目列表 */}
             {!loading && !error && (
               <>
                 {sortedProjects.length === 0 ? (
-                  <div className="text-center py-8 text-[#999999]">
-                    暂无项目，点击上方按钮创建
+                  <div className="flex flex-col items-center justify-center py-16">
+                    <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-text-tertiary mb-2">No projects yet</div>
+                    <p className="text-[12.5px] text-text-secondary mb-4">点击右上角「新建项目」开始</p>
                   </div>
                 ) : (
                   <DndContext
@@ -308,64 +319,64 @@ export const ProjectListPage: React.FC = () => {
                     onDragStart={handleDragStart}
                     onDragEnd={handleDragEnd}
                   >
-                    <div className="grid grid-cols-2 gap-4">
-                      {/* Default project - not draggable */}
-                      {defaultProject && (
-                        <div>
-                          <ProjectCard
-                            project={defaultProject}
-                            platform={platform}
-                            onLaunch={handleLaunch}
-                            onEdit={handleEdit}
-                          />
-                        </div>
-                      )}
-
-                      {/* Pinned projects - draggable within group */}
-                      {pinnedProjects.length > 0 && (
+                    {/* Pinned section */}
+                    {pinnedProjects.length > 0 && (
+                      <section className="mb-5">
+                        <SectionLabel>置顶 · {pinnedProjects.length}</SectionLabel>
                         <SortableContext
                           items={pinnedProjects.map(p => p.id)}
                           strategy={verticalListSortingStrategy}
                         >
-                          {pinnedProjects.map(project => (
-                            <SortableProjectCard
-                              key={project.id}
-                              project={project}
-                              platform={platform}
-                              onLaunch={handleLaunch}
-                              onEdit={handleEdit}
-                            />
-                          ))}
+                          <div className="grid grid-cols-2 gap-2.5">
+                            {pinnedProjects.map((project, i) => (
+                              <div key={project.id} className="fade-up" style={{ animationDelay: `${i * 24}ms` }}>
+                                <SortableProjectCard
+                                  project={project}
+                                  platform={platform}
+                                  presets={presets}
+                                  onLaunch={handleLaunch}
+                                  onSelect={handleSelect}
+                                />
+                              </div>
+                            ))}
+                          </div>
                         </SortableContext>
-                      )}
+                      </section>
+                    )}
 
-                      {/* Normal projects - draggable within group */}
-                      {normalProjects.length > 0 && (
+                    {/* Non-pinned section (default project participates as a normal one) */}
+                    {normalProjects.length > 0 && (
+                      <section>
+                        {pinnedProjects.length > 0 && <SectionLabel>项目 · {normalProjects.length}</SectionLabel>}
                         <SortableContext
                           items={normalProjects.map(p => p.id)}
                           strategy={verticalListSortingStrategy}
                         >
-                          {normalProjects.map(project => (
-                            <SortableProjectCard
-                              key={project.id}
-                              project={project}
-                              platform={platform}
-                              onLaunch={handleLaunch}
-                              onEdit={handleEdit}
-                            />
-                          ))}
+                          <div className="grid grid-cols-2 gap-2.5">
+                            {normalProjects.map((project, i) => (
+                              <div key={project.id} className="fade-up" style={{ animationDelay: `${(pinnedProjects.length + i) * 24}ms` }}>
+                                <SortableProjectCard
+                                  project={project}
+                                  platform={platform}
+                                  presets={presets}
+                                  onLaunch={handleLaunch}
+                                  onSelect={handleSelect}
+                                />
+                              </div>
+                            ))}
+                          </div>
                         </SortableContext>
-                      )}
-                    </div>
+                      </section>
+                    )}
 
-                    {/* Drag overlay for better visual feedback */}
                     <DragOverlay>
                       {activeProject ? (
                         <ProjectCard
                           project={activeProject}
                           platform={platform}
+                          presets={presets}
                           onLaunch={() => {}}
-                          onEdit={() => {}}
+                          onSelect={() => {}}
                           isDragging
                         />
                       ) : null}
@@ -376,8 +387,14 @@ export const ProjectListPage: React.FC = () => {
             )}
           </div>
         </div>
-        </div>
       </div>
     </div>
   );
 };
+
+const SectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
+  <div className="flex items-baseline gap-3 mb-2 px-0.5">
+    <span className="font-mono text-[10px] uppercase tracking-[0.20em] text-text-tertiary">{children}</span>
+    <div className="flex-1 h-px bg-line" />
+  </div>
+);

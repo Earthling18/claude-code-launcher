@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { DependencyStatus, AppConfig } from './types';
 import type { Project, ProjectConfig, ProjectOrderItem, PinnedOrderItem, ConfigScanResult } from './types/project';
+import type { GlobalPresets, ProxyPreset, ModelPreset } from './types/presets';
 
 export const api = {
   // 依赖检测
@@ -23,6 +24,8 @@ export const api = {
   updateGitbash: () => invoke('update_gitbash'),
   installCodex: () => invoke('install_codex'),
   updateCodex: () => invoke('update_codex'),
+  reinstallClaude: () => invoke('reinstall_claude'),
+  reinstallCodex: () => invoke('reinstall_codex'),
 
   // 启动
   launchClaudeCode: (config: Record<string, string>) =>
@@ -113,5 +116,30 @@ export const dialogApi = {
 // System API
 export const systemApi = {
   getHomeDirectory: () => invoke<string>('get_home_directory'),
+};
+
+// Global presets API (proxy + model)
+export const presetsApi = {
+  getAll: () => invoke<GlobalPresets>('get_global_presets'),
+
+  createProxy: (name: string, url: string) =>
+    invoke<ProxyPreset>('create_proxy_preset', { name, url }),
+  updateProxy: (id: string, name: string, url: string) =>
+    invoke<ProxyPreset>('update_proxy_preset', { id, name, url }),
+  deleteProxy: (id: string) => invoke<void>('delete_proxy_preset', { id }),
+  countProxyRefs: (id: string) => invoke<number>('count_proxy_preset_refs', { id }),
+
+  createModel: (name: string, model: string, baseUrl: string, token: string) =>
+    invoke<ModelPreset>('create_model_preset', { name, model, baseUrl, token }),
+  updateModel: (id: string, name: string, model: string, baseUrl: string, token: string) =>
+    invoke<ModelPreset>('update_model_preset', { id, name, model, baseUrl, token }),
+  deleteModel: (id: string) => invoke<void>('delete_model_preset', { id }),
+  countModelRefs: (id: string) => invoke<number>('count_model_preset_refs', { id }),
+
+  getLastUsed: () => invoke<ProjectConfig | null>('get_last_used_project_config'),
+  setLastUsed: (config: ProjectConfig) =>
+    invoke<void>('set_last_used_project_config', { config }),
+
+  validateLaunch: (id: string) => invoke<void>('validate_project_launch', { id }),
 };
 

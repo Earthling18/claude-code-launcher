@@ -192,6 +192,24 @@ impl ConfigStorage {
                 project.config.normalize_legacy_mode();
             }
 
+            // One-shot legacy → presets migration. Only runs if presets.json doesn't exist yet.
+            // Failures are logged and don't block startup; legacy fields stay as fallback.
+            if let Some(presets) = crate::services::presets_storage::migrate_legacy_to_presets(
+                &mut config.projects,
+            ) {
+                if let Err(e) = crate::services::PresetsStorage::save(&presets) {
+                    log::warn!("Preset migration save failed: {}", e);
+                } else if let Err(e) = Self::save_config_v2(&config) {
+                    log::warn!("Preset migration: save projects failed: {}", e);
+                } else {
+                    log::info!(
+                        "Preset migration done: {} proxies, {} models",
+                        presets.proxies.len(),
+                        presets.models.len()
+                    );
+                }
+            }
+
             Ok(config)
         } else {
             // Migrate from v1
@@ -363,13 +381,15 @@ impl ConfigStorage {
         Ok(())
     }
 
-    /// Update sort order for non-pinned projects (batch)
+    /// Update sort order for non-pinned projects (batch).
+    /// Default project participates like any other project — only pinned ones are excluded
+    /// since they sort by pinned_at instead.
     pub fn update_projects_order(orders: Vec<ProjectOrderItem>) -> Result<(), String> {
         let mut config = Self::load_config_v2()?;
 
         for order_item in orders {
             if let Some(project) = config.projects.iter_mut().find(|p| p.id == order_item.id) {
-                if !project.is_pinned && !project.is_default {
+                if !project.is_pinned {
                     project.sort_order = order_item.sort_order;
                 }
             }

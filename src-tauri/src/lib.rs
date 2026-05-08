@@ -71,6 +71,8 @@ pub fn run() {
             commands::check_codex_with_update,
             commands::install_codex,
             commands::update_codex,
+            commands::reinstall_claude,
+            commands::reinstall_codex,
             commands::launch_claude_code,
             commands::generate_powershell_command,
             commands::generate_cmd_command,
@@ -111,6 +113,19 @@ pub fn run() {
             commands::is_portable_mode,
             commands::get_portable_download_url,
             commands::download_and_run_installer,
+            // Global presets commands
+            commands::get_global_presets,
+            commands::create_proxy_preset,
+            commands::update_proxy_preset,
+            commands::delete_proxy_preset,
+            commands::count_proxy_preset_refs,
+            commands::create_model_preset,
+            commands::update_model_preset,
+            commands::delete_model_preset,
+            commands::count_model_preset_refs,
+            commands::get_last_used_project_config,
+            commands::set_last_used_project_config,
+            commands::validate_project_launch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

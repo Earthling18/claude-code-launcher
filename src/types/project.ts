@@ -7,6 +7,8 @@ export interface ProjectConfig {
   skip_permissions: boolean;
   codex_api_key: string;
   custom_cli: 'claude' | 'codex';
+  proxy_preset_id?: string | null;
+  model_preset_id?: string | null;
 }
 
 export interface Project {
@@ -73,12 +75,14 @@ export interface ConfigScanResult {
 }
 
 export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
-  mode: 'claude',
+  mode: 'custom',
   proxy: '',
-  model: 'qwen3-coder-480b-a35b',
-  base_url: 'http://litellm.uattest.weoa.com',
+  model: '',
+  base_url: '',
   token: '',
   skip_permissions: true,
   codex_api_key: '',
   custom_cli: 'claude',
+  proxy_preset_id: null,
+  model_preset_id: null,
 };

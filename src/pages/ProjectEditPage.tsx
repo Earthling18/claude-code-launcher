@@ -1,9 +1,11 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { projectApi } from '../api';
+import { projectApi, presetsApi, api } from '../api';
 import { ProjectForm } from '../components/ProjectForm';
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { CopyCommandButton } from '../components/CopyCommandButton';
 import { useDragContext } from '../App';
+import { toast } from '../lib/toast';
 import type { Project, ProjectConfig } from '../types/project';
 
 export const ProjectEditPage: React.FC = () => {
@@ -16,6 +18,11 @@ export const ProjectEditPage: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [droppedWorkingDirectory, setDroppedWorkingDirectory] = useState<string | null>(null);
+  const [platform, setPlatform] = useState<string>('windows');
+
+  useEffect(() => {
+    api.getPlatform().then(setPlatform).catch(() => {});
+  }, []);
 
   // 用 ref 存储 handler 逻辑，确保引用稳定
   const dragHandlerRef = useRef<((path: string) => boolean) | null>(null);
@@ -70,10 +77,14 @@ export const ProjectEditPage: React.FC = () => {
         config,
         project.is_default ? undefined : isPinned
       );
-      alert('项目配置已更新');
+      // Persist as last-used so the next "新建项目" pre-fills with this choice.
+      presetsApi.setLastUsed(config).catch((err) => {
+        console.error('Failed to save last_used_config:', err);
+      });
+      toast.success('项目配置已更新');
       navigate('/local');
     } catch (err: any) {
-      alert(`保存失败: ${err}`);
+      toast.error(`保存失败: ${err}`);
     } finally {
       setSaving(false);
     }
@@ -96,7 +107,7 @@ export const ProjectEditPage: React.FC = () => {
       navigate('/local');
     } catch (err: any) {
       setShowDeleteConfirm(false);
-      alert(`删除失败: ${err}`);
+      toast.error(`删除失败: ${err}`);
     }
   };
 
@@ -106,64 +117,64 @@ export const ProjectEditPage: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="h-screen bg-[#212121] text-[#DCE4EE] flex items-center justify-center">
-        <div className="text-[#999999]">加载中...</div>
+      <div className="h-screen flex items-center justify-center">
+        <div className="font-mono text-[11px] text-text-tertiary uppercase tracking-[0.2em]">loading…</div>
       </div>
     );
   }
 
   if (error || !project) {
     return (
-      <div className="h-screen bg-[#212121] text-[#DCE4EE] flex flex-col items-center justify-center">
-        <div className="text-red-500 mb-4">{error || '项目不存在'}</div>
-        <button
-          onClick={handleCancel}
-          className="px-4 py-2 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded"
-        >
-          返回列表
-        </button>
+      <div className="h-screen flex flex-col items-center justify-center">
+        <div className="text-error mb-4 text-[13px]">{error || '项目不存在'}</div>
+        <button onClick={handleCancel} className="btn btn-secondary">返回列表</button>
       </div>
     );
   }
 
-  return (
-    <div className="h-screen bg-[#212121] text-[#DCE4EE] overflow-auto">
-      <div className="max-w-full p-4">
-        <div className="px-5 py-3">
-          <div className="card-frame">
-            {/* 标题栏 */}
-            <div className="flex items-center gap-4 mb-4">
-              <button
-                onClick={handleCancel}
-                className="text-[#3b82f6] hover:text-[#2563eb] text-[14px]"
-              >
-                ← 返回
-              </button>
-              <h2 className="text-base font-bold">编辑项目: {project.name}</h2>
-              {project.is_default && (
-                <span className="px-2 py-0.5 text-[10px] bg-green-600 text-white rounded">
-                  默认项目
-                </span>
-              )}
-            </div>
+  const handleLaunch = async () => {
+    try { await presetsApi.validateLaunch(project.id); }
+    catch (err: any) { toast.error(`${err}`); return; }
+    try { await projectApi.launch(project.id); }
+    catch (err: any) { toast.error(`启动失败: ${err}`); }
+  };
 
-            {/* 表单 */}
-            <ProjectForm
-              initialName={project.name}
-              initialWorkingDirectory={droppedWorkingDirectory || project.working_directory}
-              initialConfig={project.config}
-              initialIsPinned={project.is_pinned}
-              onSubmit={handleSubmit}
-              onCancel={handleCancel}
-              onDelete={project.is_default ? undefined : handleDeleteClick}
-              submitLabel={saving ? '保存中...' : '保存修改'}
-              isDefault={project.is_default}
-            />
-          </div>
+  return (
+    <div className="h-screen flex flex-col overflow-hidden">
+      <div className="flex-shrink-0 px-5 py-2.5 border-b border-line">
+        <div className="flex items-center gap-2">
+          <button onClick={handleCancel} className="btn btn-ghost btn-sm">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+            返回
+          </button>
+          <div className="h-4 w-px bg-line-strong mx-1" />
+          <span className="mode-dot" data-mode={project.config.mode} />
+          <h2 className="text-[13px] font-semibold text-text-primary truncate flex-1">{project.name}</h2>
+          {project.is_default && (
+            <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-text-tertiary border border-line-strong px-1.5 py-0.5 rounded-sm">默认</span>
+          )}
+          <button onClick={handleLaunch} className="btn btn-primary btn-sm">
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" style={{ color: 'var(--accent)' }}><path d="M8 5v14l11-7z" /></svg>
+            启动
+          </button>
+          <CopyCommandButton projectId={project.id} platform={platform} size="sm" />
         </div>
       </div>
 
-      {/* 删除确认对话框 */}
+      <div className="flex-1 overflow-auto px-5 py-5">
+        <ProjectForm
+          initialName={project.name}
+          initialWorkingDirectory={droppedWorkingDirectory || project.working_directory}
+          initialConfig={project.config}
+          initialIsPinned={project.is_pinned}
+          onSubmit={handleSubmit}
+          onCancel={handleCancel}
+          onDelete={project.is_default ? undefined : handleDeleteClick}
+          submitLabel={saving ? '保存中…' : '保存修改'}
+          isDefault={project.is_default}
+        />
+      </div>
+
       <ConfirmDialog
         isOpen={showDeleteConfirm}
         title="删除项目"

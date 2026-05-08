@@ -1,0 +1,71 @@
+/* Design tokens — Workshop Console */
+
+:root {
+  /* Surfaces (depth steps) — slightly lifted from near-black for comfortable reading */
+  --surface-base:  #181B21;
+  --surface-1:     #1E2128;
+  --surface-2:     #23272F;
+  --surface-3:     #2A2F38;
+  --surface-input: #14171D;
+
+  /* Lines */
+  --line-soft:    #2D323B;
+  --line-strong:  #3D434E;
+
+  /* Text — boosted contrast */
+  --text-primary:   #ECEAE2;
+  --text-secondary: #BDC2CB;
+  --text-tertiary:  #8E949E;
+  --text-disabled:  #5C616B;
+
+  /* Accent (single brand color) */
+  --accent:        #E8A547;
+  --accent-strong: #F4B65A;
+  --accent-deep:   #C9892F;
+  --accent-soft:   rgba(232, 165, 71, 0.12);
+  --accent-ring:   rgba(232, 165, 71, 0.32);
+
+  /* Mode colors (left edge bar / dot indicators) */
+  --mode-claude: #5EB3A7;  /* teal */
+  --mode-codex:  #B47FD6;  /* violet */
+  --mode-custom: #E8A547;  /* amber (== accent) */
+
+  /* States */
+  --ok:    #6BBF7A;
+  --warn:  #E8A547;
+  --error: #D6726E;
+  --info:  #6FA8DC;
+
+  /* Spacing scale (4 / 8 / 12 / 16 / 20 / 24 / 32) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+
+  /* Radius (consistent: small inputs 4, surfaces 6, modals 10) */
+  --radius-sm: 4px;
+  --radius:    6px;
+  --radius-lg: 10px;
+
+  /* Typography */
+  --font-sans: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", "Helvetica Neue", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas, "Courier New", monospace;
+
+  /* Motion */
+  --ease-out:    cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+
+  /* Shadows */
+  --shadow-card:  0 1px 0 rgba(255, 255, 255, 0.02) inset, 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-card-hover: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 8px 18px rgba(0, 0, 0, 0.55);
+  --shadow-elev:  0 14px 32px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-amber: 0 0 0 1px var(--accent), 0 8px 24px rgba(232, 165, 71, 0.18);
+  --shadow-focus: 0 0 0 2px var(--accent-ring);
+}

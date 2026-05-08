@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
-import { ccConfigApi } from '../api';
+import { ccConfigApi, api } from '../api';
+import { toast } from '../lib/toast';
 import type { Project, ConfigConflict, BomFileIssue, McpMisplaced } from '../types/project';
 
 interface CcConfigPanelProps {
@@ -22,6 +23,7 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
   const [mcpMisplaced, setMcpMisplaced] = useState<McpMisplaced[]>([]);
   const [scanning, setScanning] = useState(false);
   const [cleaning, setCleaning] = useState(false);
+  const [reinstallingCc, setReinstallingCc] = useState(false);
 
   const doScan = async () => {
     setScanning(true);
@@ -93,7 +95,7 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
       await ccConfigApi.cleanField(filePath, key);
       await doScan();
     } catch (err: any) {
-      alert(`清理失败: ${err}`);
+      toast.error(`清理失败: ${err}`);
     }
   };
 
@@ -126,10 +128,10 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
         }
         fixed++;
       }
-      alert(`已修复 ${fixed} 项问题`);
+      toast.success(`已修复 ${fixed} 项问题`);
       await doScan();
     } catch (err: any) {
-      alert(`修复失败: ${err}`);
+      toast.error(`修复失败: ${err}`);
     } finally {
       setCleaning(false);
     }
@@ -140,7 +142,7 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
       await ccConfigApi.fixBom(filePath);
       await doScan();
     } catch (err: any) {
-      alert(`修复失败: ${err}`);
+      toast.error(`修复失败: ${err}`);
     }
   };
 
@@ -149,7 +151,7 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
       await ccConfigApi.fixMcpMisplaced(filePath, targetPath);
       await doScan();
     } catch (err: any) {
-      alert(`修复失败: ${err}`);
+      toast.error(`修复失败: ${err}`);
     }
   };
 
@@ -158,7 +160,7 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
       await ccConfigApi.removeMcpServers(filePath);
       await doScan();
     } catch (err: any) {
-      alert(`清理失败: ${err}`);
+      toast.error(`清理失败: ${err}`);
     }
   };
 
@@ -166,7 +168,19 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
     try {
       await ccConfigApi.openFile(filePath);
     } catch (err: any) {
-      alert(`打开失败: ${err}`);
+      toast.error(`打开失败: ${err}`);
+    }
+  };
+
+  const handleReinstallClaude = async () => {
+    setReinstallingCc(true);
+    try {
+      await api.reinstallClaude();
+      toast.info('已打开重装窗口，请等待终端执行完毕');
+    } catch (err: any) {
+      toast.error(`重装失败: ${err}`);
+    } finally {
+      setReinstallingCc(false);
     }
   };
 
@@ -181,41 +195,46 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
   };
 
   return (
-    <div className="card-frame">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-[13px] font-bold">CC 配置检测</h2>
+    <div className="card p-4">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <button
-            onClick={doScan}
-            disabled={scanning}
-            className="px-3 py-1 text-[10px] bg-[#666666] hover:bg-[#555555] text-white rounded disabled:opacity-50"
-          >
-            {scanning ? '扫描中...' : '重新扫描'}
+          <span className={`dot ${totalIssues > 0 ? 'dot-warn' : 'dot-ok'}`} />
+          <h2 className="text-[13px] font-semibold text-text-primary">CC 修复</h2>
+        </div>
+        <button onClick={onClose} className="btn btn-ghost btn-sm">收起</button>
+      </div>
+
+      {/* Section 1: 安装修复 */}
+      <SectionHeader title="安装修复" />
+      <div className="mb-5 p-3 rounded border border-line bg-surface-1">
+        <p className="text-[11.5px] text-text-secondary mb-2.5 leading-snug">
+          如果 Claude Code 命令报错、卡住或行为异常，可尝试一次完整重装（卸载后重新安装）。
+        </p>
+        <button onClick={handleReinstallClaude} disabled={reinstallingCc} className="btn btn-secondary btn-sm">
+          {reinstallingCc ? '处理中…' : '重装 Claude Code'}
+        </button>
+      </div>
+
+      {/* Section 2: CC 配置修复 */}
+      <div className="flex items-center justify-between mb-1.5">
+        <SectionHeader title="CC 配置修复" inline />
+        <div className="flex items-center gap-1">
+          <button onClick={doScan} disabled={scanning} className="btn btn-ghost btn-sm">
+            {scanning ? '扫描中…' : '重新扫描'}
           </button>
           {totalFixable > 0 && (
-            <button
-              onClick={handleCleanAll}
-              disabled={cleaning}
-              className="px-3 py-1 text-[10px] bg-[#ef4444] hover:bg-[#dc2626] text-white rounded disabled:opacity-50"
-            >
-              {cleaning ? '修复中...' : '一键修复'}
+            <button onClick={handleCleanAll} disabled={cleaning} className="btn btn-secondary btn-sm">
+              {cleaning ? '修复中…' : `一键修复 ${totalFixable}`}
             </button>
           )}
-          <button
-            onClick={onClose}
-            className="text-[10px] text-[#cccccc] hover:text-white transition-colors"
-          >
-            收起
-          </button>
         </div>
       </div>
 
       {scanning && totalIssues === 0 ? (
-        <div className="text-[11px] text-[#999999] py-4 text-center">扫描中...</div>
+        <div className="text-[11.5px] text-text-tertiary py-3 text-center">扫描配置中…</div>
       ) : totalIssues === 0 ? (
-        <div className="text-[11px] text-[#10b981] py-4 text-center">
-          未检测到配置问题
-        </div>
+        <div className="text-[11.5px] text-ok py-3 text-center">✓ 未检测到配置问题</div>
       ) : (
         <div className="space-y-3">
           {/* Section 1: Config conflicts */}
@@ -344,3 +363,10 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
     </div>
   );
 };
+
+const SectionHeader: React.FC<{ title: string; inline?: boolean }> = ({ title, inline = false }) => (
+  <div className={`flex items-baseline gap-3 ${inline ? '' : 'mb-2'}`}>
+    <h3 className="font-mono text-[10px] uppercase tracking-[0.20em] text-text-tertiary">{title}</h3>
+    {!inline && <div className="flex-1 h-px bg-line" />}
+  </div>
+);

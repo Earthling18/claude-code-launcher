@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { api } from '../api';
+import { toast } from '../lib/toast';
 import type { DependencyStatus } from '../types';
 import type { Project } from '../types/project';
 import { CcConfigPanel } from './CcConfigPanel';
@@ -119,14 +120,17 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
     }
   };
 
-  const handleAction = async (key: string, action: 'install' | 'update') => {
+  const handleAction = async (key: string, action: 'install' | 'update' | 'reinstall') => {
     const config = depConfig[key];
     setDeps(prev => ({ ...prev, [key]: { ...prev[key], loading: true } }));
     try {
       if (action === 'install') {
         await config.installFn();
-      } else {
+      } else if (action === 'update') {
         await config.updateFn();
+      } else if (action === 'reinstall') {
+        if (key === 'claude') await api.reinstallClaude();
+        else if (key === 'codex') await api.reinstallCodex();
       }
       // Re-check after action
       setTimeout(async () => {
@@ -138,7 +142,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
         }
       }, 2000);
     } catch (error: any) {
-      alert(`操作失败: ${error}`);
+      toast.error(`操作失败: ${error}`);
       setDeps(prev => ({ ...prev, [key]: { ...prev[key], loading: false } }));
     }
   };
@@ -159,7 +163,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
   // Show CC config panel
   if (showCcConfig) {
     return (
-      <div className="px-5 py-2">
+      <div>
         <CcConfigPanel
           projects={projects}
           platform={platform}
@@ -172,101 +176,134 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
   // Show expanded dependency detail panel
   if (expanded) {
     return (
-      <div className="px-5 py-2">
-        <div className="card-frame">
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-[13px] font-bold">
-              {hasIssues ? '⚠ 依赖需要处理' : '系统依赖'}
+      <div className="card p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className={`dot ${hasIssues ? 'dot-warn dot-pulse' : 'dot-ok'}`} />
+            <h2 className="text-[13px] font-semibold text-text-primary">
+              {hasIssues ? '依赖需要处理' : '系统依赖就绪'}
             </h2>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={checkWithUpdates}
-                disabled={checking}
-                className="px-3 py-1 text-[10px] bg-[#666666] hover:bg-[#555555] text-white rounded disabled:opacity-50"
-              >
-                {isInstalling ? '安装中...' : checking ? '检测中...' : '刷新'}
-              </button>
-              <button
-                onClick={() => setExpanded(false)}
-                className="text-[10px] text-[#cccccc] hover:text-white transition-colors"
-              >
-                收起
-              </button>
-            </div>
           </div>
-          <div className="flex items-center gap-4 flex-wrap">
-            {Object.entries(deps).map(([key, d]) => {
-              const config = depConfig[key];
-              return (
-                <div key={key} className="flex items-center gap-2">
-                  <span className="text-[10px]">{config.label}:</span>
-                  {!d.status ? (
-                    <span className="text-[#999999] text-[10px]">⏳</span>
-                  ) : !d.status.installed ? (
-                    <>
-                      <span className="text-red-500 text-[10px]">✗</span>
-                      {!d.loading && (
-                        <button onClick={() => handleAction(key, 'install')} className="px-3 py-1 text-[10px] bg-[#3b82f6] hover:bg-[#2563eb] rounded text-white">
-                          安装
-                        </button>
-                      )}
-                    </>
-                  ) : d.status.update_available ? (
-                    <>
-                      <span className="text-yellow-500 text-[10px]">⚠ {d.status.version} → {d.status.latest_version}</span>
-                      {!d.loading && (
-                        <button onClick={() => handleAction(key, 'update')} className="px-3 py-1 text-[10px] bg-[#3b82f6] hover:bg-[#2563eb] rounded text-white">
-                          更新
-                        </button>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-[#10b981] text-[10px]">✓ {d.status.version}</span>
-                  )}
-                  {d.loading && <span className="text-[10px] text-[#999999]">处理中...</span>}
-                </div>
-              );
-            })}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={checkWithUpdates}
+              disabled={checking}
+              className="btn btn-ghost btn-sm"
+            >
+              {isInstalling ? '安装中…' : checking ? '检测中…' : '刷新'}
+            </button>
+            <button
+              onClick={() => setExpanded(false)}
+              className="btn btn-ghost btn-sm"
+            >
+              收起
+            </button>
           </div>
+        </div>
+        <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
+          {Object.entries(deps).map(([key, d]) => {
+            const config = depConfig[key];
+            const dotClass = !d.status
+              ? 'dot'
+              : !d.status.installed
+              ? 'dot dot-error'
+              : d.status.update_available
+              ? 'dot dot-warn'
+              : 'dot dot-ok';
+            const canReinstall = (key === 'claude' || key === 'codex') && d.status?.installed;
+            return (
+              <div key={key} className="flex items-center gap-2.5">
+                <span className={`${dotClass} ${d.loading ? 'dot-pulse' : ''}`} />
+                <span className="text-[12px] text-text-primary w-20 flex-shrink-0">{config.label}</span>
+                {!d.status ? (
+                  <span className="font-mono text-[10.5px] text-text-tertiary">checking…</span>
+                ) : !d.status.installed ? (
+                  <>
+                    <span className="font-mono text-[10.5px] text-error/90">missing</span>
+                    {!d.loading && (
+                      <button onClick={() => handleAction(key, 'install')} className="btn btn-secondary btn-sm ml-auto">安装</button>
+                    )}
+                  </>
+                ) : d.status.update_available ? (
+                  <>
+                    <span className="font-mono text-[10.5px] text-warn">{d.status.version} → {d.status.latest_version}</span>
+                    {!d.loading && (
+                      <div className="ml-auto flex items-center gap-1">
+                        <button onClick={() => handleAction(key, 'update')} className="btn btn-secondary btn-sm">更新</button>
+                        {canReinstall && (
+                          <button onClick={() => handleAction(key, 'reinstall')} className="btn btn-ghost btn-sm" title="卸载后重新安装">重装</button>
+                        )}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span className="font-mono text-[10.5px] text-text-tertiary">{d.status.version}</span>
+                    {canReinstall && !d.loading && (
+                      <button
+                        onClick={() => handleAction(key, 'reinstall')}
+                        className="btn btn-ghost btn-sm ml-auto opacity-60 hover:opacity-100"
+                        title="卸载后重新安装"
+                      >
+                        重装
+                      </button>
+                    )}
+                  </>
+                )}
+                {d.loading && <span className="font-mono text-[10.5px] text-text-tertiary">…</span>}
+              </div>
+            );
+          })}
         </div>
       </div>
     );
   }
 
-  // Collapsed — show minimal bar with two buttons
+  // Collapsed — show minimal bar
+  const summaryDot = isInstalling
+    ? 'dot dot-info dot-pulse'
+    : checking
+    ? 'dot dot-info dot-pulse'
+    : hasIssues
+    ? 'dot dot-warn'
+    : 'dot dot-ok';
+  const summaryText = isInstalling
+    ? '安装中'
+    : checking
+    ? '检测中'
+    : hasIssues
+    ? '有更新可用'
+    : '依赖就绪';
+
   return (
-    <div className="px-5 py-1">
-      <div className="flex items-center justify-between py-1">
+    <div className="flex items-center justify-between py-1.5 px-1">
+      <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
-          {isInstalling
-            ? <span className="text-[10px] text-[#3b82f6]">⏳ 安装中...</span>
-            : checking
-            ? <span className="text-[10px] text-[#999999]">⏳ 检测中...</span>
-            : hasIssues
-            ? <span className="text-[10px] text-yellow-500">⚠ 有更新可用</span>
-            : <span className="text-[10px] text-[#10b981]">✓ 依赖就绪</span>
-          }
+          <span className={summaryDot} />
+          <span className="text-[11.5px] text-text-secondary">{summaryText}</span>
+        </div>
+        <div className="hidden md:flex items-center gap-3 font-mono text-[10px] text-text-tertiary">
           {Object.entries(deps).map(([key, d]) => (
-            <span key={key} className="text-[10px] text-[#999999]">
-              {depConfig[key].label} {d.status?.version}
+            <span key={key} className="lowercase">
+              {depConfig[key].label.toLowerCase()} <span className="text-text-disabled">{d.status?.version || '—'}</span>
             </span>
           ))}
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => { setExpanded(true); checkWithUpdates(); }}
-            disabled={checking}
-            className="text-[10px] text-[#cccccc] hover:text-white transition-colors disabled:opacity-50"
-          >
-            检查更新
-          </button>
-          <button
-            onClick={() => setShowCcConfig(true)}
-            className="text-[10px] text-[#cccccc] hover:text-white transition-colors"
-          >
-            CC修复
-          </button>
-        </div>
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => { setExpanded(true); checkWithUpdates(); }}
+          disabled={checking}
+          className="btn btn-ghost btn-sm"
+        >
+          检查更新
+        </button>
+        <button
+          onClick={() => setShowCcConfig(true)}
+          className="btn btn-ghost btn-sm"
+        >
+          CC 修复
+        </button>
       </div>
     </div>
   );

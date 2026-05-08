@@ -2,19 +2,22 @@ import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { ProjectCard } from './ProjectCard';
 import type { Project } from '../types/project';
+import type { GlobalPresets } from '../types/presets';
 
 interface SortableProjectCardProps {
   project: Project;
   platform: string;
+  presets?: GlobalPresets | null;
   onLaunch: (id: string) => void;
-  onEdit: (id: string) => void;
+  onSelect: (id: string) => void;
 }
 
 export const SortableProjectCard: React.FC<SortableProjectCardProps> = ({
   project,
   platform,
+  presets,
   onLaunch,
-  onEdit,
+  onSelect,
 }) => {
   const {
     attributes,
@@ -36,8 +39,9 @@ export const SortableProjectCard: React.FC<SortableProjectCardProps> = ({
       <ProjectCard
         project={project}
         platform={platform}
+        presets={presets}
         onLaunch={onLaunch}
-        onEdit={onEdit}
+        onSelect={onSelect}
         isDragging={isDragging}
       />
     </div>

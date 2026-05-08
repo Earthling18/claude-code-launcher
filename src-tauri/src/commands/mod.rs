@@ -1,6 +1,9 @@
 use crate::services::*;
 use crate::services::cc_config_checker::{ConfigScanResult, ProjectInfo, CleanTarget};
-use crate::models::{Project, ProjectConfig, CreateProjectInput, UpdateProjectInput, ProjectOrderItem, PinnedOrderItem};
+use crate::models::{
+    Project, ProjectConfig, CreateProjectInput, UpdateProjectInput, ProjectOrderItem, PinnedOrderItem,
+    GlobalPresets, ModelPreset, ProxyPreset,
+};
 use std::collections::HashMap;
 
 #[tauri::command]
@@ -87,6 +90,16 @@ pub async fn install_codex() -> Result<(), String> {
 #[tauri::command]
 pub async fn update_codex() -> Result<(), String> {
     Installer::update_codex()
+}
+
+#[tauri::command]
+pub async fn reinstall_claude() -> Result<(), String> {
+    Installer::reinstall_claude()
+}
+
+#[tauri::command]
+pub async fn reinstall_codex() -> Result<(), String> {
+    Installer::reinstall_codex()
 }
 
 #[tauri::command]
@@ -232,45 +245,80 @@ pub fn generate_project_bash_command(id: String) -> Result<String, String> {
     Ok(Launcher::generate_bash_command_with_dir(&config, Some(project.working_directory)))
 }
 
+/// Resolve effective proxy URL: preset wins, legacy field is fallback.
+fn resolve_proxy(project: &Project, presets: &crate::models::GlobalPresets) -> String {
+    if let Some(id) = &project.config.proxy_preset_id {
+        if let Some(p) = presets.proxies.iter().find(|p| &p.id == id) {
+            return p.url.clone();
+        }
+    }
+    match project.config.mode.as_str() {
+        "claude" => project.config.proxy.clone(),
+        "codex" => project.config.codex_api_key.clone(),
+        _ => String::new(),
+    }
+}
+
+/// Resolve effective (model, base_url, token) for custom mode: preset wins, legacy fields fallback.
+fn resolve_model(
+    project: &Project,
+    presets: &crate::models::GlobalPresets,
+) -> (String, String, String) {
+    if let Some(id) = &project.config.model_preset_id {
+        if let Some(m) = presets.models.iter().find(|m| &m.id == id) {
+            return (m.model.clone(), m.base_url.clone(), m.token.clone());
+        }
+    }
+    (
+        project.config.model.clone(),
+        project.config.base_url.clone(),
+        project.config.token.clone(),
+    )
+}
+
 fn build_config_map(project: &Project) -> HashMap<String, String> {
     let mut config: HashMap<String, String> = HashMap::new();
+    let presets = PresetsStorage::load();
 
     match project.config.mode.as_str() {
         "claude" => {
-            if !project.config.proxy.is_empty() {
-                config.insert("HTTP_PROXY".to_string(), project.config.proxy.clone());
-                config.insert("HTTPS_PROXY".to_string(), project.config.proxy.clone());
+            let proxy = resolve_proxy(project, &presets);
+            if !proxy.is_empty() {
+                config.insert("HTTP_PROXY".to_string(), proxy.clone());
+                config.insert("HTTPS_PROXY".to_string(), proxy);
             }
         }
         "codex" => {
             config.insert("CLI_COMMAND".to_string(), "codex".to_string());
-            if !project.config.codex_api_key.is_empty() {
-                config.insert("HTTP_PROXY".to_string(), project.config.codex_api_key.clone());
-                config.insert("HTTPS_PROXY".to_string(), project.config.codex_api_key.clone());
+            let proxy = resolve_proxy(project, &presets);
+            if !proxy.is_empty() {
+                config.insert("HTTP_PROXY".to_string(), proxy.clone());
+                config.insert("HTTPS_PROXY".to_string(), proxy);
             }
         }
         "custom" => {
+            let (model, base_url, token) = resolve_model(project, &presets);
             if project.config.custom_cli == "codex" {
                 let mut cli_cmd = "codex".to_string();
-                if !project.config.model.is_empty() {
-                    cli_cmd.push_str(&format!(" --model {}", project.config.model));
+                if !model.is_empty() {
+                    cli_cmd.push_str(&format!(" --model {}", model));
                 }
                 config.insert("CLI_COMMAND".to_string(), cli_cmd);
-                if !project.config.base_url.is_empty() {
-                    config.insert("OPENAI_BASE_URL".to_string(), project.config.base_url.clone());
+                if !base_url.is_empty() {
+                    config.insert("OPENAI_BASE_URL".to_string(), base_url);
                 }
-                if !project.config.token.is_empty() {
-                    config.insert("OPENAI_API_KEY".to_string(), project.config.token.clone());
+                if !token.is_empty() {
+                    config.insert("OPENAI_API_KEY".to_string(), token);
                 }
             } else {
-                if !project.config.model.is_empty() {
-                    config.insert("ANTHROPIC_MODEL".to_string(), project.config.model.clone());
+                if !model.is_empty() {
+                    config.insert("ANTHROPIC_MODEL".to_string(), model);
                 }
-                if !project.config.base_url.is_empty() {
-                    config.insert("ANTHROPIC_BASE_URL".to_string(), project.config.base_url.clone());
+                if !base_url.is_empty() {
+                    config.insert("ANTHROPIC_BASE_URL".to_string(), base_url);
                 }
-                if !project.config.token.is_empty() {
-                    config.insert("ANTHROPIC_AUTH_TOKEN".to_string(), project.config.token.clone());
+                if !token.is_empty() {
+                    config.insert("ANTHROPIC_AUTH_TOKEN".to_string(), token);
                 }
             }
         }
@@ -368,6 +416,104 @@ pub fn fix_cc_mcp_misplaced(file_path: String, target_path: String) -> Result<()
 #[tauri::command]
 pub fn remove_cc_mcp_servers(file_path: String) -> Result<(), String> {
     CcConfigChecker::remove_mcp_servers(&file_path)
+}
+
+// ============ Global Presets Commands ============
+
+#[tauri::command]
+pub fn get_global_presets() -> GlobalPresets {
+    PresetsStorage::load()
+}
+
+#[tauri::command]
+pub fn create_proxy_preset(name: String, url: String) -> Result<ProxyPreset, String> {
+    PresetsStorage::create_proxy(name, url)
+}
+
+#[tauri::command]
+pub fn update_proxy_preset(id: String, name: String, url: String) -> Result<ProxyPreset, String> {
+    PresetsStorage::update_proxy(&id, name, url)
+}
+
+#[tauri::command]
+pub fn delete_proxy_preset(id: String) -> Result<(), String> {
+    PresetsStorage::delete_proxy(&id)
+}
+
+#[tauri::command]
+pub fn count_proxy_preset_refs(id: String) -> usize {
+    PresetsStorage::count_proxy_refs(&id)
+}
+
+#[tauri::command]
+pub fn create_model_preset(
+    name: String,
+    model: String,
+    base_url: String,
+    token: String,
+) -> Result<ModelPreset, String> {
+    PresetsStorage::create_model(name, model, base_url, token)
+}
+
+#[tauri::command]
+pub fn update_model_preset(
+    id: String,
+    name: String,
+    model: String,
+    base_url: String,
+    token: String,
+) -> Result<ModelPreset, String> {
+    PresetsStorage::update_model(&id, name, model, base_url, token)
+}
+
+#[tauri::command]
+pub fn delete_model_preset(id: String) -> Result<(), String> {
+    PresetsStorage::delete_model(&id)
+}
+
+#[tauri::command]
+pub fn count_model_preset_refs(id: String) -> usize {
+    PresetsStorage::count_model_refs(&id)
+}
+
+#[tauri::command]
+pub fn get_last_used_project_config() -> Option<ProjectConfig> {
+    PresetsStorage::get_last_used()
+}
+
+#[tauri::command]
+pub fn set_last_used_project_config(config: ProjectConfig) -> Result<(), String> {
+    PresetsStorage::set_last_used(config)
+}
+
+/// Validate that a project is fully configured before launch.
+/// custom mode requires a usable model preset (or legacy fallback fields). Other modes always pass.
+#[tauri::command]
+pub fn validate_project_launch(id: String) -> Result<(), String> {
+    let project = ConfigStorage::get_project(&id)?;
+    if project.config.mode != "custom" {
+        return Ok(());
+    }
+    let presets = PresetsStorage::load();
+    let (model, base_url, _token) = match &project.config.model_preset_id {
+        Some(pid) => match presets.models.iter().find(|m| &m.id == pid) {
+            Some(m) => (m.model.clone(), m.base_url.clone(), m.token.clone()),
+            None => (
+                project.config.model.clone(),
+                project.config.base_url.clone(),
+                project.config.token.clone(),
+            ),
+        },
+        None => (
+            project.config.model.clone(),
+            project.config.base_url.clone(),
+            project.config.token.clone(),
+        ),
+    };
+    if model.is_empty() && base_url.is_empty() {
+        return Err("请先配置模型".to_string());
+    }
+    Ok(())
 }
 
 // ============ Portable Mode Commands ============

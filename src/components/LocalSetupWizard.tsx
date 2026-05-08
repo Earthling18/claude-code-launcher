@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { motion } from 'framer-motion';
 import { api } from '../api';
 import type { DependencyStatus } from '../types';
 
@@ -31,20 +32,14 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
     setSteps(prev => prev.map((s, i) => (i === index ? { ...s, ...update } : s)));
   };
 
-  // Returns { result, skipped }: result is the dependency status if it became installed,
-  // skipped='current' or 'all' if the user pressed a skip button mid-wait.
   const waitForInstall = async (
     checkFn: () => Promise<DependencyStatus>,
     maxAttempts = 60
   ): Promise<{ result: DependencyStatus | null; skipped: SkipSignal }> => {
     for (let i = 0; i < maxAttempts; i++) {
-      if (skipSignalRef.current) {
-        return { result: null, skipped: skipSignalRef.current };
-      }
+      if (skipSignalRef.current) return { result: null, skipped: skipSignalRef.current };
       await new Promise(r => setTimeout(r, 3000));
-      if (skipSignalRef.current) {
-        return { result: null, skipped: skipSignalRef.current };
-      }
+      if (skipSignalRef.current) return { result: null, skipped: skipSignalRef.current };
       try {
         await api.refreshSystemPath();
         const result = await checkFn();
@@ -92,19 +87,19 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
         return;
       }
 
-      updateStep(def.index, { status: 'running', detail: '正在检测...' });
+      updateStep(def.index, { status: 'running', detail: '检测中…' });
 
       try {
         const status = await def.check();
         if (status.installed) {
-          updateStep(def.index, { status: 'done', detail: status.version || undefined });
+          updateStep(def.index, { status: 'done', detail: status.version || '已就绪' });
           continue;
         }
 
-        updateStep(def.index, { status: 'running', detail: '正在打开安装程序...' });
+        updateStep(def.index, { status: 'running', detail: '正在打开安装程序…' });
         setWaitingInstall(def.label);
         await def.install();
-        updateStep(def.index, { detail: '等待安装完成...' });
+        updateStep(def.index, { detail: '等待安装完成…' });
 
         const { result, skipped } = await waitForInstall(def.check);
         setWaitingInstall(null);
@@ -120,7 +115,7 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
           continue;
         }
         if (result) {
-          updateStep(def.index, { status: 'done', detail: result.version || undefined });
+          updateStep(def.index, { status: 'done', detail: result.version || '已就绪' });
         } else {
           updateStep(def.index, { status: 'error', detail: '安装超时，请手动安装后重试' });
           setIsRunning(false);
@@ -146,77 +141,86 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
   }, []);
 
   const hasError = steps.some(s => s.status === 'error');
-
-  const getIcon = (status: StepStatus) => {
-    switch (status) {
-      case 'pending': return <span className="w-6 h-6 rounded-full border-2 border-[#565B5E] flex items-center justify-center text-[10px] text-[#565B5E]">-</span>;
-      case 'running': return <span className="w-6 h-6 rounded-full border-2 border-[#3b82f6] flex items-center justify-center text-[12px] text-[#3b82f6] animate-spin">&#x27F3;</span>;
-      case 'done': return <span className="w-6 h-6 rounded-full bg-[#10b981] flex items-center justify-center text-[10px] text-white">&#x2713;</span>;
-      case 'error': return <span className="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center text-[10px] text-white">&#x2717;</span>;
-      case 'skipped': return <span className="w-6 h-6 rounded-full bg-[#565B5E] flex items-center justify-center text-[10px] text-white">-</span>;
-    }
-  };
+  const completedCount = steps.filter(s => s.status === 'done' || s.status === 'skipped').length;
+  const progress = (completedCount / steps.length) * 100;
 
   return (
-    <div className="h-full flex items-center justify-center">
-      <div className="max-w-md w-full space-y-6">
-        <div className="text-center mb-2">
-          <h2 className="text-[16px] font-bold mb-1">环境配置</h2>
-          <p className="text-[12px] text-[#999999]">首次使用需要安装依赖，检测到已安装的会自动跳过</p>
+    <div className="h-full flex items-center justify-center px-6">
+      <div className="w-full max-w-md">
+        {/* Header */}
+        <div className="text-center mb-6">
+          <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-text-tertiary mb-1.5">
+            FIRST RUN · 环境配置
+          </div>
+          <h2 className="text-[18px] font-semibold text-text-primary mb-1.5">为 CC 启动器准备依赖</h2>
+          <p className="text-[12px] text-text-tertiary leading-relaxed">
+            首次使用需要安装 4 个依赖项；已安装的会自动跳过。<br/>
+            网络受限可随时跳过单项或全部。
+          </p>
         </div>
 
-        <div className="space-y-3">
+        {/* Progress bar */}
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-text-tertiary">
+              进度
+            </span>
+            <span className="font-mono text-[10.5px] text-text-secondary">
+              {completedCount} / {steps.length}
+            </span>
+          </div>
+          <div className="h-1 bg-surface-1 rounded-full overflow-hidden border border-line">
+            <motion.div
+              className="h-full bg-accent"
+              initial={{ width: 0 }}
+              animate={{ width: `${progress}%` }}
+              transition={{ duration: 0.5, ease: [0.2, 0.8, 0.2, 1] }}
+            />
+          </div>
+        </div>
+
+        {/* Steps */}
+        <div className="space-y-1.5 mb-5">
           {steps.map((step, i) => (
-            <div
-              key={i}
-              className={`flex items-center gap-3 p-3 rounded-lg transition-colors ${
-                step.status === 'running'
-                  ? 'bg-[#2a2f3a] border border-[#3b82f6]'
-                  : step.status === 'done'
-                  ? 'bg-[#2a3a2f] border border-[#10b981]/30'
-                  : step.status === 'error'
-                  ? 'bg-[#3a2a2a] border border-red-500/30'
-                  : 'bg-[#2a2a2a] border border-[#3a3a3a]'
-              }`}
-            >
-              {getIcon(step.status)}
-              <div className="flex-1 min-w-0">
-                <span className="text-[13px] font-medium">{step.label}</span>
-                {step.detail && (
-                  <span className="text-[11px] text-[#999999] ml-2">{step.detail}</span>
-                )}
-              </div>
-            </div>
+            <StepRow key={i} step={step} />
           ))}
         </div>
 
+        {/* Waiting state */}
         {waitingInstall && (
-          <div className="space-y-2">
-            <div className="text-center text-[12px] text-[#6b9fff] animate-pulse">
-              请完成 {waitingInstall} 安装程序，安装后将自动继续...
+          <div className="mt-5 p-3 bg-surface-1 border border-line rounded space-y-2">
+            <div className="text-center">
+              <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-accent">
+                INSTALLING
+              </span>
             </div>
-            <div className="flex justify-center gap-3">
+            <div className="text-center text-[12.5px] text-text-primary">
+              请完成 <strong className="text-accent font-semibold">{waitingInstall}</strong> 安装程序
+            </div>
+            <div className="text-center text-[11px] text-text-tertiary leading-snug">
+              检测到安装完成将自动继续
+            </div>
+            <div className="flex justify-center gap-3 pt-1">
               <button
                 onClick={() => { skipSignalRef.current = 'current'; }}
-                className="px-3 py-1 text-[11px] text-[#999999] hover:text-[#DCE4EE] underline-offset-2 hover:underline transition-colors"
+                className="text-[11px] text-text-tertiary hover:text-text-primary underline-offset-2 hover:underline transition-colors"
               >
                 跳过此项
               </button>
+              <span className="text-text-disabled text-[11px]">·</span>
               <button
                 onClick={() => { skipSignalRef.current = 'all'; }}
-                className="px-3 py-1 text-[11px] text-[#999999] hover:text-[#DCE4EE] underline-offset-2 hover:underline transition-colors"
+                className="text-[11px] text-text-tertiary hover:text-text-primary underline-offset-2 hover:underline transition-colors"
               >
                 全部跳过
               </button>
             </div>
-            <p className="text-center text-[10px] text-[#666666]">
-              网络受限时可跳过 Codex 等耗时项；之后仍可在「项目编辑」内手动配置
-            </p>
           </div>
         )}
 
+        {/* Error state */}
         {hasError && !isRunning && (
-          <div className="flex justify-center gap-3">
+          <div className="flex justify-center gap-2 mt-5">
             <button
               onClick={() => {
                 hasStarted.current = false;
@@ -224,7 +228,7 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
                 hasStarted.current = true;
                 runSetup();
               }}
-              className="px-6 py-2 text-[13px] bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded-lg transition-colors"
+              className="btn btn-primary"
             >
               重试
             </button>
@@ -233,7 +237,7 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
                 localStorage.setItem('local_deps_ok', '1');
                 onComplete();
               }}
-              className="px-6 py-2 text-[13px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded-lg transition-colors"
+              className="btn btn-secondary"
             >
               跳过
             </button>
@@ -242,4 +246,76 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
       </div>
     </div>
   );
+};
+
+const StepRow: React.FC<{ step: Step }> = ({ step }) => {
+  const { status, label, detail } = step;
+  return (
+    <motion.div
+      initial={{ opacity: 0, x: -4 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.2 }}
+      className={[
+        'flex items-center gap-3 px-3 py-2.5 rounded border transition-colors',
+        status === 'running' ? 'border-accent/40 bg-accent/[0.04]'
+        : status === 'done' ? 'border-line bg-surface-1'
+        : status === 'error' ? 'border-error/40 bg-error/[0.04]'
+        : status === 'skipped' ? 'border-line bg-transparent opacity-60'
+        : 'border-line bg-surface-1',
+      ].join(' ')}
+    >
+      <StatusIcon status={status} />
+      <span className="text-[12.5px] font-medium text-text-primary flex-1">{label}</span>
+      {detail && (
+        <span className={`font-mono text-[10.5px] ${
+          status === 'error' ? 'text-error'
+          : status === 'done' ? 'text-text-tertiary'
+          : status === 'running' ? 'text-accent'
+          : 'text-text-tertiary'
+        }`}>
+          {detail}
+        </span>
+      )}
+    </motion.div>
+  );
+};
+
+const StatusIcon: React.FC<{ status: StepStatus }> = ({ status }) => {
+  const base = 'w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0';
+  switch (status) {
+    case 'pending':
+      return (
+        <span className={`${base} border border-line-strong`}>
+          <span className="dot" style={{ background: 'var(--text-disabled)' }} />
+        </span>
+      );
+    case 'running':
+      return (
+        <span className={`${base} border border-accent/50 relative`}>
+          <span className="absolute inset-0 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+        </span>
+      );
+    case 'done':
+      return (
+        <span className={`${base}`} style={{ background: 'rgba(107, 191, 122, 0.12)', border: '1px solid rgba(107, 191, 122, 0.4)' }}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="20 6 9 17 4 12" />
+          </svg>
+        </span>
+      );
+    case 'error':
+      return (
+        <span className={`${base}`} style={{ background: 'rgba(214, 114, 110, 0.12)', border: '1px solid rgba(214, 114, 110, 0.4)' }}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--error)" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+        </span>
+      );
+    case 'skipped':
+      return (
+        <span className={`${base} border border-line-strong`}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="2.5" strokeLinecap="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </span>
+      );
+  }
 };

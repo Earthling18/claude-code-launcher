@@ -1,4 +1,5 @@
 import React from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -21,43 +22,54 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   onCancel,
   variant = 'default',
 }) => {
-  if (!isOpen) return null;
-
-  const confirmButtonClass =
-    variant === 'danger'
-      ? 'bg-red-600 hover:bg-red-700'
-      : 'bg-[#3b82f6] hover:bg-[#2563eb]';
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* 背景遮罩 */}
-      <div
-        className="absolute inset-0 bg-black/60"
-        onClick={onCancel}
-      />
-
-      {/* 对话框 */}
-      <div className="relative bg-[#2a2a2a] border border-[#565B5E] rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-        <h3 className="text-[16px] font-bold text-[#DCE4EE] mb-3">{title}</h3>
-        <p className="text-[14px] text-[#999999] mb-6 whitespace-pre-line">{message}</p>
-
-        <div className="flex justify-end gap-3">
-          <button
-            type="button"
-            onClick={onCancel}
-            className="px-4 py-2 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded"
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          className="modal-overlay"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.15 }}
+          onClick={onCancel}
+        >
+          <motion.div
+            className="modal-panel max-w-md w-full mx-4 p-5"
+            initial={{ opacity: 0, scale: 0.96, y: 6 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.98, y: 4 }}
+            transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+            onClick={(e) => e.stopPropagation()}
           >
-            {cancelLabel}
-          </button>
-          <button
-            type="button"
-            onClick={onConfirm}
-            className={`px-4 py-2 text-[12px] ${confirmButtonClass} text-white rounded`}
-          >
-            {confirmLabel}
-          </button>
-        </div>
-      </div>
-    </div>
+            <div className="flex items-start gap-3 mb-3">
+              {variant === 'danger' && (
+                <div className="w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(214,114,110,0.10)' }}>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--error)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                    <line x1="12" y1="9" x2="12" y2="13" />
+                    <line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                </div>
+              )}
+              <h3 className="text-[14px] font-semibold text-text-primary mt-0.5">{title}</h3>
+            </div>
+            <p className="text-[12.5px] text-text-secondary mb-5 whitespace-pre-line leading-relaxed">{message}</p>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={onCancel} className="btn btn-ghost">
+                {cancelLabel}
+              </button>
+              <button
+                type="button"
+                onClick={onConfirm}
+                className={variant === 'danger' ? 'btn btn-danger' : 'btn btn-primary'}
+                style={variant === 'danger' ? { background: 'var(--error)', borderColor: 'var(--error)', color: '#1A0606' } : undefined}
+              >
+                {confirmLabel}
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 };
