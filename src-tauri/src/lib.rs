@@ -29,22 +29,53 @@ pub fn run() {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
 
-            // macOS: remove old "Mobot Launcher.app" / "Claude Code Launcher.app" after rename
+            // macOS: cleanup old / duplicate app bundles on launch.
+            //   - Old branding: "Mobot Launcher.app" / "Claude Code Launcher.app"
+            //   - Finder "Keep Both" duplicates: "CC 启动器 2.app", "CC 启动器 3.app", …
+            //     (created when users click "Keep Both" instead of "Replace" while
+            //      drag-installing a same-named DMG over an existing copy)
             #[cfg(target_os = "macos")]
             {
-                let old_names = ["Mobot Launcher.app", "Claude Code Launcher.app"];
-                let mut paths = Vec::new();
-                for name in old_names {
-                    paths.push(std::path::PathBuf::from(format!("/Applications/{}", name)));
+                use regex::Regex;
+
+                let mut paths: Vec<std::path::PathBuf> = Vec::new();
+                let app_dirs: Vec<std::path::PathBuf> = {
+                    let mut v = vec![std::path::PathBuf::from("/Applications/")];
                     if let Some(home) = dirs::home_dir() {
-                        paths.push(home.join(format!("Applications/{}", name)));
+                        v.push(home.join("Applications/"));
+                    }
+                    v
+                };
+
+                // Explicit old-name targets
+                let old_names = ["Mobot Launcher.app", "Claude Code Launcher.app"];
+                for name in old_names {
+                    for dir in &app_dirs {
+                        paths.push(dir.join(name));
                     }
                 }
+
+                // Pattern-match "CC 启动器 N.app" duplicates (where N >= 2)
+                let dup_re = Regex::new(r"^CC 启动器 \d+\.app$").ok();
+                if let Some(re) = dup_re {
+                    for dir in &app_dirs {
+                        if let Ok(entries) = std::fs::read_dir(dir) {
+                            for entry in entries.flatten() {
+                                if let Some(name) = entry.file_name().to_str() {
+                                    if re.is_match(name) {
+                                        paths.push(entry.path());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 for old_app in &paths {
                     if old_app.exists() {
-                        log::info!("Found old app bundle: {}, removing...", old_app.display());
+                        log::info!("Cleaning up app bundle: {}", old_app.display());
                         if let Err(e) = std::fs::remove_dir_all(old_app) {
-                            log::warn!("Failed to remove old app bundle {}: {}", old_app.display(), e);
+                            log::warn!("Failed to remove app bundle {}: {}", old_app.display(), e);
                         }
                     }
                 }

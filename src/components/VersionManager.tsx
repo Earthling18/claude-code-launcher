@@ -105,21 +105,59 @@ export const VersionManager: React.FC = () => {
     return undefined;
   };
 
-  const handleInstall = async (release: GitHubRelease) => {
-    const asset = findInstaller(release);
-    if (!asset) {
-      // Fallback: open release page
-      try { await openUrl(release.html_url); } catch { window.open(release.html_url, '_blank'); }
-      return;
+  // Compare semver strings, returns 1 / -1 / 0.
+  const cmpSemver = (a: string, b: string): number => {
+    const pa = a.replace(/^v/, '').split('.').map(Number);
+    const pb = b.replace(/^v/, '').split('.').map(Number);
+    for (let i = 0; i < 3; i++) {
+      const va = pa[i] || 0;
+      const vb = pb[i] || 0;
+      if (va > vb) return 1;
+      if (va < vb) return -1;
     }
+    return 0;
+  };
 
+  const handleInstall = async (release: GitHubRelease) => {
     setDownloading(release.tag_name);
     try {
+      // macOS: when upgrading to a version newer than current AND that version
+      // matches the server's latest.json, route through Tauri Updater for a
+      // proper in-place replace (no DMG drag, no Finder "Replace?" dialog).
+      // Older / equal / mismatched targets fall back to the manual DMG flow.
+      if (platform === 'macos') {
+        const targetVer = release.tag_name.replace(/^v/, '');
+        if (cmpSemver(targetVer, currentVersion) > 0) {
+          try {
+            const { check } = await import('@tauri-apps/plugin-updater');
+            const update = await check();
+            if (update && update.version === targetVer) {
+              await update.downloadAndInstall();
+              const { relaunch } = await import('@tauri-apps/plugin-process');
+              await relaunch();
+              return;
+            }
+            // No matching update from server (e.g., release is prerelease or
+            // server hasn't picked it up yet) → fall through to manual flow.
+          } catch (e) {
+            // If updater path failed for any reason, drop down to manual flow.
+            console.warn('[VersionManager] Tauri updater path failed, falling back to DMG:', e);
+          }
+        }
+      }
+
+      // Default path: download platform installer (NSIS / DMG) and run/open it.
+      const asset = findInstaller(release);
+      if (!asset) {
+        try { await openUrl(release.html_url); } catch { window.open(release.html_url, '_blank'); }
+        setDownloading(null);
+        return;
+      }
       await invoke('download_and_run_installer', {
         url: asset.browser_download_url,
         filename: asset.name,
       });
-      // Installer launched, exit app to let it proceed
+      // Installer launched, exit app to let it proceed.
       await exit(0);
     } catch (e: any) {
       setError(e?.toString() || 'Download failed');
