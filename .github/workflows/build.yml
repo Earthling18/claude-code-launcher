@@ -131,12 +131,14 @@ jobs:
           WORK=$(mktemp -d)
           echo -n "" > "$WORK/renames.txt"
 
+          # Cache asset list once (avoid hitting the API per pattern).
+          gh release view "$TAG" -R "$REPO" --json assets --jq '.assets[].name' > "$WORK/assets.txt"
+
           rename_asset() {
-            local pattern="$1"
+            local pattern="$1"   # bash extended regex
             local new_name="$2"
             local old_name
-            old_name=$(gh release view "$TAG" -R "$REPO" --json assets \
-              --jq ".assets[] | select(.name | test(\"$pattern\")) | .name" | head -1)
+            old_name=$(grep -E "$pattern" "$WORK/assets.txt" | head -1 || true)
             if [ -z "$old_name" ]; then
               echo "[skip] no asset matching: $pattern"
               return
@@ -154,14 +156,17 @@ jobs:
             printf '%s|%s\n' "$old_name" "$new_name" >> "$WORK/renames.txt"
           }
 
-          rename_asset '^CC.*_'"${VERSION//./\\.}"'_x64-setup\\.exe$'              "CCLauncher_${VERSION}_x64-setup.exe"
-          rename_asset '^CC.*_'"${VERSION//./\\.}"'_x64-setup\\.exe\\.sig$'       "CCLauncher_${VERSION}_x64-setup.exe.sig"
-          rename_asset '^CC.*_'"${VERSION//./\\.}"'_universal\\.dmg$'             "CCLauncher_${VERSION}_universal.dmg"
-          rename_asset '^CC.*_universal\\.app\\.tar\\.gz$'                        "CCLauncher_${VERSION}_universal.app.tar.gz"
-          rename_asset '^CC.*_universal\\.app\\.tar\\.gz\\.sig$'                  "CCLauncher_${VERSION}_universal.app.tar.gz.sig"
+          # VER_ESC: dots escaped for use in regex (1.1.1 -> 1\.1\.1)
+          VER_ESC="${VERSION//./\\.}"
+
+          rename_asset "^CC.*_${VER_ESC}_x64-setup\\.exe$"             "CCLauncher_${VERSION}_x64-setup.exe"
+          rename_asset "^CC.*_${VER_ESC}_x64-setup\\.exe\\.sig$"       "CCLauncher_${VERSION}_x64-setup.exe.sig"
+          rename_asset "^CC.*_${VER_ESC}_universal\\.dmg$"             "CCLauncher_${VERSION}_universal.dmg"
+          rename_asset "^CC.*_universal\\.app\\.tar\\.gz$"             "CCLauncher_${VERSION}_universal.app.tar.gz"
+          rename_asset "^CC.*_universal\\.app\\.tar\\.gz\\.sig$"       "CCLauncher_${VERSION}_universal.app.tar.gz.sig"
 
           # Update latest.json so Tauri updater resolves the new URLs.
-          if gh release view "$TAG" -R "$REPO" --json assets --jq '.assets[].name' | grep -qFx 'latest.json'; then
+          if grep -qFx 'latest.json' "$WORK/assets.txt"; then
             if [ -s "$WORK/renames.txt" ]; then
               echo "Patching latest.json URLs..."
               gh release download "$TAG" -R "$REPO" --pattern 'latest.json' --dir "$WORK" --clobber
