@@ -107,3 +107,75 @@ jobs:
           releaseName: 'CC 启动器 ${{ github.ref_name }}'
           releaseDraft: true
           args: --target universal-apple-darwin
+
+  # Tauri sanitizes the productName "CC 启动器" into "CC." for bundle filenames,
+  # producing assets like `CC._1.1.1_x64-setup.exe`. We rename them to a clean
+  # ASCII prefix `CCLauncher_` AFTER both build jobs upload, and patch `latest.json`
+  # so the Tauri updater can still resolve the new URLs.
+  rename-assets:
+    needs: [build-windows, build-macos]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Rename release assets to ASCII names
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          WORK=$(mktemp -d)
+          echo -n "" > "$WORK/renames.txt"
+
+          rename_asset() {
+            local pattern="$1"
+            local new_name="$2"
+            local old_name
+            old_name=$(gh release view "$TAG" -R "$REPO" --json assets \
+              --jq ".assets[] | select(.name | test(\"$pattern\")) | .name" | head -1)
+            if [ -z "$old_name" ]; then
+              echo "[skip] no asset matching: $pattern"
+              return
+            fi
+            if [ "$old_name" = "$new_name" ]; then
+              echo "[skip] $old_name already named correctly"
+              return
+            fi
+            echo "Rename: $old_name -> $new_name"
+            gh release download "$TAG" -R "$REPO" --pattern "$old_name" --dir "$WORK" --clobber
+            mv "$WORK/$old_name" "$WORK/$new_name"
+            gh release upload "$TAG" -R "$REPO" "$WORK/$new_name" --clobber
+            gh release delete-asset "$TAG" -R "$REPO" "$old_name" -y
+            rm -f "$WORK/$new_name"
+            printf '%s|%s\n' "$old_name" "$new_name" >> "$WORK/renames.txt"
+          }
+
+          rename_asset '^CC.*_'"${VERSION//./\\.}"'_x64-setup\\.exe$'              "CCLauncher_${VERSION}_x64-setup.exe"
+          rename_asset '^CC.*_'"${VERSION//./\\.}"'_x64-setup\\.exe\\.sig$'       "CCLauncher_${VERSION}_x64-setup.exe.sig"
+          rename_asset '^CC.*_'"${VERSION//./\\.}"'_universal\\.dmg$'             "CCLauncher_${VERSION}_universal.dmg"
+          rename_asset '^CC.*_universal\\.app\\.tar\\.gz$'                        "CCLauncher_${VERSION}_universal.app.tar.gz"
+          rename_asset '^CC.*_universal\\.app\\.tar\\.gz\\.sig$'                  "CCLauncher_${VERSION}_universal.app.tar.gz.sig"
+
+          # Update latest.json so Tauri updater resolves the new URLs.
+          if gh release view "$TAG" -R "$REPO" --json assets --jq '.assets[].name' | grep -qFx 'latest.json'; then
+            if [ -s "$WORK/renames.txt" ]; then
+              echo "Patching latest.json URLs..."
+              gh release download "$TAG" -R "$REPO" --pattern 'latest.json' --dir "$WORK" --clobber
+              while IFS='|' read -r old_n new_n; do
+                [ -z "$old_n" ] && continue
+                # Escape regex/sed-special chars in filenames (dots etc.)
+                old_esc=$(printf '%s' "$old_n" | sed 's/[][\\.*^$/]/\\&/g')
+                new_esc=$(printf '%s' "$new_n" | sed 's/[\\&/]/\\&/g')
+                sed -i "s|/$old_esc|/$new_esc|g" "$WORK/latest.json"
+              done < "$WORK/renames.txt"
+              gh release upload "$TAG" -R "$REPO" "$WORK/latest.json" --clobber
+              echo "latest.json updated."
+            fi
+          fi
+
+          rm -rf "$WORK"
+          echo "Done."
