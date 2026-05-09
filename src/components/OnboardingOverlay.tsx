@@ -1,297 +1,219 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 
-interface OnboardingStep {
-  id: string;
-  title: string;
-  description: string;
+export interface OnboardingStep {
+  /** CSS selector for the element to spotlight. Omit for centered welcome / final card. */
   targetSelector?: string;
-  position?: 'center' | 'top' | 'bottom' | 'left' | 'right';
+  /** Tooltip placement relative to target. Default: bottom (or center if no target). */
+  position?: 'top' | 'bottom' | 'center';
+  title: string;
+  body: string;
+  /** Override the primary button label. Default: "下一步" or "完成" on last step. */
+  primaryLabel?: string;
+  /** Custom primary action. If set, replaces "advance" behavior; the tour also closes. */
+  onPrimary?: () => void;
 }
 
-const ONBOARDING_STEPS: OnboardingStep[] = [
-  {
-    id: 'welcome',
-    title: '欢迎使用 CC 启动器',
-    description: '这是一个帮助您管理和启动 Claude Code 项目的工具。接下来让我们快速了解主要功能。',
-    position: 'center',
-  },
-  {
-    id: 'dependencies',
-    title: '依赖检测',
-    description: '这里显示运行 Claude Code 所需的依赖状态。如果显示未安装，点击对应按钮可一键安装或更新。',
-    targetSelector: '[data-onboarding="dependencies"]',
-    position: 'bottom',
-  },
-  {
-    id: 'default-project',
-    title: '默认项目',
-    description: '这是系统自带的默认项目，工作目录为您的用户主目录。\n\n⚠️ 首次使用请先点击右上角的编辑图标配置模型！\n\n您可以选择使用 Claude 原版（需代理）或切换到自定义模型（如内部 API）。',
-    targetSelector: '[data-onboarding="default-project"]',
-    position: 'bottom',
-  },
-  {
-    id: 'create',
-    title: '新建项目',
-    description: '有两种方式创建新项目：\n1. 直接将文件夹拖入窗口\n2. 点击"+ 新建项目"按钮手动创建',
-    targetSelector: '[data-onboarding="create-btn"]',
-    position: 'bottom',
-  },
-  {
-    id: 'launch',
-    title: '启动项目',
-    description: '点击"启动"按钮直接在新窗口运行 Claude Code。也可以点击"复制PS/CMD"按钮复制启动命令，自己在终端中执行。',
-    targetSelector: '[data-onboarding="launch-buttons"]',
-    position: 'top',
-  },
-  {
-    id: 'finish',
-    title: '开始使用吧！',
-    description: '现在您已了解基本功能。如需再次查看引导，可点击右下角的帮助按钮。',
-    position: 'center',
-  },
-];
-
-interface OnboardingOverlayProps {
-  onComplete: () => void;
+interface Props {
+  isOpen: boolean;
+  steps: OnboardingStep[];
+  /** Always called when the tour ends (skip / complete / primary action). */
+  onClose: () => void;
+  /** Optional: called when user reaches the end naturally OR confirms via primary on last step. */
+  onComplete?: () => void;
 }
 
-interface TargetRect {
+interface Rect {
   top: number;
   left: number;
   width: number;
   height: number;
 }
 
-export const OnboardingOverlay: React.FC<OnboardingOverlayProps> = ({ onComplete }) => {
-  const [currentStep, setCurrentStep] = useState(0);
-  const [targetRect, setTargetRect] = useState<TargetRect | null>(null);
+const TOOLTIP_W = 360;
+const PAD = 14;
 
-  const step = ONBOARDING_STEPS[currentStep];
-  const isFirstStep = currentStep === 0;
-  const isLastStep = currentStep === ONBOARDING_STEPS.length - 1;
+export const OnboardingOverlay: React.FC<Props> = ({ isOpen, steps, onClose, onComplete }) => {
+  const [idx, setIdx] = useState(0);
+  const [rect, setRect] = useState<Rect | null>(null);
 
-  const updateTargetRect = useCallback(() => {
-    if (step.targetSelector) {
-      const element = document.querySelector(step.targetSelector);
-      if (element) {
-        const rect = element.getBoundingClientRect();
-        setTargetRect({
-          top: rect.top,
-          left: rect.left,
-          width: rect.width,
-          height: rect.height,
-        });
-      } else {
-        setTargetRect(null);
-      }
-    } else {
-      setTargetRect(null);
-    }
-  }, [step.targetSelector]);
+  // Reset to step 0 each time the tour opens.
+  useEffect(() => { if (isOpen) setIdx(0); }, [isOpen]);
 
-  useEffect(() => {
-    updateTargetRect();
+  const step = steps[idx];
+  const isLast = idx === steps.length - 1;
 
-    // Update on window resize
-    window.addEventListener('resize', updateTargetRect);
-    return () => window.removeEventListener('resize', updateTargetRect);
-  }, [updateTargetRect]);
+  // Recompute target rect whenever step or window changes.
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+    if (!step?.targetSelector) { setRect(null); return; }
 
-  const handleNext = () => {
-    if (isLastStep) {
-      onComplete();
-    } else {
-      setCurrentStep(prev => prev + 1);
-    }
+    const compute = () => {
+      const el = document.querySelector(step.targetSelector!);
+      if (!el) { setRect(null); return; }
+      // Bring the target into view if needed.
+      el.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' as ScrollBehavior });
+      const r = el.getBoundingClientRect();
+      setRect({ top: r.top, left: r.left, width: r.width, height: r.height });
+    };
+
+    compute();
+    // Recompute slightly later in case layout shifts.
+    const t = setTimeout(compute, 60);
+    window.addEventListener('resize', compute);
+    return () => {
+      clearTimeout(t);
+      window.removeEventListener('resize', compute);
+    };
+  }, [isOpen, step?.targetSelector, idx]);
+
+  const handleSkip = () => {
+    onClose();
+    onComplete?.();
   };
 
   const handlePrev = () => {
-    if (!isFirstStep) {
-      setCurrentStep(prev => prev - 1);
+    if (idx > 0) setIdx(idx - 1);
+  };
+
+  const handlePrimary = () => {
+    if (step.onPrimary) {
+      step.onPrimary();
+      onClose();
+      onComplete?.();
+      return;
+    }
+    if (isLast) {
+      onClose();
+      onComplete?.();
+    } else {
+      setIdx(idx + 1);
     }
   };
 
-  const handleSkip = () => {
-    onComplete();
-  };
-
-  // Calculate tooltip position based on target element and preferred position
-  const getTooltipStyle = (): React.CSSProperties => {
-    if (!targetRect || step.position === 'center') {
-      // Center position
+  // Tooltip positioning.
+  const computeTooltipStyle = (): React.CSSProperties => {
+    if (!rect || step.position === 'center') {
       return {
-        position: 'fixed',
-        top: '50%',
         left: '50%',
+        top: '50%',
         transform: 'translate(-50%, -50%)',
+        width: TOOLTIP_W,
       };
     }
-
-    const padding = 16;
-    const tooltipWidth = 360;
-    const tooltipHeight = 200; // estimated
+    const tooltipH = 200;
+    const targetCenterX = rect.left + rect.width / 2;
+    let left = targetCenterX - TOOLTIP_W / 2;
+    left = Math.max(PAD, Math.min(left, window.innerWidth - TOOLTIP_W - PAD));
 
     let top: number;
-    let left: number;
-
-    switch (step.position) {
-      case 'bottom':
-        top = targetRect.top + targetRect.height + padding;
-        left = targetRect.left + targetRect.width / 2 - tooltipWidth / 2;
-        break;
-      case 'top':
-        top = targetRect.top - tooltipHeight - padding;
-        left = targetRect.left + targetRect.width / 2 - tooltipWidth / 2;
-        break;
-      case 'left':
-        top = targetRect.top + targetRect.height / 2 - tooltipHeight / 2;
-        left = targetRect.left - tooltipWidth - padding;
-        break;
-      case 'right':
-        top = targetRect.top + targetRect.height / 2 - tooltipHeight / 2;
-        left = targetRect.left + targetRect.width + padding;
-        break;
-      default:
-        top = targetRect.top + targetRect.height + padding;
-        left = targetRect.left + targetRect.width / 2 - tooltipWidth / 2;
+    const placeBottom = step.position !== 'top';
+    if (placeBottom) {
+      top = rect.top + rect.height + PAD;
+      // Flip if would go off screen.
+      if (top + tooltipH > window.innerHeight - PAD) top = rect.top - tooltipH - PAD;
+    } else {
+      top = rect.top - tooltipH - PAD;
+      if (top < PAD) top = rect.top + rect.height + PAD;
     }
-
-    // Keep tooltip within viewport
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-
-    if (left < padding) left = padding;
-    if (left + tooltipWidth > viewportWidth - padding) {
-      left = viewportWidth - tooltipWidth - padding;
-    }
-    if (top < padding) top = padding;
-    if (top + tooltipHeight > viewportHeight - padding) {
-      top = viewportHeight - tooltipHeight - padding;
-    }
-
-    return {
-      position: 'fixed',
-      top: `${top}px`,
-      left: `${left}px`,
-    };
-  };
-
-  // Generate clip-path for spotlight effect
-  const getOverlayStyle = (): React.CSSProperties => {
-    if (!targetRect) {
-      return {};
-    }
-
-    const padding = 8;
-    const borderRadius = 8;
-    const x = targetRect.left - padding;
-    const y = targetRect.top - padding;
-    const w = targetRect.width + padding * 2;
-    const h = targetRect.height + padding * 2;
-
-    // Create a rounded rectangle cutout using clip-path
-    // The clip-path creates the inverse (everything except the spotlight)
-    const clipPath = `
-      polygon(
-        0% 0%,
-        0% 100%,
-        ${x}px 100%,
-        ${x}px ${y + borderRadius}px,
-        ${x + borderRadius}px ${y}px,
-        ${x + w - borderRadius}px ${y}px,
-        ${x + w}px ${y + borderRadius}px,
-        ${x + w}px ${y + h - borderRadius}px,
-        ${x + w - borderRadius}px ${y + h}px,
-        ${x + borderRadius}px ${y + h}px,
-        ${x}px ${y + h - borderRadius}px,
-        ${x}px 100%,
-        100% 100%,
-        100% 0%
-      )
-    `;
-
-    return { clipPath };
+    return { left, top, width: TOOLTIP_W };
   };
 
   return (
-    <div className="fixed inset-0 z-[100]">
-      {/* Dark overlay with spotlight cutout */}
-      <div
-        className="absolute inset-0 bg-black/70 transition-all duration-300"
-        style={getOverlayStyle()}
-        onClick={handleSkip}
-      />
-
-      {/* Highlight border around target element */}
-      {targetRect && (
-        <div
-          className="absolute border-2 border-[#3b82f6] rounded-lg pointer-events-none transition-all duration-300"
-          style={{
-            top: targetRect.top - 8,
-            left: targetRect.left - 8,
-            width: targetRect.width + 16,
-            height: targetRect.height + 16,
-            boxShadow: '0 0 0 4px rgba(59, 130, 246, 0.3)',
-          }}
-        />
-      )}
-
-      {/* Tooltip card */}
-      <div
-        className="bg-[#2a2a2a] border border-[#565B5E] rounded-lg p-5 w-[360px] shadow-xl"
-        style={getTooltipStyle()}
-      >
-        {/* Step indicator */}
-        <div className="flex items-center gap-2 mb-3">
-          <span className="text-[12px] text-[#999999]">
-            {currentStep + 1} / {ONBOARDING_STEPS.length}
-          </span>
-          <div className="flex gap-1">
-            {ONBOARDING_STEPS.map((_, idx) => (
-              <div
-                key={idx}
-                className={`w-2 h-2 rounded-full transition-colors ${
-                  idx === currentStep ? 'bg-[#3b82f6]' : 'bg-[#565B5E]'
-                }`}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Title */}
-        <h3 className="text-[16px] font-bold text-white mb-3">{step.title}</h3>
-
-        {/* Description */}
-        <p className="text-[13px] text-[#DCE4EE] leading-relaxed whitespace-pre-line mb-5">
-          {step.description}
-        </p>
-
-        {/* Buttons */}
-        <div className="flex items-center justify-between">
-          <button
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[100]">
+          {/* Click-blocker: clicking anywhere outside tooltip / spotlight skips the tour. */}
+          <motion.div
+            className="absolute inset-0"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
             onClick={handleSkip}
-            className="text-[12px] text-[#999999] hover:text-white transition-colors"
+          />
+
+          {/* When no target (centered card), darken everything. */}
+          {!rect && (
+            <div className="absolute inset-0 pointer-events-none" style={{ background: 'rgba(10, 12, 16, 0.78)' }} />
+          )}
+
+          {/* Spotlight: visual only (pointer-events-none). The dark surround is painted via box-shadow. */}
+          {rect && (
+            <motion.div
+              className="absolute pointer-events-none"
+              initial={false}
+              animate={{
+                top: rect.top - 6,
+                left: rect.left - 6,
+                width: rect.width + 12,
+                height: rect.height + 12,
+              }}
+              transition={{ duration: 0.32, ease: [0.2, 0.8, 0.2, 1] }}
+              style={{
+                borderRadius: 8,
+                border: '2px solid var(--accent)',
+                boxShadow:
+                  '0 0 0 9999px rgba(10, 12, 16, 0.78), 0 0 0 4px rgba(232, 165, 71, 0.18)',
+              }}
+            />
+          )}
+
+          {/* Tooltip card */}
+          <motion.div
+            key={idx} // re-mount on step change so animation plays
+            className="absolute bg-surface-2 border border-line-strong rounded-lg shadow-elev"
+            style={computeTooltipStyle()}
+            initial={{ opacity: 0, y: 6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.98 }}
+            transition={{ duration: 0.2, ease: [0.2, 0.8, 0.2, 1] }}
+            onClick={(e) => e.stopPropagation()}
           >
-            跳过引导
-          </button>
-          <div className="flex gap-2">
-            {!isFirstStep && (
+            <div className="px-4 pt-4 pb-2">
+              <div className="flex items-center justify-between mb-2">
+                <span className="font-mono text-[10px] uppercase tracking-[0.22em] text-text-tertiary">
+                  STEP {idx + 1} / {steps.length}
+                </span>
+                <div className="flex gap-1">
+                  {steps.map((_, i) => (
+                    <span
+                      key={i}
+                      className="w-1.5 h-1.5 rounded-full transition-colors"
+                      style={{
+                        background: i === idx ? 'var(--accent)' : 'var(--line-strong)',
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+              <h3 className="text-[14px] font-semibold text-text-primary mb-1.5">{step.title}</h3>
+              <p className="text-[12px] text-text-secondary leading-relaxed whitespace-pre-line">
+                {step.body}
+              </p>
+            </div>
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-t border-line">
               <button
-                onClick={handlePrev}
-                className="px-4 py-1.5 text-[12px] bg-[#565B5E] hover:bg-[#7A8488] text-white rounded transition-colors"
+                type="button"
+                onClick={handleSkip}
+                className="text-[11px] text-text-tertiary hover:text-text-primary underline-offset-2 hover:underline transition-colors"
               >
-                上一步
+                跳过引导
               </button>
-            )}
-            <button
-              onClick={handleNext}
-              className="px-4 py-1.5 text-[12px] bg-[#3b82f6] hover:bg-[#2563eb] text-white rounded transition-colors"
-            >
-              {isLastStep ? '完成' : '下一步'}
-            </button>
-          </div>
+              <div className="flex items-center gap-1.5">
+                {idx > 0 && (
+                  <button type="button" onClick={handlePrev} className="btn btn-ghost btn-sm">
+                    上一步
+                  </button>
+                )}
+                <button type="button" onClick={handlePrimary} className="btn btn-primary btn-sm">
+                  {step.primaryLabel ?? (isLast ? '完成' : '下一步')}
+                </button>
+              </div>
+            </div>
+          </motion.div>
         </div>
-      </div>
-    </div>
+      )}
+    </AnimatePresence>
   );
 };

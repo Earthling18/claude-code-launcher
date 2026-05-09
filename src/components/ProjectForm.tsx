@@ -222,19 +222,17 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
         </div>
       </Row>
 
-      {!isDefault && (
-        <Row label="">
-          <label className="flex items-center gap-2 cursor-pointer h-[34px]">
-            <input
-              type="checkbox"
-              checked={isPinned}
-              onChange={(e) => setIsPinned(e.target.checked)}
-              className="w-3.5 h-3.5 accent-accent"
-            />
-            <span className="text-[12.5px]">置顶此项目</span>
-          </label>
-        </Row>
-      )}
+      <Row label="">
+        <label className="flex items-center gap-2 cursor-pointer h-[34px]">
+          <input
+            type="checkbox"
+            checked={isPinned}
+            onChange={(e) => setIsPinned(e.target.checked)}
+            className="w-3.5 h-3.5 accent-accent"
+          />
+          <span className="text-[12.5px]">置顶此项目</span>
+        </label>
+      </Row>
 
       {/* Action bar */}
       <div className="flex items-center gap-3 pt-3 mt-2 border-t border-line">

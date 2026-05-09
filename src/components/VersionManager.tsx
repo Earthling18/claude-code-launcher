@@ -153,19 +153,31 @@ export const VersionManager: React.FC = () => {
         >
           {/* Header */}
           <div className="px-4 py-3 border-b border-[#3a3a3a] shrink-0">
-            <div className="flex items-center justify-between">
-              <span className="text-[13px] text-[#DCE4EE]">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[13px] text-[#DCE4EE] truncate">
                 当前版本：<span className="font-semibold text-[#3b82f6]">v{currentVersion}</span>
               </span>
-              <button
-                onClick={fetchReleases}
-                disabled={loading}
-                className="px-3 py-1 text-[12px] bg-[#3b82f6] hover:bg-[#2563eb]
-                           disabled:bg-[#565B5E] disabled:cursor-not-allowed
-                           text-white rounded transition-colors"
-              >
-                {loading ? '检查中...' : '检查更新'}
-              </button>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  onClick={() => {
+                    setIsOpen(false);
+                    window.dispatchEvent(new CustomEvent('cc-launcher:show-onboarding'));
+                  }}
+                  className="text-[11px] text-[#aaaaaa] hover:text-white underline-offset-2 hover:underline transition-colors"
+                  title="重新查看新手引导"
+                >
+                  新手引导
+                </button>
+                <button
+                  onClick={fetchReleases}
+                  disabled={loading}
+                  className="px-3 py-1 text-[12px] bg-[#3b82f6] hover:bg-[#2563eb]
+                             disabled:bg-[#565B5E] disabled:cursor-not-allowed
+                             text-white rounded transition-colors"
+                >
+                  {loading ? '检查中...' : '检查更新'}
+                </button>
+              </div>
             </div>
           </div>
 

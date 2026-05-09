@@ -143,3 +143,9 @@ export const presetsApi = {
   validateLaunch: (id: string) => invoke<void>('validate_project_launch', { id }),
 };
 
+// Onboarding API
+export const onboardingApi = {
+  getStatus: () => invoke<boolean>('get_onboarding_status'),
+  setCompleted: () => invoke<void>('set_onboarding_completed'),
+};
+

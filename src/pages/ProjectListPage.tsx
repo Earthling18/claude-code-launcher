@@ -1,5 +1,9 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+
+// Module-level scroll memory: persists across mount/unmount of ProjectListPage
+// (e.g., navigating to /edit and back). Reset only on full page reload.
+let lastScrollTop = 0;
 import {
   DndContext,
   closestCenter,
@@ -16,13 +20,15 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
-import { projectApi, api, presetsApi } from '../api';
+import { projectApi, api, presetsApi, onboardingApi } from '../api';
 import { toast } from '../lib/toast';
 import { DependencyFrame } from '../components/DependencyFrame';
 import { LocalSetupWizard } from '../components/LocalSetupWizard';
 import { ProjectCard } from '../components/ProjectCard';
 import { SortableProjectCard } from '../components/SortableProjectCard';
 import { PresetManagerDialog } from '../components/PresetManagerDialog';
+import { OnboardingOverlay, type OnboardingStep } from '../components/OnboardingOverlay';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import type { Project } from '../types/project';
 import type { GlobalPresets } from '../types/presets';
 
@@ -49,6 +55,8 @@ export const ProjectListPage: React.FC = () => {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showPresets, setShowPresets] = useState(false);
   const [presets, setPresets] = useState<GlobalPresets | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -81,6 +89,73 @@ export const ProjectListPage: React.FC = () => {
     loadPlatform();
     presetsApi.getAll().then(setPresets).catch(() => setPresets(null));
   }, []);
+
+  // First-time onboarding: only after deps are ready (avoids overlapping the wizard)
+  useEffect(() => {
+    if (!depsReady) return;
+    onboardingApi.getStatus()
+      .then(seen => { if (!seen) setShowOnboarding(true); })
+      .catch(() => {});
+  }, [depsReady]);
+
+  // Allow other components (e.g. VersionManager popup) to re-trigger the tour.
+  useEffect(() => {
+    const handler = () => setShowOnboarding(true);
+    window.addEventListener('cc-launcher:show-onboarding', handler);
+    return () => window.removeEventListener('cc-launcher:show-onboarding', handler);
+  }, []);
+
+  // Preserve scroll position across navigations (edit → save → list, back, etc.)
+  // We continuously persist scrollTop into a module-level variable, then restore on mount.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    // Restore. Wait for layout/render so projects are mounted before scrolling.
+    requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = lastScrollTop;
+    });
+    const onScroll = () => { lastScrollTop = el.scrollTop; };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [loading]); // re-run after loading flips so children are present when we restore
+
+  const handleOnboardingComplete = () => {
+    onboardingApi.setCompleted().catch(() => {});
+  };
+
+  // Build the onboarding tour steps. Re-built when projects load so step 3 has the default project id.
+  const onboardingSteps: OnboardingStep[] = useMemo(() => {
+    const defaultProj = projects.find(p => p.is_default);
+    return [
+      {
+        targetSelector: '[data-onboarding="create"]',
+        position: 'bottom',
+        title: '快速创建项目',
+        body: '把任意文件夹拖进窗口，会自动为该目录创建项目，配置好后一键启动 CC。也可以点这里手动新建。',
+      },
+      {
+        targetSelector: '[data-onboarding="deps"]',
+        position: 'bottom',
+        title: '修复 / 检查更新',
+        body:
+          '[CC 修复]：Claude Code 出现配置冲突、命令异常时，点这里一键排查\n' +
+          '[检查更新]：获取依赖（Node / Git / Claude / Codex）与启动器自身的新版本',
+      },
+      {
+        targetSelector: '[data-onboarding="default-card"]',
+        position: 'bottom',
+        title: '从默认项目开始',
+        body:
+          '点击默认项目进入配置页面：\n' +
+          '· 内部用户可使用 UAT 环境模型（自定义模型 → 选 / 新建 LiteLLM 配置）\n' +
+          '· 也可使用原版 Claude / Codex 账号（登录后即可启动）',
+        primaryLabel: '开始使用',
+        onPrimary: () => {
+          if (defaultProj) navigate(`/local/project/${defaultProj.id}/edit`);
+        },
+      },
+    ];
+  }, [projects, navigate]);
 
   const reloadPresets = () => presetsApi.getAll().then(setPresets).catch(() => {});
 
@@ -272,6 +347,7 @@ export const ProjectListPage: React.FC = () => {
               管理模型
             </button>
             <button
+              data-onboarding="create"
               onClick={handleCreate}
               className="btn btn-primary"
             >
@@ -289,9 +365,18 @@ export const ProjectListPage: React.FC = () => {
         onClose={() => { setShowPresets(false); reloadPresets(); }}
       />
 
-      <div className="flex-1 overflow-auto">
+      <OnboardingOverlay
+        isOpen={showOnboarding}
+        steps={onboardingSteps}
+        onClose={() => setShowOnboarding(false)}
+        onComplete={handleOnboardingComplete}
+      />
+
+      <div ref={scrollRef} className="flex-1 overflow-auto">
         <div className="px-5 pt-2 pb-5">
-          <DependencyFrame projects={projects} platform={platform} />
+          <div data-onboarding="deps">
+            <DependencyFrame projects={projects} platform={platform} />
+          </div>
 
           <div className="mt-3">
             {loading && (
@@ -328,8 +413,11 @@ export const ProjectListPage: React.FC = () => {
                           strategy={verticalListSortingStrategy}
                         >
                           <div className="grid grid-cols-2 gap-2.5">
-                            {pinnedProjects.map((project, i) => (
-                              <div key={project.id} className="fade-up" style={{ animationDelay: `${i * 24}ms` }}>
+                            {pinnedProjects.map((project) => (
+                              <div
+                                key={project.id}
+                                {...(project.is_default ? { 'data-onboarding': 'default-card' } : {})}
+                              >
                                 <SortableProjectCard
                                   project={project}
                                   platform={platform}
@@ -353,8 +441,11 @@ export const ProjectListPage: React.FC = () => {
                           strategy={verticalListSortingStrategy}
                         >
                           <div className="grid grid-cols-2 gap-2.5">
-                            {normalProjects.map((project, i) => (
-                              <div key={project.id} className="fade-up" style={{ animationDelay: `${(pinnedProjects.length + i) * 24}ms` }}>
+                            {normalProjects.map((project) => (
+                              <div
+                                key={project.id}
+                                {...(project.is_default ? { 'data-onboarding': 'default-card' } : {})}
+                              >
                                 <SortableProjectCard
                                   project={project}
                                   platform={platform}
@@ -385,6 +476,23 @@ export const ProjectListPage: React.FC = () => {
                 )}
               </>
             )}
+          </div>
+
+          {/* Footer credit + help link */}
+          <div className="text-center text-[10.5px] text-text-tertiary mt-8 mb-1">
+            <span>项目由 AI 中台提供，如有问题可咨询 shawnlin</span>
+            <span className="text-text-disabled mx-2">·</span>
+            <button
+              type="button"
+              onClick={() => {
+                openUrl('https://ccn09t0pw557.feishu.cn/wiki/UrgHwXIeKiBgPzkLutBczEupnig?from=from_copylink')
+                  .catch(() => {});
+              }}
+              className="text-info hover:brightness-125 underline underline-offset-2 transition-all"
+              title="在浏览器打开使用帮助文档"
+            >
+              使用帮助
+            </button>
           </div>
         </div>
       </div>

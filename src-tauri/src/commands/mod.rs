@@ -354,6 +354,18 @@ pub fn toggle_project_pinned(id: String, is_pinned: bool) -> Result<Project, Str
     ConfigStorage::toggle_project_pinned(&id, is_pinned)
 }
 
+// ============ Onboarding Commands ============
+
+#[tauri::command]
+pub fn get_onboarding_status() -> Result<bool, String> {
+    ConfigStorage::get_onboarding_status()
+}
+
+#[tauri::command]
+pub fn set_onboarding_completed() -> Result<(), String> {
+    ConfigStorage::set_onboarding_completed()
+}
+
 // ============ Claude Login Check Commands ============
 
 #[tauri::command]

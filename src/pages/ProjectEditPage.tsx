@@ -75,7 +75,7 @@ export const ProjectEditPage: React.FC = () => {
         project.is_default ? undefined : name,
         project.is_default ? undefined : workingDirectory,
         config,
-        project.is_default ? undefined : isPinned
+        isPinned
       );
       // Persist as last-used so the next "新建项目" pre-fills with this choice.
       presetsApi.setLastUsed(config).catch((err) => {

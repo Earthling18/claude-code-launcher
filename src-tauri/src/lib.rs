@@ -126,6 +126,9 @@ pub fn run() {
             commands::get_last_used_project_config,
             commands::set_last_used_project_config,
             commands::validate_project_launch,
+            // Onboarding commands
+            commands::get_onboarding_status,
+            commands::set_onboarding_completed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
