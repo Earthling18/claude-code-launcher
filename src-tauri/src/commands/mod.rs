@@ -103,6 +103,21 @@ pub async fn reinstall_codex() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn check_skill_market() -> Result<dependency_checker::DependencyStatus, String> {
+    Ok(Installer::check_skill_market())
+}
+
+/// Best-effort install. Has a built-in timeout (15s); on failure the wizard treats
+/// it as 'skipped' rather than 'error' since the marketplace is intranet-only.
+#[tauri::command]
+pub async fn install_skill_market() -> Result<(), String> {
+    // Run blocking IO off the tauri runtime so the UI stays responsive.
+    tokio::task::spawn_blocking(|| Installer::install_skill_market())
+        .await
+        .map_err(|e| format!("任务调度失败: {}", e))?
+}
+
+#[tauri::command]
 pub fn launch_claude_code(config: HashMap<String, String>) -> Result<(), String> {
     Launcher::launch_with_config(config)
 }

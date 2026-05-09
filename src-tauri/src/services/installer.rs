@@ -2,6 +2,95 @@ use std::process::Command;
 
 pub struct Installer;
 
+/// Webank skill marketplace — download a zip and extract to ~/.claude/skills/skill-market/
+const SKILL_MARKET_NAME: &str = "skill-market";
+const SKILL_MARKET_SERVER: &str = "https://uat.prophecis.bdap.weoa.com";
+/// Hard timeout: install should finish in seconds on intranet; otherwise we skip.
+const SKILL_MARKET_TIMEOUT_SECS: u64 = 15;
+
+impl Installer {
+    /// Check if skill-market is installed by looking for files inside the target dir.
+    pub fn check_skill_market() -> crate::services::dependency_checker::DependencyStatus {
+        use crate::services::dependency_checker::DependencyStatus;
+        let dest = match Self::skill_market_dir() {
+            Some(p) => p,
+            None => return DependencyStatus {
+                installed: false,
+                version: None,
+                meets_requirement: false,
+                latest_version: None,
+                update_available: false,
+                error: Some("无法解析用户主目录".to_string()),
+            },
+        };
+        let installed = dest.exists()
+            && std::fs::read_dir(&dest)
+                .map(|mut rd| rd.next().is_some())
+                .unwrap_or(false);
+        DependencyStatus {
+            installed,
+            version: if installed { Some("已安装".to_string()) } else { None },
+            meets_requirement: installed,
+            latest_version: None,
+            update_available: false,
+            error: None,
+        }
+    }
+
+    /// Synchronous install: download zip + extract. Returns Err on timeout / network / extract failure.
+    /// Caller can choose to mark the step as `skipped` rather than `error` on failure
+    /// since this is a best-effort intranet-only resource.
+    pub fn install_skill_market() -> Result<(), String> {
+        let dest = Self::skill_market_dir().ok_or("无法解析用户主目录")?;
+        std::fs::create_dir_all(&dest)
+            .map_err(|e| format!("创建目录失败: {}", e))?;
+
+        let url = format!(
+            "{}/cc/v2/plugin-guest/nameDown?pluginName={}",
+            SKILL_MARKET_SERVER, SKILL_MARKET_NAME
+        );
+
+        // Build a client that mirrors the doc's `curl -skL --noproxy "*"`:
+        //   - danger_accept_invalid_certs (-k)
+        //   - timeout cap
+        //   - no_proxy() to bypass system proxy (intranet endpoint)
+        //   - redirect follow is reqwest default (-L)
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(SKILL_MARKET_TIMEOUT_SECS))
+            .danger_accept_invalid_certs(true)
+            .no_proxy()
+            .build()
+            .map_err(|e| format!("HTTP client 初始化失败: {}", e))?;
+
+        let resp = client
+            .get(&url)
+            .header("User-Agent", "CCLauncher")
+            .send()
+            .map_err(|e| format!("下载失败: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("服务器返回 HTTP {}", resp.status()));
+        }
+        let bytes = resp.bytes().map_err(|e| format!("读取响应失败: {}", e))?;
+
+        // Write to a temp zip then extract — `zip::ZipArchive` needs Read+Seek.
+        let tmp = std::env::temp_dir().join(format!("{}.zip", SKILL_MARKET_NAME));
+        std::fs::write(&tmp, &bytes).map_err(|e| format!("写临时 zip 失败: {}", e))?;
+
+        let file = std::fs::File::open(&tmp).map_err(|e| format!("打开临时 zip 失败: {}", e))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| format!("解析 zip 失败: {}", e))?;
+        archive.extract(&dest).map_err(|e| format!("解压失败: {}", e))?;
+
+        let _ = std::fs::remove_file(&tmp);
+        Ok(())
+    }
+
+    fn skill_market_dir() -> Option<std::path::PathBuf> {
+        dirs::home_dir().map(|h| h.join(".claude").join("skills").join(SKILL_MARKET_NAME))
+    }
+}
+
 impl Installer {
     pub fn install_nodejs() -> Result<(), String> {
         #[cfg(windows)]

@@ -1,9 +1,12 @@
 import { useEffect, useState, useRef } from 'react';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { api } from '../api';
 import { toast } from '../lib/toast';
 import type { DependencyStatus } from '../types';
 import type { Project } from '../types/project';
 import { CcConfigPanel } from './CcConfigPanel';
+
+const SKILL_MARKET_URL = 'http://uat.aiep.weoa.com/#/assets/plugin?microPath=/assets/plugin';
 
 interface DependencyFrameProps {
   projects?: Project[];
@@ -16,6 +19,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
     git: { status: null, loading: false },
     claude: { status: null, loading: false },
     codex: { status: null, loading: false },
+    skill_market: { status: null, loading: false },
   });
   const [checking, setChecking] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -27,6 +31,14 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
     git: { label: 'Git', checkFn: api.checkGitbash, installFn: api.installGitbash, updateFn: api.updateGitbash, checkUpdateFn: api.checkGitbashWithUpdate },
     claude: { label: 'Claude Code', checkFn: api.checkClaude, installFn: api.installClaude, updateFn: api.updateClaude, checkUpdateFn: api.checkClaudeWithUpdate },
     codex: { label: 'Codex', checkFn: api.checkCodex, installFn: api.installCodex, updateFn: api.updateCodex, checkUpdateFn: api.checkCodexWithUpdate },
+    // skill-market: best-effort intranet resource. installFn is silent (no terminal); update reuses install.
+    skill_market: {
+      label: 'Webank 技能市场',
+      checkFn: api.checkSkillMarket,
+      installFn: api.installSkillMarket,
+      updateFn: api.installSkillMarket,
+      checkUpdateFn: api.checkSkillMarket,
+    },
   };
 
   // Parallel silent check on mount
@@ -44,6 +56,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
           git: { status: c.gitbash || null, loading: false },
           claude: { status: c.claude || null, loading: false },
           codex: { status: c.codex || null, loading: false },
+          skill_market: { status: c.skill_market || null, loading: false },
         });
         return;
       }
@@ -55,11 +68,12 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
   const runParallelCheck = async () => {
     setChecking(true);
     try {
-      const [nodeResult, gitResult, claudeResult, codexResult] = await Promise.all([
+      const [nodeResult, gitResult, claudeResult, codexResult, skillMarketResult] = await Promise.all([
         api.checkNodejs().catch(() => null),
         api.checkGitbash().catch(() => null),
         api.checkClaude().catch(() => null),
         api.checkCodex().catch(() => null),
+        api.checkSkillMarket().catch(() => null),
       ]);
 
       const newDeps = {
@@ -67,10 +81,12 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
         git: { status: gitResult, loading: false },
         claude: { status: claudeResult, loading: false },
         codex: { status: codexResult, loading: false },
+        skill_market: { status: skillMarketResult, loading: false },
       };
       setDeps(newDeps);
 
-      // Auto-expand only if something is missing (not for updates)
+      // Auto-expand only if a *required* dep is missing. skill-market is best-effort
+      // and shouldn't force the panel open if just it is missing.
       const hasMissing = [nodeResult, gitResult, claudeResult, codexResult].some(r => r && !r.installed);
       if (hasMissing) setExpanded(true);
 
@@ -79,6 +95,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
         gitbash: gitResult,
         claude: claudeResult,
         codex: codexResult,
+        skill_market: skillMarketResult,
       }));
     } catch (error) {
       console.error('检测失败:', error);
@@ -92,11 +109,12 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
     setChecking(true);
     try {
       await api.refreshSystemPath();
-      const [nodeResult, gitResult, claudeResult, codexResult] = await Promise.all([
+      const [nodeResult, gitResult, claudeResult, codexResult, skillMarketResult] = await Promise.all([
         api.checkNodejsWithUpdate().catch(() => null),
         api.checkGitbashWithUpdate().catch(() => null),
         api.checkClaudeWithUpdate().catch(() => null),
         api.checkCodexWithUpdate().catch(() => null),
+        api.checkSkillMarket().catch(() => null),
       ]);
 
       const newDeps = {
@@ -104,6 +122,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
         git: { status: gitResult, loading: false },
         claude: { status: claudeResult, loading: false },
         codex: { status: codexResult, loading: false },
+        skill_market: { status: skillMarketResult, loading: false },
       };
       setDeps(newDeps);
 
@@ -112,6 +131,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
         gitbash: gitResult,
         claude: claudeResult,
         codex: codexResult,
+        skill_market: skillMarketResult,
       }));
     } catch (error) {
       console.error('检测失败:', error);
@@ -211,10 +231,26 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
               ? 'dot dot-warn'
               : 'dot dot-ok';
             const canReinstall = (key === 'claude' || key === 'codex') && d.status?.installed;
+            const isSkillMarket = key === 'skill_market';
             return (
-              <div key={key} className="flex items-center gap-2.5">
+              <div key={key} className="flex items-center gap-2.5 min-w-0">
                 <span className={`${dotClass} ${d.loading ? 'dot-pulse' : ''}`} />
-                <span className="text-[12px] text-text-primary w-20 flex-shrink-0">{config.label}</span>
+                <span className={`text-[12px] text-text-primary flex-shrink-0 ${isSkillMarket ? '' : 'w-20'}`}>
+                  {config.label}
+                  {isSkillMarket && (
+                    <>
+                      {' '}
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); openUrl(SKILL_MARKET_URL).catch(() => {}); }}
+                        className="text-[10.5px] text-info hover:brightness-125 underline underline-offset-2"
+                        title="在浏览器打开 Webank 技能市场"
+                      >
+                        (跳转)
+                      </button>
+                    </>
+                  )}
+                </span>
                 {!d.status ? (
                   <span className="font-mono text-[10.5px] text-text-tertiary">checking…</span>
                 ) : !d.status.installed ? (

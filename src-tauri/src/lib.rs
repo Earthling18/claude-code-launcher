@@ -73,6 +73,8 @@ pub fn run() {
             commands::update_codex,
             commands::reinstall_claude,
             commands::reinstall_codex,
+            commands::check_skill_market,
+            commands::install_skill_market,
             commands::launch_claude_code,
             commands::generate_powershell_command,
             commands::generate_cmd_command,

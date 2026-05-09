@@ -22,6 +22,7 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
     { label: 'Git', status: 'pending' },
     { label: 'Claude Code', status: 'pending' },
     { label: 'Codex', status: 'pending' },
+    { label: 'Webank 技能市场', status: 'pending' },
   ]);
   const [isRunning, setIsRunning] = useState(false);
   const [waitingInstall, setWaitingInstall] = useState<string | null>(null);
@@ -58,6 +59,10 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
       label: string;
       check: () => Promise<DependencyStatus>;
       install: () => Promise<unknown>;
+      /** When true, install runs silently (no terminal) and resolves on success/failure
+          right away. Failures are silenced as 'skipped' rather than 'error' so the wizard
+          completes even when the resource is unreachable (intranet-only). */
+      silent?: boolean;
     };
 
     const stepDefs: StepDef[] = [
@@ -65,6 +70,7 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
       { index: 1, label: 'Git',         check: api.checkGitbash, install: api.installGitbash },
       { index: 2, label: 'Claude Code', check: api.checkClaude,  install: api.installClaude },
       { index: 3, label: 'Codex',       check: api.checkCodex,   install: api.installCodex },
+      { index: 4, label: 'Webank 技能市场', check: api.checkSkillMarket, install: api.installSkillMarket, silent: true },
     ];
 
     const finishWithSkipAll = (fromIndex: number) => {
@@ -93,6 +99,26 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
         const status = await def.check();
         if (status.installed) {
           updateStep(def.index, { status: 'done', detail: status.version || '已就绪' });
+          continue;
+        }
+
+        // Silent install path: no terminal, in-process; on failure mark skipped and continue.
+        if (def.silent) {
+          updateStep(def.index, { status: 'running', detail: '安装中…' });
+          try {
+            await def.install();
+            const recheck = await def.check();
+            if (recheck.installed) {
+              updateStep(def.index, { status: 'done', detail: recheck.version || '已就绪' });
+            } else {
+              updateStep(def.index, { status: 'skipped', detail: '已跳过（未检测到安装）' });
+            }
+          } catch (e: any) {
+            // Network unreachable / timeout / extract failed — best-effort, just skip.
+            const msg = String(e || '').toLowerCase();
+            const isTimeout = msg.includes('timeout') || msg.includes('timed out');
+            updateStep(def.index, { status: 'skipped', detail: isTimeout ? '已跳过（超时）' : '已跳过' });
+          }
           continue;
         }
 
