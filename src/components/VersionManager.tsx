@@ -20,6 +20,8 @@ interface GitHubRelease {
   assets: GitHubAsset[];
 }
 
+type Platform = 'windows' | 'macos' | 'linux' | 'unknown';
+
 export const VersionManager: React.FC = () => {
   const [currentVersion, setCurrentVersion] = useState('');
   const [releases, setReleases] = useState<GitHubRelease[]>([]);
@@ -29,12 +31,14 @@ export const VersionManager: React.FC = () => {
   const [hasFetched, setHasFetched] = useState(false);
   const [expandedTag, setExpandedTag] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<string | null>(null);
+  const [platform, setPlatform] = useState<Platform>('unknown');
 
   const popupRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     getVersion().then(setCurrentVersion).catch(() => setCurrentVersion('unknown'));
+    invoke<string>('get_platform').then(p => setPlatform(p as Platform)).catch(() => {});
   }, []);
 
   const fetchReleases = useCallback(async () => {
@@ -86,9 +90,19 @@ export const VersionManager: React.FC = () => {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  // Find the NSIS installer asset for this release
+  // Find the platform-specific installer asset for this release.
+  //   windows → NSIS .exe
+  //   macos   → .dmg
+  // Returns undefined for unknown / unsupported platforms; UI falls back to opening
+  // the release page in the browser.
   const findInstaller = (release: GitHubRelease): GitHubAsset | undefined => {
-    return release.assets.find(a => a.name.endsWith('_x64-setup.exe'));
+    if (platform === 'windows') {
+      return release.assets.find(a => a.name.endsWith('_x64-setup.exe'));
+    }
+    if (platform === 'macos') {
+      return release.assets.find(a => a.name.endsWith('_universal.dmg') || a.name.endsWith('.dmg'));
+    }
+    return undefined;
   };
 
   const handleInstall = async (release: GitHubRelease) => {
