@@ -154,8 +154,7 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
           </div>
           <h2 className="text-[18px] font-semibold text-text-primary mb-1.5">为 CC 启动器准备依赖</h2>
           <p className="text-[12px] text-text-tertiary leading-relaxed">
-            首次使用需要安装 4 个依赖项；已安装的会自动跳过。<br/>
-            网络受限可随时跳过单项或全部。
+            如果 Node 和 Git 安装失败，可前往软件管家自行下载
           </p>
         </div>
 
@@ -186,7 +185,7 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
           ))}
         </div>
 
-        {/* Waiting state */}
+        {/* Status of current install */}
         {waitingInstall && (
           <div className="mt-5 p-3 bg-surface-1 border border-line rounded space-y-2">
             <div className="text-center">
@@ -200,21 +199,29 @@ export const LocalSetupWizard: React.FC<LocalSetupWizardProps> = ({ onComplete }
             <div className="text-center text-[11px] text-text-tertiary leading-snug">
               检测到安装完成将自动继续
             </div>
-            <div className="flex justify-center gap-3 pt-1">
-              <button
-                onClick={() => { skipSignalRef.current = 'current'; }}
-                className="text-[11px] text-text-tertiary hover:text-text-primary underline-offset-2 hover:underline transition-colors"
-              >
-                跳过此项
-              </button>
-              <span className="text-text-disabled text-[11px]">·</span>
-              <button
-                onClick={() => { skipSignalRef.current = 'all'; }}
-                className="text-[11px] text-text-tertiary hover:text-text-primary underline-offset-2 hover:underline transition-colors"
-              >
-                全部跳过
-              </button>
-            </div>
+          </div>
+        )}
+
+        {/* Skip controls — visible whenever wizard is actively running.
+            "跳过此项" only enabled while a current install is being awaited. */}
+        {isRunning && !hasError && (
+          <div className="flex justify-center gap-3 pt-3">
+            <button
+              type="button"
+              onClick={() => { if (waitingInstall) skipSignalRef.current = 'current'; }}
+              disabled={!waitingInstall}
+              className="text-[11px] text-text-tertiary hover:text-text-primary underline-offset-2 hover:underline transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:no-underline"
+            >
+              跳过此项
+            </button>
+            <span className="text-text-disabled text-[11px]">·</span>
+            <button
+              type="button"
+              onClick={() => { skipSignalRef.current = 'all'; }}
+              className="text-[11px] text-text-tertiary hover:text-text-primary underline-offset-2 hover:underline transition-colors"
+            >
+              全部跳过
+            </button>
           </div>
         )}
 

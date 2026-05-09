@@ -234,17 +234,22 @@ export const VersionManager: React.FC = () => {
                             </span>
                           )}
                         </div>
-                        {!isCurrent && (
-                          <button
-                            onClick={(e) => { e.stopPropagation(); handleInstall(release); }}
-                            disabled={!!downloading}
-                            className="px-2.5 py-1 text-[11px] bg-[#10b981] hover:bg-[#059669]
-                                       disabled:bg-[#565B5E] disabled:cursor-not-allowed
-                                       text-white rounded transition-colors shrink-0 ml-2"
-                          >
-                            {isDownloading ? '下载中...' : installer ? `安装 (${formatSize(installer.size)})` : '查看'}
-                          </button>
-                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleInstall(release); }}
+                          disabled={!!downloading}
+                          className={`px-2.5 py-1 text-[11px] disabled:bg-[#565B5E] disabled:cursor-not-allowed text-white rounded transition-colors shrink-0 ml-2 ${
+                            isCurrent
+                              ? 'bg-[#565B5E] hover:bg-[#7A8488]'
+                              : 'bg-[#10b981] hover:bg-[#059669]'
+                          }`}
+                          title={isCurrent ? '从 GitHub 下载并重装当前版本' : undefined}
+                        >
+                          {isDownloading
+                            ? '下载中...'
+                            : installer
+                            ? `${isCurrent ? '重装' : '安装'} (${formatSize(installer.size)})`
+                            : '查看'}
+                        </button>
                       </div>
 
                       {/* Expanded release notes */}
