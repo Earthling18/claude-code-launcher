@@ -251,9 +251,8 @@ impl Launcher {
         };
 
         // First check if CLI command exists
-        let where_cmd = format!("where.exe {} 2>$null", cli_bin);
-        let check = Command::new("powershell.exe")
-            .args(&["-Command", &where_cmd])
+        let check = Command::new("where.exe")
+            .arg(cli_bin)
             .creation_flags(CREATE_NO_WINDOW)
             .output()
             .map_err(|e| format!("无法检查{}命令: {}", cli_label, e))?;
@@ -309,8 +308,8 @@ impl Launcher {
             super::dependency_checker::DependencyChecker::refresh_system_path();
 
             // Verify CLI is now findable
-            let recheck = Command::new("powershell.exe")
-                .args(&["-Command", &where_cmd])
+            let recheck = Command::new("where.exe")
+                .arg(cli_bin)
                 .creation_flags(CREATE_NO_WINDOW)
                 .output();
 
