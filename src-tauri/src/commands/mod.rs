@@ -503,6 +503,119 @@ pub fn count_model_preset_refs(id: String) -> usize {
     PresetsStorage::count_model_refs(&id)
 }
 
+#[derive(serde::Serialize)]
+pub struct ModelProbeResult {
+    pub ok: bool,
+    pub status: u16,
+    pub latency_ms: u64,
+    pub models: Vec<String>,
+    pub error: Option<String>,
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+pub async fn probe_model_endpoint(baseUrl: String, token: String) -> Result<ModelProbeResult, String> {
+    use std::time::{Duration, Instant};
+
+    let trimmed = baseUrl.trim().trim_end_matches('/').to_string();
+    if trimmed.is_empty() {
+        return Ok(ModelProbeResult {
+            ok: false,
+            status: 0,
+            latency_ms: 0,
+            models: vec![],
+            error: Some("Base URL 为空".to_string()),
+        });
+    }
+    let url = format!("{}/v1/models", trimmed);
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => return Ok(ModelProbeResult {
+            ok: false,
+            status: 0,
+            latency_ms: 0,
+            models: vec![],
+            error: Some(format!("构造 HTTP client 失败: {}", e)),
+        }),
+    };
+
+    let mut req = client.get(&url).header("anthropic-version", "2023-06-01");
+    let tok = token.trim();
+    if !tok.is_empty() {
+        req = req.header("x-api-key", tok).bearer_auth(tok);
+    }
+
+    let start = Instant::now();
+    let resp = match req.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            let latency_ms = start.elapsed().as_millis() as u64;
+            let msg = if e.is_timeout() {
+                "请求超时（>8s）".to_string()
+            } else if e.is_connect() {
+                format!("无法连接: {}", e)
+            } else {
+                format!("请求失败: {}", e)
+            };
+            return Ok(ModelProbeResult {
+                ok: false,
+                status: 0,
+                latency_ms,
+                models: vec![],
+                error: Some(msg),
+            });
+        }
+    };
+    let latency_ms = start.elapsed().as_millis() as u64;
+    let status = resp.status().as_u16();
+    let ok_status = resp.status().is_success();
+
+    let body_text = resp.text().await.unwrap_or_default();
+    if !ok_status {
+        let snippet: String = body_text.chars().take(200).collect();
+        return Ok(ModelProbeResult {
+            ok: false,
+            status,
+            latency_ms,
+            models: vec![],
+            error: Some(format!("HTTP {}: {}", status, snippet)),
+        });
+    }
+
+    let parsed: serde_json::Value = match serde_json::from_str(&body_text) {
+        Ok(v) => v,
+        Err(e) => return Ok(ModelProbeResult {
+            ok: false,
+            status,
+            latency_ms,
+            models: vec![],
+            error: Some(format!("响应非 JSON: {}", e)),
+        }),
+    };
+
+    let models: Vec<String> = parsed
+        .get("data")
+        .and_then(|d| d.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(ModelProbeResult {
+        ok: true,
+        status,
+        latency_ms,
+        models,
+        error: None,
+    })
+}
+
 #[tauri::command]
 pub fn get_last_used_project_config() -> Option<ProjectConfig> {
     PresetsStorage::get_last_used()

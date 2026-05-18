@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { DependencyStatus, AppConfig } from './types';
 import type { Project, ProjectConfig, ProjectOrderItem, PinnedOrderItem, ConfigScanResult } from './types/project';
-import type { GlobalPresets, ProxyPreset, ModelPreset } from './types/presets';
+import type { GlobalPresets, ProxyPreset, ModelPreset, ModelProbeResult } from './types/presets';
 
 export const api = {
   // 依赖检测
@@ -137,6 +137,9 @@ export const presetsApi = {
     invoke<ModelPreset>('update_model_preset', { id, name, model, baseUrl, token }),
   deleteModel: (id: string) => invoke<void>('delete_model_preset', { id }),
   countModelRefs: (id: string) => invoke<number>('count_model_preset_refs', { id }),
+
+  probeModel: (baseUrl: string, token: string) =>
+    invoke<ModelProbeResult>('probe_model_endpoint', { baseUrl, token }),
 
   getLastUsed: () => invoke<ProjectConfig | null>('get_last_used_project_config'),
   setLastUsed: (config: ProjectConfig) =>

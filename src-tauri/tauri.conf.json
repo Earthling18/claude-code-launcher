@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "CC 启动器",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "identifier": "com.claudecode.launcher",
   "build": {
     "beforeDevCommand": "npm run dev",

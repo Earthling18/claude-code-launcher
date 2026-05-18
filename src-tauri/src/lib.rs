@@ -156,6 +156,7 @@ pub fn run() {
             commands::update_model_preset,
             commands::delete_model_preset,
             commands::count_model_preset_refs,
+            commands::probe_model_endpoint,
             commands::get_last_used_project_config,
             commands::set_last_used_project_config,
             commands::validate_project_launch,

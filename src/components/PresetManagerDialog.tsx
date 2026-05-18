@@ -1,9 +1,43 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { presetsApi } from '../api';
 import { toast } from '../lib/toast';
 import { ConfirmDialog } from './ConfirmDialog';
-import type { ProxyPreset, ModelPreset } from '../types/presets';
+import type { ProxyPreset, ModelPreset, ModelProbeResult } from '../types/presets';
+
+type ProbeState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'success'; result: ModelProbeResult }
+  | { kind: 'error'; error: string };
+
+function useProbeModel() {
+  const [state, setState] = useState<ProbeState>({ kind: 'idle' });
+  const seqRef = useRef(0);
+  const run = useCallback(async (baseUrl: string, token: string) => {
+    const url = baseUrl.trim();
+    if (!url) { setState({ kind: 'error', error: '请先填写 Base URL' }); return; }
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      setState({ kind: 'error', error: 'Base URL 必须以 http:// 或 https:// 开头' });
+      return;
+    }
+    const mySeq = ++seqRef.current;
+    setState({ kind: 'loading' });
+    try {
+      const result = await presetsApi.probeModel(url, token);
+      if (mySeq !== seqRef.current) return;
+      if (result.ok) setState({ kind: 'success', result });
+      else setState({ kind: 'error', error: result.error || `HTTP ${result.status}` });
+    } catch (err: any) {
+      if (mySeq !== seqRef.current) return;
+      setState({ kind: 'error', error: err?.toString() || '检测失败' });
+    }
+  }, []);
+  const reset = useCallback(() => { seqRef.current++; setState({ kind: 'idle' }); }, []);
+  return { state, run, reset };
+}
+
+type RowProbeState = 'loading' | { ok: true; latency_ms: number; models: string[] } | { ok: false; error: string };
 
 type Kind = 'proxy' | 'model';
 
@@ -52,6 +86,29 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [showToken, setShowToken] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<{ id: string; refs: number; name: string } | null>(null);
+  const { state: probeState, run: probeRun, reset: probeReset } = useProbeModel();
+  const [rowProbes, setRowProbes] = useState<Record<string, RowProbeState>>({});
+
+  // Auto-trigger endpoint probe (debounced) when both base_url and token are filled.
+  useEffect(() => {
+    if (kind !== 'model' || !draft) return;
+    const d = draft as ModelDraft;
+    const url = d.base_url.trim();
+    const tok = d.token.trim();
+    if (!url || !tok) {
+      probeReset();
+      return;
+    }
+    if (!url.startsWith('http://') && !url.startsWith('https://')) return;
+    const handle = window.setTimeout(() => probeRun(url, tok), 600);
+    return () => window.clearTimeout(handle);
+  }, [
+    kind,
+    draft && (draft as ModelDraft).base_url,
+    draft && (draft as ModelDraft).token,
+    probeRun,
+    probeReset,
+  ]);
 
   useEffect(() => {
     if (isOpen) {
@@ -59,6 +116,8 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
       loadAll();
       setDraft(null);
       setError(null);
+      probeReset();
+      setRowProbes({});
     }
   }, [isOpen, initialKind]);
 
@@ -66,6 +125,7 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
     if (isOpen) {
       setDraft(null);
       setError(null);
+      probeReset();
     }
   }, [kind]);
 
@@ -85,6 +145,7 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
   const startCreate = () => {
     setError(null);
     setShowToken(false);
+    probeReset();
     if (kind === 'proxy') {
       setDraft({ name: '', url: '' });
     } else {
@@ -100,7 +161,26 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
   const startEditModel = (m: ModelPreset) => {
     setError(null);
     setShowToken(false);
+    probeReset();
     setDraft({ id: m.id, model: m.model, base_url: m.base_url, token: m.token });
+  };
+
+  const probeRow = async (m: ModelPreset) => {
+    if (!m.base_url) {
+      setRowProbes((s) => ({ ...s, [m.id]: { ok: false, error: '无 Base URL' } }));
+      return;
+    }
+    setRowProbes((s) => ({ ...s, [m.id]: 'loading' }));
+    try {
+      const r = await presetsApi.probeModel(m.base_url, m.token);
+      if (r.ok) {
+        setRowProbes((s) => ({ ...s, [m.id]: { ok: true, latency_ms: r.latency_ms, models: r.models } }));
+      } else {
+        setRowProbes((s) => ({ ...s, [m.id]: { ok: false, error: r.error || `HTTP ${r.status}` } }));
+      }
+    } catch (err: any) {
+      setRowProbes((s) => ({ ...s, [m.id]: { ok: false, error: err?.toString() || '检测失败' } }));
+    }
   };
 
   const handleSave = async () => {
@@ -140,6 +220,7 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
         }
       }
       setDraft(null);
+      probeReset();
       await loadAll();
       onChanged?.(newId);
     } catch (err: any) {
@@ -322,13 +403,22 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
                               </button>
                             </div>
                           </Field>
+                          <ProbeResultPanel
+                            state={probeState}
+                            currentModel={(draft as ModelDraft).model}
+                            onPickModel={(id) => setDraft({ ...(draft as ModelDraft), model: id } as any)}
+                            onRetry={() => {
+                              const d = draft as ModelDraft;
+                              probeRun(d.base_url, d.token);
+                            }}
+                          />
                         </>
                       )}
                     </div>
                     <div className="flex justify-end gap-2 mt-4">
                       <button
                         type="button"
-                        onClick={() => { setDraft(null); setError(null); }}
+                        onClick={() => { setDraft(null); setError(null); probeReset(); }}
                         className="btn btn-ghost btn-sm"
                       >
                         取消
@@ -381,12 +471,24 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
                       className="list-row"
                     >
                       <div className="flex-1 min-w-0">
-                        <div className="font-mono text-[12px] text-text-primary truncate">{m.name}</div>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="font-mono text-[12px] text-text-primary truncate">{m.name}</span>
+                          <RowProbeBadge state={rowProbes[m.id]} />
+                        </div>
                         <div className="font-mono text-[10.5px] text-text-tertiary truncate mt-0.5">
                           {m.base_url || <span className="italic text-text-disabled">(无 Base URL)</span>}
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => probeRow(m)}
+                          disabled={rowProbes[m.id] === 'loading'}
+                          className="btn btn-ghost btn-sm"
+                          title="检测端点可达性"
+                        >
+                          {rowProbes[m.id] === 'loading' ? '检测中…' : '检测'}
+                        </button>
                         <button type="button" onClick={() => startEditModel(m)} className="btn btn-ghost btn-sm">编辑</button>
                         <button type="button" onClick={() => requestDelete(m.id, m.name)} className="btn btn-ghost btn-sm text-error/80 hover:!text-error">删除</button>
                       </div>
@@ -442,6 +544,80 @@ const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, 
     {children}
   </div>
 );
+
+const ProbeResultPanel: React.FC<{
+  state: ProbeState;
+  currentModel: string;
+  onPickModel: (id: string) => void;
+  onRetry: () => void;
+}> = ({ state, currentModel, onPickModel, onRetry }) => {
+  if (state.kind === 'idle') return null;
+  if (state.kind === 'loading') {
+    return (
+      <div className="mt-1 px-3 py-2 rounded bg-surface-2 border border-line text-[11px] text-text-secondary">
+        <span className="font-mono">检测中…</span>
+      </div>
+    );
+  }
+  if (state.kind === 'error') {
+    return (
+      <div className="mt-1 px-3 py-2 rounded bg-error/5 border border-error/30 flex items-start justify-between gap-2">
+        <span className="font-mono text-[11px] text-error flex-1 break-all">✗ {state.error}</span>
+        <button type="button" onClick={onRetry} className="btn btn-ghost btn-sm shrink-0 !h-6 !px-2 !text-[10px]">重新检测</button>
+      </div>
+    );
+  }
+  const { latency_ms, models } = state.result;
+  return (
+    <div className="mt-1 px-3 py-2 rounded bg-ok/5 border border-ok/30">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-mono text-[11px] text-ok">
+          ✓ {latency_ms}ms · {models.length} 个模型可用
+        </span>
+        <button type="button" onClick={onRetry} className="btn btn-ghost btn-sm shrink-0 !h-6 !px-2 !text-[10px]">重新检测</button>
+      </div>
+      {models.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {models.map((id) => {
+            const active = id === currentModel.trim();
+            return (
+              <button
+                key={id}
+                type="button"
+                onClick={() => onPickModel(id)}
+                data-active={active}
+                className="font-mono text-[10.5px] px-2 py-0.5 rounded border border-line bg-surface-1 text-text-secondary hover:border-accent hover:text-text-primary transition-colors data-[active=true]:bg-accent/15 data-[active=true]:border-accent data-[active=true]:text-accent"
+                title="点击填入 Model 字段"
+              >
+                {id}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const RowProbeBadge: React.FC<{ state: RowProbeState | undefined }> = ({ state }) => {
+  if (!state) return null;
+  if (state === 'loading') {
+    return <span className="font-mono text-[10px] text-text-tertiary">检测中…</span>;
+  }
+  if (state.ok) {
+    const color = state.latency_ms < 300 ? 'text-ok' : state.latency_ms < 1000 ? 'text-warn' : 'text-error';
+    return (
+      <span className={`font-mono text-[10px] ${color}`} title={`${state.models.length} 个模型可用`}>
+        {state.latency_ms}ms
+      </span>
+    );
+  }
+  return (
+    <span className="font-mono text-[10px] text-error" title={state.error}>
+      不可达
+    </span>
+  );
+};
 
 const EmptyState: React.FC<{ kind: Kind; onCreate: () => void }> = ({ kind, onCreate }) => (
   <div className="flex flex-col items-center justify-center py-12 px-6 text-center">

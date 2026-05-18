@@ -19,3 +19,11 @@ export interface GlobalPresets {
   models: ModelPreset[];
   last_used_config: ProjectConfig | null;
 }
+
+export interface ModelProbeResult {
+  ok: boolean;
+  status: number;
+  latency_ms: number;
+  models: string[];
+  error: string | null;
+}
