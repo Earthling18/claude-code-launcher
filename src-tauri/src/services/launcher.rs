@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::process::Command;
 #[cfg(windows)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub struct Launcher;
 
@@ -29,6 +32,109 @@ impl Launcher {
         }
 
         new_dir.join("launcher.log")
+    }
+
+    /// System-wide wt.exe detection, cached for the process lifetime
+    /// (`where.exe` costs ~100ms per call). If the user installs WT while the
+    /// launcher is running, a restart picks it up.
+    #[cfg(windows)]
+    fn system_wt_available() -> bool {
+        use std::os::windows::process::CommandExt;
+        use std::sync::OnceLock;
+        static AVAILABLE: OnceLock<bool> = OnceLock::new();
+        *AVAILABLE.get_or_init(|| {
+            // Escape hatch for testing the bundled-WT / conhost fallback paths.
+            if std::env::var("CCL_FORCE_NO_SYSTEM_WT").is_ok() {
+                Self::log_line("CCL_FORCE_NO_SYSTEM_WT set: ignoring system wt.exe");
+                return false;
+            }
+            Command::new("where.exe")
+                .arg("wt.exe")
+                .creation_flags(CREATE_NO_WINDOW)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        })
+    }
+
+    /// Locate the bundled Windows Terminal portable shipped under `resources\wt`
+    /// next to the launcher executable (declared in tauri.windows.conf.json,
+    /// populated by scripts/fetch-wt.ps1 / CI).
+    #[cfg(windows)]
+    fn bundled_wt_dir() -> Option<PathBuf> {
+        let exe = std::env::current_exe().ok()?;
+        let dir = exe.parent()?.join("resources").join("wt");
+        if dir.join("WindowsTerminal.exe").exists() {
+            Some(dir)
+        } else {
+            None
+        }
+    }
+
+    /// WT only runs in portable mode (settings kept beside the exe instead of the
+    /// user's profile) when a `.portable` marker sits next to WindowsTerminal.exe.
+    /// Resource bundling can't be trusted to ship dotfiles, so create it on first
+    /// use. If the install dir is read-only (per-machine installs), copy the whole
+    /// directory to %LOCALAPPDATA%\CCLauncher\wt and run from there.
+    #[cfg(windows)]
+    fn prepare_bundled_wt(dir: &Path) -> Result<PathBuf, String> {
+        let marker = dir.join(".portable");
+        if marker.exists() || std::fs::write(&marker, b"").is_ok() {
+            return Ok(dir.join("WindowsTerminal.exe"));
+        }
+
+        Self::log_line("bundled wt dir not writable; using LocalAppData copy");
+        let base = dirs::data_local_dir().ok_or("无法获取LocalAppData目录")?;
+        let target = base.join("CCLauncher").join("wt");
+        let target_exe = target.join("WindowsTerminal.exe");
+        if !target_exe.exists() {
+            Self::copy_dir_recursive(dir, &target)
+                .map_err(|e| format!("复制内置Windows Terminal失败: {}", e))?;
+        }
+        std::fs::write(target.join(".portable"), b"")
+            .map_err(|e| format!("创建.portable标记失败: {}", e))?;
+        Ok(target_exe)
+    }
+
+    #[cfg(windows)]
+    fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(dst)?;
+        for entry in std::fs::read_dir(src)? {
+            let entry = entry?;
+            let to = dst.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                Self::copy_dir_recursive(&entry.path(), &to)?;
+            } else {
+                std::fs::copy(entry.path(), &to)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Spawn a PowerShell session inside Windows Terminal (system wt.exe or the
+    /// bundled WindowsTerminal.exe — both accept the same command line).
+    #[cfg(windows)]
+    fn spawn_in_wt(program: &Path, work_dir: &str, title: &str, encoded: &str) -> std::io::Result<()> {
+        use std::os::windows::process::CommandExt;
+        Command::new(program)
+            .args(&[
+                "new-tab",
+                "--title",
+                title,
+                "-d",
+                work_dir,
+                "powershell.exe",
+                "-NoExit",
+                "-NoLogo",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-EncodedCommand",
+                encoded,
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map(|_| ())
     }
 
     #[cfg(windows)]
@@ -220,7 +326,6 @@ impl Launcher {
     #[cfg(windows)]
     fn execute_windows(command: &str, working_dir: Option<String>) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
 
         Self::log_line("=== launch start ===");
         Self::log_line(&format!("raw command: {}", Self::sanitize_command_for_log(command)));
@@ -380,41 +485,55 @@ impl Launcher {
         let encoded = Self::encode_powershell_encoded_command(&ps);
         Self::log_line(&format!("encoded_command length: {}", encoded.len()));
 
-        // Prefer Windows Terminal (wt.exe) for better ANSI/TUI rendering;
-        // fall back to cmd.exe /c start for systems without it.
-        let has_wt = Command::new("where.exe")
-            .arg("wt.exe")
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false);
+        // Prefer Windows Terminal for ANSI/TUI rendering (conhost is laggy and
+        // glitchy with Claude Code). Three-tier fallback chain — a failure at any
+        // tier logs and falls through to the next, never aborts the launch:
+        //   1. system wt.exe
+        //   2. bundled WT portable (resources\wt, Windows-only)
+        //   3. conhost via cmd.exe /c start
+        let work_dir_str = work_dir.to_string_lossy();
+        let mut launched_in_wt = false;
 
-        Self::log_line(&format!("Windows Terminal available: {}", has_wt));
-
-        if has_wt {
-            let work_dir_str = work_dir.to_string_lossy();
-            Command::new("wt.exe")
-                .args(&[
-                    "new-tab",
-                    "--title", cli_label,
-                    "-d", &work_dir_str,
-                    "powershell.exe",
-                    "-NoExit",
-                    "-NoLogo",
-                    "-NoProfile",
-                    "-ExecutionPolicy",
-                    "Bypass",
-                    "-EncodedCommand",
-                    &encoded,
-                ])
-                .creation_flags(CREATE_NO_WINDOW)
-                .spawn()
-                .map_err(|e| {
-                    Self::log_line(&format!("spawn wt.exe failed: {}", e));
-                    format!("无法启动Windows Terminal: {}", e)
-                })?;
-            Self::log_line("spawned wt.exe OK");
+        if Self::system_wt_available() {
+            match Self::spawn_in_wt(Path::new("wt.exe"), &work_dir_str, cli_label, &encoded) {
+                Ok(()) => {
+                    Self::log_line("spawned system wt.exe OK");
+                    launched_in_wt = true;
+                }
+                Err(e) => {
+                    Self::log_line(&format!("spawn system wt.exe failed, falling back: {}", e))
+                }
+            }
         } else {
+            Self::log_line("system wt.exe not found");
+        }
+
+        if !launched_in_wt {
+            if let Some(dir) = Self::bundled_wt_dir() {
+                match Self::prepare_bundled_wt(&dir) {
+                    Ok(exe) => {
+                        match Self::spawn_in_wt(&exe, &work_dir_str, cli_label, &encoded) {
+                            Ok(()) => {
+                                Self::log_line(&format!("spawned bundled wt OK: {}", exe.display()));
+                                launched_in_wt = true;
+                            }
+                            Err(e) => Self::log_line(&format!(
+                                "spawn bundled wt failed, falling back to conhost: {}",
+                                e
+                            )),
+                        }
+                    }
+                    Err(e) => Self::log_line(&format!(
+                        "prepare bundled wt failed, falling back to conhost: {}",
+                        e
+                    )),
+                }
+            } else {
+                Self::log_line("bundled wt not present");
+            }
+        }
+
+        if !launched_in_wt {
             Command::new("cmd.exe")
                 .current_dir(&work_dir)
                 .args(&[

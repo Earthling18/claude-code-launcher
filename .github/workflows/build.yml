@@ -30,6 +30,11 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    env:
+      # Windows Terminal Portable, bundled as the fallback terminal when the
+      # user's system has no wt.exe (avoids conhost rendering issues).
+      WT_VERSION: '1.24.11321.0'
+      WT_ZIP_SHA256: '7CAEF554147E5498ED1BECDCA73CDEDB79FBC81F89032E46AE9B095C53433812'
     steps:
       - uses: actions/checkout@v4
       - name: Setup Node.js
@@ -40,6 +45,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Install dependencies
         run: npm ci
+      - name: Fetch Windows Terminal Portable
+        shell: pwsh
+        run: ./scripts/fetch-wt.ps1 -Version $env:WT_VERSION -Sha256 $env:WT_ZIP_SHA256
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0.5.25
         env:
@@ -62,6 +70,16 @@ jobs:
 
           # Copy the built exe
           Copy-Item "src-tauri/target/release/cc-launcher-tauri.exe" "$portableDir/CC 启动器.exe"
+
+          # Bundled resources (Windows Terminal portable fallback). tauri-build
+          # mirrors src-tauri/resources into target/release/resources; fall back
+          # to the source dir if the layout ever changes.
+          if (Test-Path "src-tauri/target/release/resources/wt/WindowsTerminal.exe") {
+            Copy-Item -Recurse "src-tauri/target/release/resources" "$portableDir/resources"
+          } else {
+            New-Item -ItemType Directory -Force -Path "$portableDir/resources" | Out-Null
+            Copy-Item -Recurse "src-tauri/resources/wt" "$portableDir/resources/wt"
+          }
 
           # Create .portable marker
           New-Item -ItemType File -Path "$portableDir/.portable" -Value "CC 启动器 Portable v$version"
