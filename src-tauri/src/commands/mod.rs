@@ -118,8 +118,12 @@ pub async fn install_skill_market() -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn launch_claude_code(config: HashMap<String, String>) -> Result<(), String> {
-    Launcher::launch_with_config(config)
+pub async fn launch_claude_code(config: HashMap<String, String>) -> Result<(), String> {
+    // Launch involves blocking subprocess calls (where.exe / npm checks); keep them
+    // off the tauri runtime so the UI stays responsive.
+    tokio::task::spawn_blocking(move || Launcher::launch_with_config(config))
+        .await
+        .map_err(|e| format!("任务调度失败: {}", e))?
 }
 
 #[tauri::command]
@@ -213,17 +217,24 @@ pub fn delete_project(id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn launch_project(id: String) -> Result<(), String> {
-    let project = ConfigStorage::get_project(&id)?;
-    let config = build_config_map(&project);
+pub async fn launch_project(id: String) -> Result<(), String> {
+    // Launch involves blocking subprocess calls (where.exe / npm checks, possibly an
+    // npm shim repair taking seconds); keep them off the tauri runtime so the UI
+    // stays responsive.
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let project = ConfigStorage::get_project(&id)?;
+        let config = build_config_map(&project);
 
-    // Launch with working directory
-    Launcher::launch_with_config_and_dir(config, Some(project.working_directory.clone()))?;
+        // Launch with working directory
+        Launcher::launch_with_config_and_dir(config, Some(project.working_directory.clone()))?;
 
-    // Update last launched timestamp
-    let _ = ConfigStorage::update_project_launched(&id);
+        // Update last launched timestamp
+        let _ = ConfigStorage::update_project_launched(&id);
 
-    Ok(())
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("任务调度失败: {}", e))?
 }
 
 #[tauri::command]
@@ -394,18 +405,23 @@ pub fn check_claude_login() -> bool {
 }
 
 #[tauri::command]
-pub fn launch_claude_for_login(proxy: Option<String>) -> Result<(), String> {
-    let mut config: HashMap<String, String> = HashMap::new();
-    if let Some(p) = proxy {
-        if !p.is_empty() {
-            config.insert("HTTP_PROXY".to_string(), p.clone());
-            config.insert("HTTPS_PROXY".to_string(), p);
+pub async fn launch_claude_for_login(proxy: Option<String>) -> Result<(), String> {
+    // Same as launch_project: blocking subprocess calls go off the tauri runtime.
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let mut config: HashMap<String, String> = HashMap::new();
+        if let Some(p) = proxy {
+            if !p.is_empty() {
+                config.insert("HTTP_PROXY".to_string(), p.clone());
+                config.insert("HTTPS_PROXY".to_string(), p);
+            }
         }
-    }
-    let home_dir = dirs::home_dir()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| "~".to_string());
-    Launcher::launch_with_config_and_dir(config, Some(home_dir))
+        let home_dir = dirs::home_dir()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| "~".to_string());
+        Launcher::launch_with_config_and_dir(config, Some(home_dir))
+    })
+    .await
+    .map_err(|e| format!("任务调度失败: {}", e))?
 }
 
 // ============ CC Config Checker Commands ============
