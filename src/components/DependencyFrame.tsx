@@ -78,37 +78,37 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
     runParallelCheck().then(() => checkWithUpdates(true));
   }, []);
 
+  // Each check updates its own row as soon as it finishes — a slow check
+  // (e.g. backend auto-reinstall when claude/codex is missing) must not hide
+  // the whole bar or block the other rows.
   const runParallelCheck = async () => {
     setChecking(true);
     try {
-      const [nodeResult, gitResult, claudeResult, codexResult, skillMarketResult] = await Promise.all([
-        api.checkNodejs().catch(() => null),
-        api.checkGitbash().catch(() => null),
-        api.checkClaude().catch(() => null),
-        api.checkCodex().catch(() => null),
-        api.checkSkillMarket().catch(() => null),
-      ]);
-
-      const newDeps = {
-        nodejs: { status: nodeResult, loading: false },
-        git: { status: gitResult, loading: false },
-        claude: { status: claudeResult, loading: false },
-        codex: { status: codexResult, loading: false },
-        skill_market: { status: skillMarketResult, loading: false },
-      };
-      setDeps(newDeps);
+      const checks: Array<{ key: string; fn: () => Promise<DependencyStatus> }> = [
+        { key: 'nodejs', fn: api.checkNodejs },
+        { key: 'git', fn: api.checkGitbash },
+        { key: 'claude', fn: api.checkClaude },
+        { key: 'codex', fn: api.checkCodex },
+        { key: 'skill_market', fn: api.checkSkillMarket },
+      ];
+      const results: Record<string, DependencyStatus | null> = {};
+      await Promise.all(checks.map(async ({ key, fn }) => {
+        const status = await fn().catch(() => null);
+        results[key] = status;
+        setDeps(prev => ({ ...prev, [key]: { status, loading: false } }));
+      }));
 
       // Auto-expand only if a *required* dep is missing. skill-market is best-effort
       // and shouldn't force the panel open if just it is missing.
-      const hasMissing = [nodeResult, gitResult, claudeResult, codexResult].some(r => r && !r.installed);
+      const hasMissing = ['nodejs', 'git', 'claude', 'codex'].some(k => results[k] && !results[k]!.installed);
       if (hasMissing) setExpanded(true);
 
       sessionStorage.setItem('dependencyStatus', JSON.stringify({
-        nodejs: nodeResult,
-        gitbash: gitResult,
-        claude: claudeResult,
-        codex: codexResult,
-        skill_market: skillMarketResult,
+        nodejs: results.nodejs,
+        gitbash: results.git,
+        claude: results.claude,
+        codex: results.codex,
+        skill_market: results.skill_market,
       }));
     } catch (error) {
       console.error('检测失败:', error);
@@ -125,37 +125,39 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
     }
     try {
       await api.refreshSystemPath();
-      const [nodeResult, gitResult, claudeResult, codexResult, skillMarketResult] = await Promise.all([
-        api.checkNodejsWithUpdate().catch(() => null),
-        api.checkGitbashWithUpdate().catch(() => null),
-        api.checkClaudeWithUpdate().catch(() => null),
-        api.checkCodexWithUpdate().catch(() => null),
-        api.checkSkillMarketWithUpdate().catch(() => null),
-      ]);
+      const checks: Array<{ key: string; fn: () => Promise<DependencyStatus> }> = [
+        { key: 'nodejs', fn: api.checkNodejsWithUpdate },
+        { key: 'git', fn: api.checkGitbashWithUpdate },
+        { key: 'claude', fn: api.checkClaudeWithUpdate },
+        { key: 'codex', fn: api.checkCodexWithUpdate },
+        { key: 'skill_market', fn: api.checkSkillMarketWithUpdate },
+      ];
+      const results: Record<string, DependencyStatus | null> = {};
+      await Promise.all(checks.map(async ({ key, fn }) => {
+        const status = await fn().catch(() => null);
+        results[key] = status;
+        // Update each row as it finishes; keep the previous status when a
+        // check fails so a flaky round doesn't wipe out a valid result
+        if (status) {
+          setDeps(prev => ({ ...prev, [key]: { status, loading: false } }));
+        }
+      }));
 
-      // Keep previous status when a check fails, so a flaky update check
-      // doesn't wipe out a valid earlier result
+      // Cache the merged snapshot (reading latest state inside the updater)
       setDeps(prev => {
-        const merged = {
-          nodejs: { status: nodeResult || prev.nodejs.status, loading: false },
-          git: { status: gitResult || prev.git.status, loading: false },
-          claude: { status: claudeResult || prev.claude.status, loading: false },
-          codex: { status: codexResult || prev.codex.status, loading: false },
-          skill_market: { status: skillMarketResult || prev.skill_market.status, loading: false },
-        };
         sessionStorage.setItem('dependencyStatus', JSON.stringify({
-          nodejs: merged.nodejs.status,
-          gitbash: merged.git.status,
-          claude: merged.claude.status,
-          codex: merged.codex.status,
-          skill_market: merged.skill_market.status,
+          nodejs: prev.nodejs.status,
+          gitbash: prev.git.status,
+          claude: prev.claude.status,
+          codex: prev.codex.status,
+          skill_market: prev.skill_market.status,
           __withUpdates: true,
         }));
-        return merged;
+        return prev;
       });
 
       // Fire-and-forget: auto-update what we just detected (claude/codex/skill-market)
-      autoUpdateDeps({ claude: claudeResult, codex: codexResult, skill_market: skillMarketResult });
+      autoUpdateDeps(results);
     } catch (error) {
       console.error('检测失败:', error);
     } finally {
@@ -241,18 +243,10 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
     }
   };
 
-  // Check if any issues exist
+  // Check if any issues exist. The bar is always rendered — rows fill in as
+  // each check finishes, so users see progress and keep the manual entry.
   const hasIssues = Object.values(deps).some(d => d.status && (!d.status.installed || d.status.update_available));
-  const allChecked = Object.values(deps).every(d => d.status !== null);
   const isInstalling = Object.values(deps).some(d => d.loading);
-
-  // Don't show anything while initial check is running (no previous data)
-  if (!allChecked && !checking) {
-    return null;
-  }
-  if (!allChecked && checking && !Object.values(deps).some(d => d.status !== null)) {
-    return null;
-  }
 
   // Show CC config panel
   if (showCcConfig) {
