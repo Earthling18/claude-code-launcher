@@ -77,15 +77,25 @@ export function useUpdateChecker() {
   async function checkPortableUpdate() {
     try {
       const currentVersion = await getVersion();
-      // Fetch latest.json from the same endpoint the updater uses
-      const resp = await fetch(
-        'https://github.com/erthman18/claude-code-launcher/releases/latest/download/latest.json'
-      );
-      if (!resp.ok) {
+      // Fetch latest.json from the same endpoints the Tauri updater uses:
+      // Aliyun OSS first (reachable in mainland China), GitHub as fallback.
+      const endpoints = [
+        'https://cc-launcher-dist.oss-cn-shanghai.aliyuncs.com/releases/latest.json',
+        'https://github.com/Earthling18/claude-code-launcher/releases/latest/download/latest.json',
+      ];
+      let data: { version: string } | null = null;
+      for (const url of endpoints) {
+        try {
+          const resp = await fetch(url);
+          if (resp.ok) { data = await resp.json(); break; }
+        } catch {
+          // try next endpoint
+        }
+      }
+      if (!data) {
         setState(prev => ({ ...prev, status: 'idle' }));
         return;
       }
-      const data = await resp.json();
       const latestVersion: string = data.version;
 
       if (compareSemver(latestVersion, currentVersion) > 0) {

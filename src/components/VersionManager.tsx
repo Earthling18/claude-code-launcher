@@ -22,6 +22,53 @@ interface GitHubRelease {
 
 type Platform = 'windows' | 'macos' | 'linux' | 'unknown';
 
+// In-app version list is served from Aliyun OSS first (reachable in mainland
+// China without a VPN), falling back to the GitHub API. The OSS releases.json
+// is a version-index array maintained by CI (.github/workflows/build.yml) and
+// has a different shape than the GitHub API, so we map it onto GitHubRelease.
+const OSS_RELEASES_URL =
+  'https://cc-launcher-dist.oss-cn-shanghai.aliyuncs.com/releases/releases.json';
+const GITHUB_RELEASES_URL =
+  'https://api.github.com/repos/Earthling18/claude-code-launcher/releases';
+
+interface OssReleaseEntry {
+  version: string;
+  pub_date: string;
+  notes: string;
+  prerelease: boolean;
+  platforms: Record<string, { url: string }>;
+}
+
+// Derive a GitHubAsset-shaped object from an OSS download url. The filename is
+// taken from the url tail so findInstaller's suffix matching still works. OSS
+// releases.json carries no byte size, so size is 0 (the UI hides "(size)" then).
+const ossAsset = (url?: string): GitHubAsset | null => {
+  if (!url) return null;
+  const name = url.split('/').pop() || url;
+  return { name, browser_download_url: url, size: 0 };
+};
+
+// Map one OSS index entry to the internal GitHubRelease model the UI renders.
+const ossEntryToRelease = (e: OssReleaseEntry): GitHubRelease => {
+  const p = e.platforms || {};
+  const assets = [
+    ossAsset(p['windows-x86_64']?.url),
+    ossAsset(p['darwin-universal-dmg']?.url),
+    ossAsset(p['darwin-universal-tar']?.url),
+    ossAsset(p['windows-portable']?.url),
+  ].filter((a): a is GitHubAsset => a !== null);
+  return {
+    tag_name: e.version.startsWith('v') ? e.version : `v${e.version}`,
+    name: e.version,
+    published_at: e.pub_date,
+    prerelease: !!e.prerelease,
+    // No per-version OSS web page; point "查看" fallback at the bucket folder.
+    html_url: `https://cc-launcher-dist.oss-cn-shanghai.aliyuncs.com/releases/v${e.version}/`,
+    body: e.notes || '',
+    assets,
+  };
+};
+
 export const VersionManager: React.FC = () => {
   const [currentVersion, setCurrentVersion] = useState('');
   const [releases, setReleases] = useState<GitHubRelease[]>([]);
@@ -41,13 +88,35 @@ export const VersionManager: React.FC = () => {
     invoke<string>('get_platform').then(p => setPlatform(p as Platform)).catch(() => {});
   }, []);
 
+  // Try the OSS version index first (fast + reachable in mainland China).
+  // Returns the mapped releases on success, or null to signal "fall back".
+  const fetchFromOss = useCallback(async (): Promise<GitHubRelease[] | null> => {
+    try {
+      // Cache-bust so a freshly published version shows up promptly.
+      const res = await fetch(`${OSS_RELEASES_URL}?t=${Date.now()}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!Array.isArray(data) || data.length === 0) return null;
+      return (data as OssReleaseEntry[]).map(ossEntryToRelease);
+    } catch {
+      return null;
+    }
+  }, []);
+
   const fetchReleases = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(
-        'https://api.github.com/repos/Earthling18/claude-code-launcher/releases'
-      );
+      // 1) OSS first.
+      const ossReleases = await fetchFromOss();
+      if (ossReleases) {
+        setReleases(ossReleases);
+        setHasFetched(true);
+        return;
+      }
+
+      // 2) Fall back to the GitHub API.
+      const res = await fetch(GITHUB_RELEASES_URL);
       // Anonymous GitHub API is limited to 60 req/hour PER IP — behind a
       // corporate NAT/VPN the shared quota is often exhausted by others.
       if (res.status === 403 || res.status === 429) {
@@ -63,7 +132,7 @@ export const VersionManager: React.FC = () => {
       setLoading(false);
       setHasFetched(true);
     }
-  }, []);
+  }, [fetchFromOss]);
 
   const handleOpen = useCallback(() => {
     setIsOpen(true);
@@ -311,12 +380,14 @@ export const VersionManager: React.FC = () => {
                               ? 'bg-[#565B5E] hover:bg-[#7A8488]'
                               : 'bg-[#10b981] hover:bg-[#059669]'
                           }`}
-                          title={isCurrent ? '从 GitHub 下载并重装当前版本' : undefined}
+                          title={isCurrent ? '下载并重装当前版本' : undefined}
                         >
                           {isDownloading
                             ? '下载中...'
                             : installer
-                            ? `${isCurrent ? '重装' : '安装'} (${formatSize(installer.size)})`
+                            // OSS-sourced assets carry no byte size (size 0);
+                            // only append "(size)" when GitHub gave us one.
+                            ? `${isCurrent ? '重装' : '安装'}${installer.size > 0 ? ` (${formatSize(installer.size)})` : ''}`
                             : '查看'}
                         </button>
                       </div>

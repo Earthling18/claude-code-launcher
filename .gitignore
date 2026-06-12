@@ -48,3 +48,4 @@ src-tauri/resources/bridge/bridge_admin.json
 # Bundled Windows Terminal portable (fetched by scripts/fetch-wt.ps1 / CI, never committed)
 src-tauri/resources/wt/*
 !src-tauri/resources/wt/README.md
+.playwright-mcp/

@@ -1547,7 +1547,7 @@ pub fn get_portable_download_url() -> String
 
 **参数**: 无
 
-**返回值**: `String` — 固定返回 `"https://github.com/erthman18/claude-code-launcher/releases/latest"`
+**返回值**: `String` — 固定返回 `"https://github.com/Earthling18/claude-code-launcher/releases/latest"`
 
 **前端调用**: `invoke<string>('get_portable_download_url')` （在 `useUpdateChecker` hook 中直接调用）
 

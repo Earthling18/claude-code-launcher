@@ -213,3 +213,152 @@ jobs:
 
           rm -rf "$WORK"
           echo "Done."
+
+      # ----------------------------------------------------------------------
+      # Mirror the release to Aliyun OSS for users in mainland China, who often
+      # cannot reach github.com / objects.githubusercontent.com without a VPN.
+      #
+      # GitHub Releases stays the primary channel — this step is best-effort
+      # (continue-on-error) so an OSS hiccup never fails the release. It:
+      #   1. uploads every renamed installer to releases/v{version}/
+      #   2. writes releases/latest.json (same content as the GitHub one, but
+      #      every platform url rewritten to its OSS address; signatures kept
+      #      verbatim so the Tauri minisign check still passes)
+      #   3. maintains releases/releases.json — a version index the in-app
+      #      "available versions" panel reads (keeps only the latest 5, since
+      #      the UI shows at most 5).
+      #
+      # Skips silently (with a ::warning::) if the OSS secrets are not set, so
+      # forks without OSS configured still build cleanly.
+      # ----------------------------------------------------------------------
+      - name: Mirror release to Aliyun OSS
+        if: startsWith(github.ref, 'refs/tags/')
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
+        run: |
+          set -uo pipefail
+          VERSION="${TAG#v}"
+
+          if [ -z "${OSS_ACCESS_KEY_ID:-}" ] || [ -z "${OSS_ACCESS_KEY_SECRET:-}" ] || [ -z "${OSS_BUCKET:-}" ] || [ -z "${OSS_ENDPOINT:-}" ]; then
+            echo "::warning::OSS secrets not configured; skipping OSS mirror."
+            exit 0
+          fi
+
+          # OSS_ENDPOINT is a host like oss-cn-shanghai.aliyuncs.com; derive the
+          # region (cn-shanghai) and the public base URL for download links.
+          REGION="$(echo "$OSS_ENDPOINT" | sed -E 's/^oss-([a-z0-9-]+)\.aliyuncs\.com$/\1/')"
+          # Public object base. If OSS_CDN_DOMAIN is set we prefer it (CDN in
+          # front of the bucket); otherwise the virtual-hosted bucket endpoint.
+          if [ -n "${OSS_CDN_DOMAIN:-}" ]; then
+            PUBLIC_BASE="https://${OSS_CDN_DOMAIN}"
+          else
+            PUBLIC_BASE="https://${OSS_BUCKET}.${OSS_ENDPOINT}"
+          fi
+          echo "OSS region=$REGION public_base=$PUBLIC_BASE"
+
+          # Install ossutil v2 (linux amd64 runner).
+          OSSUTIL_VER="2.1.1"
+          curl -sSL -o /tmp/ossutil.zip "https://gosspublic.alicdn.com/ossutil/v2/${OSSUTIL_VER}/ossutil-${OSSUTIL_VER}-linux-amd64.zip"
+          unzip -o -q /tmp/ossutil.zip -d /tmp/ossutil-dist
+          OSSUTIL="$(find /tmp/ossutil-dist -maxdepth 2 -name ossutil -type f | head -1)"
+          chmod +x "$OSSUTIL"
+          export OSS_REGION="$REGION"
+          "$OSSUTIL" version | head -1
+
+          WORK="$(mktemp -d)"
+
+          # The four user-facing artifacts (ASCII names produced by rename step).
+          WIN_EXE="CCLauncher_${VERSION}_x64-setup.exe"
+          MAC_TAR="CCLauncher_${VERSION}_universal.app.tar.gz"
+          MAC_DMG="CCLauncher_${VERSION}_universal.dmg"
+          PORTABLE="CC-Launcher_${VERSION}_x64_portable.zip"
+
+          # 1) Download every relevant asset + the .sig files, push installers
+          #    to releases/v{version}/.
+          for f in "$WIN_EXE" "$MAC_TAR" "$MAC_DMG" "$PORTABLE" "${WIN_EXE}.sig" "${MAC_TAR}.sig"; do
+            if gh release download "$TAG" -R "$REPO" --pattern "$f" --dir "$WORK" --clobber 2>/dev/null; then
+              echo "downloaded $f"
+            else
+              echo "::warning::asset not found, skipping: $f"
+            fi
+          done
+
+          for f in "$WIN_EXE" "$MAC_TAR" "$MAC_DMG" "$PORTABLE"; do
+            if [ -f "$WORK/$f" ]; then
+              "$OSSUTIL" cp "$WORK/$f" "oss://${OSS_BUCKET}/releases/v${VERSION}/$f" --force
+            fi
+          done
+
+          # 2) OSS latest.json — same shape as the GitHub one, urls rewritten,
+          #    signatures verbatim.
+          WIN_SIG_FILE="$WORK/${WIN_EXE}.sig"
+          MAC_SIG_FILE="$WORK/${MAC_TAR}.sig"
+          PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          if [ -f "$WIN_SIG_FILE" ] && [ -f "$MAC_SIG_FILE" ]; then
+            OSS_VER_BASE="${PUBLIC_BASE}/releases/v${VERSION}"
+            jq -n \
+              --arg version "$VERSION" \
+              --arg pub_date "$PUB_DATE" \
+              --arg win_url "${OSS_VER_BASE}/${WIN_EXE}" \
+              --arg win_sig "$(cat "$WIN_SIG_FILE")" \
+              --arg mac_url "${OSS_VER_BASE}/${MAC_TAR}" \
+              --arg mac_sig "$(cat "$MAC_SIG_FILE")" \
+              '{version: $version, notes: "", pub_date: $pub_date, platforms: {
+                 "windows-x86_64": {signature: $win_sig, url: $win_url},
+                 "darwin-x86_64":  {signature: $mac_sig, url: $mac_url},
+                 "darwin-aarch64": {signature: $mac_sig, url: $mac_url}
+               }}' > "$WORK/latest.json"
+            "$OSSUTIL" cp "$WORK/latest.json" "oss://${OSS_BUCKET}/releases/latest.json" --force
+            echo "OSS latest.json uploaded."
+          else
+            echo "::warning::Missing .sig assets; OSS latest.json not generated."
+          fi
+
+          # 3) releases.json — version index for the in-app version list.
+          #    Fetch existing (ignore 404), drop any existing entry for this
+          #    version, prepend the new one, keep newest 5.
+          RELEASE_NOTES="$(gh release view "$TAG" -R "$REPO" --json body --jq '.body' 2>/dev/null || echo "")"
+          IS_PRERELEASE="$(gh release view "$TAG" -R "$REPO" --json isPrerelease --jq '.isPrerelease' 2>/dev/null || echo false)"
+          OSS_VER_BASE="${PUBLIC_BASE}/releases/v${VERSION}"
+
+          NEW_ENTRY="$(jq -n \
+            --arg version "$VERSION" \
+            --arg pub_date "$PUB_DATE" \
+            --arg notes "$RELEASE_NOTES" \
+            --argjson prerelease "$IS_PRERELEASE" \
+            --arg win "${OSS_VER_BASE}/${WIN_EXE}" \
+            --arg mac_dmg "${OSS_VER_BASE}/${MAC_DMG}" \
+            --arg mac_tar "${OSS_VER_BASE}/${MAC_TAR}" \
+            --arg portable "${OSS_VER_BASE}/${PORTABLE}" \
+            '{version: $version, pub_date: $pub_date, notes: $notes, prerelease: $prerelease,
+              platforms: {
+                "windows-x86_64": {url: $win},
+                "darwin-universal-dmg": {url: $mac_dmg},
+                "darwin-universal-tar": {url: $mac_tar},
+                "windows-portable": {url: $portable}
+              }}')"
+
+          EXISTING="[]"
+          if curl -fsSL "${PUBLIC_BASE}/releases/releases.json" -o "$WORK/releases.json" 2>/dev/null; then
+            if jq empty "$WORK/releases.json" 2>/dev/null; then
+              EXISTING="$(cat "$WORK/releases.json")"
+            fi
+          fi
+
+          echo "$EXISTING" | jq \
+            --argjson entry "$NEW_ENTRY" \
+            '[ $entry ] + ( map(select(.version != $entry.version)) ) | .[0:5]' \
+            > "$WORK/releases.new.json"
+          "$OSSUTIL" cp "$WORK/releases.new.json" "oss://${OSS_BUCKET}/releases/releases.json" --force
+          echo "OSS releases.json updated (kept newest 5)."
+
+          rm -rf "$WORK"
+          echo "OSS mirror done."

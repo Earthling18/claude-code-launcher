@@ -403,7 +403,7 @@ interface ConfigScanResult {
 ### 4.6 自动更新
 
 基于 Tauri Updater 插件：
-- 更新端点: `https://github.com/erthman18/claude-code-launcher/releases/latest/download/latest.json`
+- 更新端点: `https://github.com/Earthling18/claude-code-launcher/releases/latest/download/latest.json`
 - 签名验证: 使用 `TAURI_SIGNING_PRIVATE_KEY` 签名
 - Windows 安装模式: `basicUi`
 - 便携模式检测: `is_portable_mode` 检查 `.portable` 文件，便携模式下引导用户手动下载
@@ -606,7 +606,7 @@ main.rs
   "plugins": {
     "updater": {
       "pubkey": "...(ed25519 公钥)...",
-      "endpoints": ["https://github.com/erthman18/claude-code-launcher/releases/latest/download/latest.json"],
+      "endpoints": ["https://github.com/Earthling18/claude-code-launcher/releases/latest/download/latest.json"],
       "windows": { "installMode": "basicUi" }
     }
   }

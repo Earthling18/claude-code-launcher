@@ -709,7 +709,7 @@ pub fn is_portable_mode() -> bool {
 /// Get the download URL for the latest portable release.
 #[tauri::command]
 pub fn get_portable_download_url() -> String {
-    "https://github.com/erthman18/claude-code-launcher/releases/latest".to_string()
+    "https://github.com/Earthling18/claude-code-launcher/releases/latest".to_string()
 }
 
 /// Download a file from URL to temp directory and launch it.
