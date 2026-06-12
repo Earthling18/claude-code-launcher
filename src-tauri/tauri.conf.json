@@ -56,7 +56,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJGMUMwMzI4RUFBNEM2QzMKUldURHhxVHFLQU1jTDdXZmd1eWd6R1JRZFNlU2pYWTY5T1BpbGY0cjBtek9lWHNaSXR0VDU2QzIK",
       "endpoints": [
-        "https://github.com/erthman18/claude-code-launcher/releases/latest/download/latest.json"
+        "https://github.com/Earthling18/claude-code-launcher/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "basicUi"

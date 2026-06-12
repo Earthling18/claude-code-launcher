@@ -183,21 +183,32 @@ jobs:
           rename_asset "^CC.*_universal\\.app\\.tar\\.gz$"             "CCLauncher_${VERSION}_universal.app.tar.gz"
           rename_asset "^CC.*_universal\\.app\\.tar\\.gz\\.sig$"       "CCLauncher_${VERSION}_universal.app.tar.gz.sig"
 
-          # Update latest.json so Tauri updater resolves the new URLs.
-          if grep -qFx 'latest.json' "$WORK/assets.txt"; then
-            if [ -s "$WORK/renames.txt" ]; then
-              echo "Patching latest.json URLs..."
-              gh release download "$TAG" -R "$REPO" --pattern 'latest.json' --dir "$WORK" --clobber
-              while IFS='|' read -r old_n new_n; do
-                [ -z "$old_n" ] && continue
-                # Escape regex/sed-special chars in filenames (dots etc.)
-                old_esc=$(printf '%s' "$old_n" | sed 's/[][\\.*^$/]/\\&/g')
-                new_esc=$(printf '%s' "$new_n" | sed 's/[\\&/]/\\&/g')
-                sed -i "s|/$old_esc|/$new_esc|g" "$WORK/latest.json"
-              done < "$WORK/renames.txt"
-              gh release upload "$TAG" -R "$REPO" "$WORK/latest.json" --clobber
-              echo "latest.json updated."
-            fi
+          # tauri-action never uploads latest.json for us: the non-ASCII
+          # productName ("CC 启动器") breaks its signature lookup and it logs
+          # "Signature not found for the updater JSON. Skipping upload...".
+          # Build latest.json ourselves from the renamed assets + .sig files.
+          echo "Generating latest.json..."
+          WIN_SIG_FILE="CCLauncher_${VERSION}_x64-setup.exe.sig"
+          MAC_SIG_FILE="CCLauncher_${VERSION}_universal.app.tar.gz.sig"
+          gh release download "$TAG" -R "$REPO" --pattern '*.sig' --dir "$WORK" --clobber
+          if [ -f "$WORK/$WIN_SIG_FILE" ] && [ -f "$WORK/$MAC_SIG_FILE" ]; then
+            BASE="https://github.com/${REPO}/releases/download/${TAG}"
+            jq -n \
+              --arg version "$VERSION" \
+              --arg pub_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --arg win_url "$BASE/CCLauncher_${VERSION}_x64-setup.exe" \
+              --arg win_sig "$(cat "$WORK/$WIN_SIG_FILE")" \
+              --arg mac_url "$BASE/CCLauncher_${VERSION}_universal.app.tar.gz" \
+              --arg mac_sig "$(cat "$WORK/$MAC_SIG_FILE")" \
+              '{version: $version, notes: "", pub_date: $pub_date, platforms: {
+                 "windows-x86_64": {signature: $win_sig, url: $win_url},
+                 "darwin-x86_64":  {signature: $mac_sig, url: $mac_url},
+                 "darwin-aarch64": {signature: $mac_sig, url: $mac_url}
+               }}' > "$WORK/latest.json"
+            gh release upload "$TAG" -R "$REPO" "$WORK/latest.json" --clobber
+            echo "latest.json uploaded."
+          else
+            echo "::warning::Missing .sig assets; latest.json not generated (updater will not see this release)."
           fi
 
           rm -rf "$WORK"
