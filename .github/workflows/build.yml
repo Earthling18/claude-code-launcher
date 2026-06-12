@@ -4,10 +4,21 @@ on:
   push:
     tags:
       - 'v*'
+  # Fires when a GitHub Release is published as NON-prerelease (i.e. you
+  # un-check "pre-release" / click "Set as latest release"). This is the
+  # all-users update switch: it (re)generates the OSS latest.json so the
+  # Tauri updater starts offering this version. Pushing a tag alone only
+  # mirrors the installers + lists the version — it never pushes to users.
+  release:
+    types: [released]
   workflow_dispatch:
 
 jobs:
   check-version:
+    # Build chain runs for tag pushes / manual dispatch only. The `released`
+    # event takes the lightweight publish-to-OSS path (promote-to-oss) instead,
+    # reusing the already-built installers — no rebuild.
+    if: github.event_name != 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,7 +69,12 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'CC 启动器 ${{ github.ref_name }}'
-          releaseDraft: true
+          # Publish as a pre-release, not a draft. You self-test from this
+          # pre-release (installers are also mirrored to OSS), then un-check
+          # "pre-release" on GitHub to promote it to latest — that fires the
+          # release:released event and pushes the update to all users.
+          releaseDraft: false
+          prerelease: true
           updaterJsonPreferNsis: true
 
       - name: Create portable zip
@@ -123,7 +139,9 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: 'CC 启动器 ${{ github.ref_name }}'
-          releaseDraft: true
+          # See windows job: pre-release on tag push, promote later to push.
+          releaseDraft: false
+          prerelease: true
           args: --target universal-apple-darwin
 
   # Tauri sanitizes the productName "CC 启动器" into "CC." for bundle filenames,
@@ -297,32 +315,13 @@ jobs:
             fi
           done
 
-          # 2) OSS latest.json — same shape as the GitHub one, urls rewritten,
-          #    signatures verbatim.
-          WIN_SIG_FILE="$WORK/${WIN_EXE}.sig"
-          MAC_SIG_FILE="$WORK/${MAC_TAR}.sig"
+          # NOTE: OSS latest.json (the all-users update trigger) is deliberately
+          # NOT written here. A tag push publishes a PRE-release for self-test;
+          # pushing latest.json now would notify everyone prematurely. It is
+          # written by the promote-to-oss job when you un-pre-release on GitHub.
           PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          if [ -f "$WIN_SIG_FILE" ] && [ -f "$MAC_SIG_FILE" ]; then
-            OSS_VER_BASE="${PUBLIC_BASE}/releases/v${VERSION}"
-            jq -n \
-              --arg version "$VERSION" \
-              --arg pub_date "$PUB_DATE" \
-              --arg win_url "${OSS_VER_BASE}/${WIN_EXE}" \
-              --arg win_sig "$(cat "$WIN_SIG_FILE")" \
-              --arg mac_url "${OSS_VER_BASE}/${MAC_TAR}" \
-              --arg mac_sig "$(cat "$MAC_SIG_FILE")" \
-              '{version: $version, notes: "", pub_date: $pub_date, platforms: {
-                 "windows-x86_64": {signature: $win_sig, url: $win_url},
-                 "darwin-x86_64":  {signature: $mac_sig, url: $mac_url},
-                 "darwin-aarch64": {signature: $mac_sig, url: $mac_url}
-               }}' > "$WORK/latest.json"
-            "$OSSUTIL" cp "$WORK/latest.json" "oss://${OSS_BUCKET}/releases/latest.json" --force
-            echo "OSS latest.json uploaded."
-          else
-            echo "::warning::Missing .sig assets; OSS latest.json not generated."
-          fi
 
-          # 3) releases.json — version index for the in-app version list.
+          # 2) releases.json — version index for the in-app version list.
           #    Fetch existing (ignore 404), drop any existing entry for this
           #    version, prepend the new one, keep newest 5.
           RELEASE_NOTES="$(gh release view "$TAG" -R "$REPO" --json body --jq '.body' 2>/dev/null || echo "")"
@@ -362,3 +361,102 @@ jobs:
 
           rm -rf "$WORK"
           echo "OSS mirror done."
+
+  # ========================================================================
+  # promote-to-oss — the all-users update switch.
+  #
+  # Runs ONLY on the release:released event, which GitHub fires when a release
+  # is published as non-prerelease (you un-check "pre-release" / "Set as latest
+  # release" on an existing pre-release). It does NOT rebuild — the installers
+  # were already built + mirrored at tag time. It just:
+  #   1. (re)generates OSS releases/latest.json from the release's .sig files,
+  #      with urls pointing at OSS — this is what the Tauri updater reads, so
+  #      this is the moment all users start getting the update.
+  #   2. flips this version's prerelease flag to false in releases/releases.json
+  #      so the in-app list drops the "Pre" badge.
+  #
+  # Best-effort (continue-on-error): GitHub stays the source of truth.
+  # ========================================================================
+  promote-to-oss:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Promote release to OSS latest.json
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
+          OSS_CDN_DOMAIN: ${{ secrets.OSS_CDN_DOMAIN }}
+        run: |
+          set -uo pipefail
+          VERSION="${TAG#v}"
+
+          if [ -z "${OSS_ACCESS_KEY_ID:-}" ] || [ -z "${OSS_ACCESS_KEY_SECRET:-}" ] || [ -z "${OSS_BUCKET:-}" ] || [ -z "${OSS_ENDPOINT:-}" ]; then
+            echo "::warning::OSS secrets not configured; skipping OSS promote."
+            exit 0
+          fi
+
+          REGION="$(echo "$OSS_ENDPOINT" | sed -E 's/^oss-([a-z0-9-]+)\.aliyuncs\.com$/\1/')"
+          if [ -n "${OSS_CDN_DOMAIN:-}" ]; then
+            PUBLIC_BASE="https://${OSS_CDN_DOMAIN}"
+          else
+            PUBLIC_BASE="https://${OSS_BUCKET}.${OSS_ENDPOINT}"
+          fi
+
+          OSSUTIL_VER="2.1.1"
+          curl -sSL -o /tmp/ossutil.zip "https://gosspublic.alicdn.com/ossutil/v2/${OSSUTIL_VER}/ossutil-${OSSUTIL_VER}-linux-amd64.zip"
+          unzip -o -q /tmp/ossutil.zip -d /tmp/ossutil-dist
+          OSSUTIL="$(find /tmp/ossutil-dist -maxdepth 2 -name ossutil -type f | head -1)"
+          chmod +x "$OSSUTIL"
+          export OSS_REGION="$REGION"
+
+          WORK="$(mktemp -d)"
+          WIN_EXE="CCLauncher_${VERSION}_x64-setup.exe"
+          MAC_TAR="CCLauncher_${VERSION}_universal.app.tar.gz"
+          MAC_DMG="CCLauncher_${VERSION}_universal.dmg"
+          PORTABLE="CC-Launcher_${VERSION}_x64_portable.zip"
+          OSS_VER_BASE="${PUBLIC_BASE}/releases/v${VERSION}"
+          PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # 1) Build OSS latest.json from the release's .sig files (signatures
+          #    verbatim — minisign verification must still pass). This is the
+          #    all-users trigger.
+          gh release download "$TAG" -R "$REPO" --pattern "${WIN_EXE}.sig" --dir "$WORK" --clobber 2>/dev/null || true
+          gh release download "$TAG" -R "$REPO" --pattern "${MAC_TAR}.sig" --dir "$WORK" --clobber 2>/dev/null || true
+          if [ -f "$WORK/${WIN_EXE}.sig" ] && [ -f "$WORK/${MAC_TAR}.sig" ]; then
+            jq -n \
+              --arg version "$VERSION" \
+              --arg pub_date "$PUB_DATE" \
+              --arg win_url "${OSS_VER_BASE}/${WIN_EXE}" \
+              --arg win_sig "$(cat "$WORK/${WIN_EXE}.sig")" \
+              --arg mac_url "${OSS_VER_BASE}/${MAC_TAR}" \
+              --arg mac_sig "$(cat "$WORK/${MAC_TAR}.sig")" \
+              '{version: $version, notes: "", pub_date: $pub_date, platforms: {
+                 "windows-x86_64": {signature: $win_sig, url: $win_url},
+                 "darwin-x86_64":  {signature: $mac_sig, url: $mac_url},
+                 "darwin-aarch64": {signature: $mac_sig, url: $mac_url}
+               }}' > "$WORK/latest.json"
+            "$OSSUTIL" cp "$WORK/latest.json" "oss://${OSS_BUCKET}/releases/latest.json" --force
+            echo "OSS latest.json promoted to v${VERSION} — update is now live for all users."
+          else
+            echo "::warning::Missing .sig assets for $TAG; OSS latest.json NOT promoted (was this version mirrored at tag time?)."
+          fi
+
+          # 2) Clear the "Pre" badge for this version in releases.json (best
+          #    effort — if the version isn't present yet it's left untouched).
+          if curl -fsSL "${PUBLIC_BASE}/releases/releases.json" -o "$WORK/releases.json" 2>/dev/null && jq empty "$WORK/releases.json" 2>/dev/null; then
+            jq --arg v "$VERSION" \
+              'map(if .version == $v then .prerelease = false else . end)' \
+              "$WORK/releases.json" > "$WORK/releases.new.json"
+            "$OSSUTIL" cp "$WORK/releases.new.json" "oss://${OSS_BUCKET}/releases/releases.json" --force
+            echo "releases.json: cleared prerelease flag for v${VERSION}."
+          fi
+
+          rm -rf "$WORK"
+          echo "Promote done."
