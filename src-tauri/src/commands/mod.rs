@@ -107,6 +107,26 @@ pub async fn check_skill_market() -> Result<dependency_checker::DependencyStatus
     Ok(Installer::check_skill_market())
 }
 
+/// Silent background updates (no terminal window). Used by auto-update after
+/// the background check detects a new version; failure falls back to the
+/// manual "有更新可用" badge.
+#[tauri::command]
+pub async fn update_claude_silent() -> Result<(), String> {
+    Installer::npm_update_silent("@anthropic-ai/claude-code").await
+}
+
+#[tauri::command]
+pub async fn update_codex_silent() -> Result<(), String> {
+    Installer::npm_update_silent("@openai/codex").await
+}
+
+/// Local check + a fast intranet probe (3s timeout) for package updates.
+/// External users without intranet access just get the local status back.
+#[tauri::command]
+pub async fn check_skill_market_with_update() -> Result<dependency_checker::DependencyStatus, String> {
+    Ok(Installer::check_skill_market_with_update().await)
+}
+
 /// Best-effort install. Has a built-in timeout (15s); on failure the wizard treats
 /// it as 'skipped' rather than 'error' since the marketplace is intranet-only.
 #[tauri::command]

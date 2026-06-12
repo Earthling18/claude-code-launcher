@@ -25,6 +25,9 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
   const [expanded, setExpanded] = useState(false);
   const [showCcConfig, setShowCcConfig] = useState(false);
   const hasChecked = useRef(false);
+  // One auto-update attempt per dep per session; a failed attempt leaves the
+  // "有更新可用" badge for the user to handle manually.
+  const autoUpdateAttempted = useRef<Set<string>>(new Set());
 
   const depConfig: Record<string, { label: string; checkFn: () => Promise<DependencyStatus>; installFn: () => Promise<unknown>; updateFn: () => Promise<unknown>; checkUpdateFn: () => Promise<DependencyStatus> }> = {
     nodejs: { label: 'Node.js', checkFn: api.checkNodejs, installFn: api.installNodejs, updateFn: api.updateNodejs, checkUpdateFn: api.checkNodejsWithUpdate },
@@ -37,7 +40,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
       checkFn: api.checkSkillMarket,
       installFn: api.installSkillMarket,
       updateFn: api.installSkillMarket,
-      checkUpdateFn: api.checkSkillMarket,
+      checkUpdateFn: api.checkSkillMarketWithUpdate,
     },
   };
 
@@ -51,6 +54,11 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
       const cached = sessionStorage.getItem('dependencyStatus');
       if (cached) {
         const c = JSON.parse(cached);
+        // A cache with missing core statuses (e.g. a check failed last time)
+        // would hide the panel for the whole session — re-check instead
+        if (!c.nodejs || !c.gitbash || !c.claude || !c.codex) {
+          throw new Error('incomplete cache');
+        }
         setDeps({
           nodejs: { status: c.nodejs || null, loading: false },
           git: { status: c.gitbash || null, loading: false },
@@ -58,11 +66,16 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
           codex: { status: c.codex || null, loading: false },
           skill_market: { status: c.skill_market || null, loading: false },
         });
+        // Cache from a plain check has no update info — refresh it silently
+        if (!c.__withUpdates) {
+          checkWithUpdates(true);
+        }
         return;
       }
     } catch (_) {}
 
-    runParallelCheck();
+    // Fast check first for immediate UI, then silently fetch update info
+    runParallelCheck().then(() => checkWithUpdates(true));
   }, []);
 
   const runParallelCheck = async () => {
@@ -104,9 +117,12 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
     }
   };
 
-  const checkWithUpdates = async () => {
-    sessionStorage.removeItem('dependencyStatus');
-    setChecking(true);
+  // silent=true runs in the background without flipping the UI into "检测中"
+  const checkWithUpdates = async (silent = false) => {
+    if (!silent) {
+      sessionStorage.removeItem('dependencyStatus');
+      setChecking(true);
+    }
     try {
       await api.refreshSystemPath();
       const [nodeResult, gitResult, claudeResult, codexResult, skillMarketResult] = await Promise.all([
@@ -114,30 +130,88 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
         api.checkGitbashWithUpdate().catch(() => null),
         api.checkClaudeWithUpdate().catch(() => null),
         api.checkCodexWithUpdate().catch(() => null),
-        api.checkSkillMarket().catch(() => null),
+        api.checkSkillMarketWithUpdate().catch(() => null),
       ]);
 
-      const newDeps = {
-        nodejs: { status: nodeResult, loading: false },
-        git: { status: gitResult, loading: false },
-        claude: { status: claudeResult, loading: false },
-        codex: { status: codexResult, loading: false },
-        skill_market: { status: skillMarketResult, loading: false },
-      };
-      setDeps(newDeps);
+      // Keep previous status when a check fails, so a flaky update check
+      // doesn't wipe out a valid earlier result
+      setDeps(prev => {
+        const merged = {
+          nodejs: { status: nodeResult || prev.nodejs.status, loading: false },
+          git: { status: gitResult || prev.git.status, loading: false },
+          claude: { status: claudeResult || prev.claude.status, loading: false },
+          codex: { status: codexResult || prev.codex.status, loading: false },
+          skill_market: { status: skillMarketResult || prev.skill_market.status, loading: false },
+        };
+        sessionStorage.setItem('dependencyStatus', JSON.stringify({
+          nodejs: merged.nodejs.status,
+          gitbash: merged.git.status,
+          claude: merged.claude.status,
+          codex: merged.codex.status,
+          skill_market: merged.skill_market.status,
+          __withUpdates: true,
+        }));
+        return merged;
+      });
 
-      sessionStorage.setItem('dependencyStatus', JSON.stringify({
-        nodejs: nodeResult,
-        gitbash: gitResult,
-        claude: claudeResult,
-        codex: codexResult,
-        skill_market: skillMarketResult,
-      }));
+      // Fire-and-forget: auto-update what we just detected (claude/codex/skill-market)
+      autoUpdateDeps({ claude: claudeResult, codex: codexResult, skill_market: skillMarketResult });
     } catch (error) {
       console.error('检测失败:', error);
     } finally {
-      setChecking(false);
+      if (!silent) setChecking(false);
     }
+  };
+
+  const updateDepCache = (key: string, status: DependencyStatus) => {
+    try {
+      const cached = sessionStorage.getItem('dependencyStatus');
+      if (!cached) return;
+      const c = JSON.parse(cached);
+      c[key === 'git' ? 'gitbash' : key] = status;
+      sessionStorage.setItem('dependencyStatus', JSON.stringify(c));
+    } catch (_) {}
+  };
+
+  // Auto-update claude/codex/skill-market in the background when a new version
+  // is detected. Node.js/Git stay manual — they run heavyweight system installers.
+  // Success → toast; failure → keep the update badge so the user can do it manually.
+  const autoUpdateDeps = async (results: Record<string, DependencyStatus | null>) => {
+    const targets: Array<{ key: string; updateFn: () => Promise<unknown> }> = [
+      { key: 'claude', updateFn: api.updateClaudeSilent },
+      { key: 'codex', updateFn: api.updateCodexSilent },
+      { key: 'skill_market', updateFn: api.installSkillMarket },
+    ];
+    await Promise.all(targets.map(async ({ key, updateFn }) => {
+      const st = results[key];
+      if (!st?.installed || !st.update_available) return;
+      if (autoUpdateAttempted.current.has(key)) return;
+      autoUpdateAttempted.current.add(key);
+
+      setDeps(prev => ({ ...prev, [key]: { ...prev[key], loading: true } }));
+      try {
+        await updateFn();
+        const fresh = await depConfig[key].checkFn().catch(() => null);
+        // skill-market has no version number; npm deps must actually reach latest
+        const updated = key === 'skill_market'
+          ? !!fresh?.installed
+          : !!(fresh?.version && st.latest_version && fresh.version === st.latest_version);
+        if (updated) {
+          const finalStatus = fresh ?? { ...st, update_available: false };
+          setDeps(prev => ({ ...prev, [key]: { status: finalStatus, loading: false } }));
+          updateDepCache(key, finalStatus);
+          toast.success(
+            key === 'skill_market'
+              ? `${depConfig[key].label} 已自动更新`
+              : `${depConfig[key].label} 已自动更新到 v${st.latest_version}`
+          );
+          return;
+        }
+      } catch (_) {
+        // fall through: keep the badge, let the user update manually
+      }
+      setDeps(prev => ({ ...prev, [key]: { status: st, loading: false } }));
+    }));
   };
 
   const handleAction = async (key: string, action: 'install' | 'update' | 'reinstall') => {
@@ -206,7 +280,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={checkWithUpdates}
+              onClick={() => checkWithUpdates()}
               disabled={checking}
               className="btn btn-ghost btn-sm"
             >

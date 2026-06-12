@@ -7,6 +7,10 @@ const SKILL_MARKET_NAME: &str = "skill-market";
 const SKILL_MARKET_SERVER: &str = "https://uat.prophecis.bdap.weoa.com";
 /// Hard timeout: install should finish in seconds on intranet; otherwise we skip.
 const SKILL_MARKET_TIMEOUT_SECS: u64 = 15;
+/// Update probe must fail fast for external users with no intranet access.
+const SKILL_MARKET_PROBE_TIMEOUT_SECS: u64 = 3;
+/// Server response metadata saved at install time, used to detect package updates.
+const SKILL_MARKET_META_FILE: &str = ".cc-launcher-meta.json";
 
 impl Installer {
     /// Check if skill-market is installed by looking for files inside the target dir.
@@ -71,6 +75,7 @@ impl Installer {
         if !resp.status().is_success() {
             return Err(format!("服务器返回 HTTP {}", resp.status()));
         }
+        let meta = Self::headers_to_meta(resp.headers());
         let bytes = resp.bytes().map_err(|e| format!("读取响应失败: {}", e))?;
 
         // Write to a temp zip then extract — `zip::ZipArchive` needs Read+Seek.
@@ -83,11 +88,161 @@ impl Installer {
         archive.extract(&dest).map_err(|e| format!("解压失败: {}", e))?;
 
         let _ = std::fs::remove_file(&tmp);
+
+        // Record server metadata so later checks can detect a new package version
+        if let Some(meta) = meta {
+            let _ = std::fs::write(
+                dest.join(SKILL_MARKET_META_FILE),
+                serde_json::to_vec(&meta).unwrap_or_default(),
+            );
+        }
         Ok(())
+    }
+
+    /// Probe the intranet server for a newer skill-market package by comparing
+    /// response headers (ETag / Last-Modified / Content-Length) against the meta
+    /// recorded at install time. Best-effort: any network failure (external users
+    /// have no route to the intranet) silently returns the plain local status.
+    pub async fn check_skill_market_with_update() -> crate::services::dependency_checker::DependencyStatus {
+        let mut status = Self::check_skill_market();
+        if !status.installed {
+            return status;
+        }
+
+        let Ok(client) = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(SKILL_MARKET_PROBE_TIMEOUT_SECS))
+            .danger_accept_invalid_certs(true)
+            .no_proxy()
+            .build()
+        else {
+            return status;
+        };
+
+        let url = format!(
+            "{}/cc/v2/plugin-guest/nameDown?pluginName={}",
+            SKILL_MARKET_SERVER, SKILL_MARKET_NAME
+        );
+
+        // Try HEAD first; the download endpoint may not support it (the zip can be
+        // packed on demand), so fall back to GET and drop the response before the
+        // body is read — send() resolves once headers arrive.
+        let mut remote_meta = None;
+        if let Ok(resp) = client.head(&url).header("User-Agent", "CCLauncher").send().await {
+            if resp.status().is_success() {
+                remote_meta = Self::headers_to_meta(resp.headers());
+            } else if let Ok(resp) = client.get(&url).header("User-Agent", "CCLauncher").send().await {
+                if resp.status().is_success() {
+                    remote_meta = Self::headers_to_meta(resp.headers());
+                }
+            }
+        }
+        let Some(remote_meta) = remote_meta else {
+            return status;
+        };
+
+        let local_meta = Self::skill_market_dir()
+            .map(|d| d.join(SKILL_MARKET_META_FILE))
+            .and_then(|p| std::fs::read(p).ok())
+            .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok());
+
+        // No local meta (installed by an older launcher) counts as outdated:
+        // one refresh re-downloads and records the meta.
+        let outdated = match &local_meta {
+            Some(local) => !Self::meta_matches(local, &remote_meta),
+            None => true,
+        };
+        if outdated {
+            status.update_available = true;
+            status.latest_version = Some("可更新".to_string());
+        }
+        status
+    }
+
+    /// Compare only fields present on BOTH sides — HEAD and GET responses may
+    /// expose different header sets (e.g. no Content-Length on HEAD). If nothing
+    /// is comparable, assume up-to-date rather than nagging with false positives.
+    fn meta_matches(local: &serde_json::Value, remote: &serde_json::Value) -> bool {
+        for key in ["etag", "last_modified", "content_length"] {
+            let l = local.get(key).and_then(|v| v.as_str());
+            let r = remote.get(key).and_then(|v| v.as_str());
+            if let (Some(l), Some(r)) = (l, r) {
+                if l != r {
+                    return false;
+                }
+            }
+        }
+        // No overlapping fields → nothing to judge by; treat as up-to-date
+        true
+    }
+
+    /// Extract identity headers into a comparable JSON value. Returns None when
+    /// the server provides nothing usable to compare.
+    fn headers_to_meta(headers: &reqwest::header::HeaderMap) -> Option<serde_json::Value> {
+        let get = |name: reqwest::header::HeaderName| {
+            headers
+                .get(name)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+        };
+        let etag = get(reqwest::header::ETAG);
+        let last_modified = get(reqwest::header::LAST_MODIFIED);
+        let content_length = get(reqwest::header::CONTENT_LENGTH);
+        if etag.is_none() && last_modified.is_none() && content_length.is_none() {
+            return None;
+        }
+        Some(serde_json::json!({
+            "etag": etag,
+            "last_modified": last_modified,
+            "content_length": content_length,
+        }))
     }
 
     fn skill_market_dir() -> Option<std::path::PathBuf> {
         dirs::home_dir().map(|h| h.join(".claude").join("skills").join(SKILL_MARKET_NAME))
+    }
+
+    /// Silent in-place npm update used by background auto-update — no terminal
+    /// window, unlike update_claude/update_codex which show progress to the user.
+    #[allow(unused_variables)]
+    pub async fn npm_update_silent(package: &str) -> Result<(), String> {
+        let pkg = format!("{}@latest", package);
+
+        #[cfg(windows)]
+        let mut cmd = {
+            let mut c = tokio::process::Command::new("cmd");
+            c.args(["/c", "npm", "install", "-g", &pkg]);
+            c.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            c
+        };
+
+        #[cfg(target_os = "macos")]
+        let mut cmd = {
+            let extended_path = crate::services::dependency_checker::get_macos_extended_path();
+            let mut c = tokio::process::Command::new("sh");
+            c.args(["-c", &format!("PATH='{}' npm install -g {}", extended_path, pkg)]);
+            c
+        };
+
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            return Err("不支持的操作系统".to_string());
+        }
+
+        #[cfg(any(windows, target_os = "macos"))]
+        {
+            let output = tokio::time::timeout(std::time::Duration::from_secs(300), cmd.output())
+                .await
+                .map_err(|_| "npm 更新超时".to_string())?
+                .map_err(|e| format!("npm 执行失败: {}", e))?;
+            if output.status.success() {
+                Ok(())
+            } else {
+                Err(format!(
+                    "npm 更新失败: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ))
+            }
+        }
     }
 }
 

@@ -26,7 +26,10 @@ export const api = {
   updateCodex: () => invoke('update_codex'),
   reinstallClaude: () => invoke('reinstall_claude'),
   reinstallCodex: () => invoke('reinstall_codex'),
+  updateClaudeSilent: () => invoke('update_claude_silent'),
+  updateCodexSilent: () => invoke('update_codex_silent'),
   checkSkillMarket: () => invoke<DependencyStatus>('check_skill_market'),
+  checkSkillMarketWithUpdate: () => invoke<DependencyStatus>('check_skill_market_with_update'),
   installSkillMarket: () => invoke('install_skill_market'),
 
   // 启动

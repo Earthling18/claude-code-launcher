@@ -789,37 +789,39 @@ impl DependencyChecker {
         }
     }
 
-    async fn get_claude_latest_version() -> Option<String> {
-        // 从 npm registry 获取最新版本 (跨平台)
-        let url = "https://registry.npmjs.org/@anthropic-ai/claude-code/latest";
+    /// 从 npm registry 获取包的最新版本，npmjs 不通时兜底 npmmirror（内网/代理环境常见）
+    async fn fetch_npm_latest_version(package: &str) -> Option<String> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .ok()?;
 
-        match reqwest::get(url).await {
-            Ok(response) => {
-                if let Ok(json) = response.json::<serde_json::Value>().await {
-                    return json.get("version")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
+        let urls = [
+            format!("https://registry.npmjs.org/{}/latest", package),
+            format!("https://registry.npmmirror.com/{}/latest", package),
+        ];
+
+        for url in &urls {
+            if let Ok(response) = client.get(url).send().await {
+                if response.status().is_success() {
+                    if let Ok(json) = response.json::<serde_json::Value>().await {
+                        if let Some(version) = json.get("version").and_then(|v| v.as_str()) {
+                            return Some(version.to_string());
+                        }
+                    }
                 }
             }
-            Err(_) => {}
         }
 
         None
     }
 
+    async fn get_claude_latest_version() -> Option<String> {
+        Self::fetch_npm_latest_version("@anthropic-ai/claude-code").await
+    }
+
     async fn get_codex_latest_version() -> Option<String> {
-        let url = "https://registry.npmjs.org/@openai/codex/latest";
-        match reqwest::get(url).await {
-            Ok(response) => {
-                if let Ok(json) = response.json::<serde_json::Value>().await {
-                    return json.get("version")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                }
-            }
-            Err(_) => {}
-        }
-        None
+        Self::fetch_npm_latest_version("@openai/codex").await
     }
 
     async fn get_gitbash_latest_version() -> Option<String> {
