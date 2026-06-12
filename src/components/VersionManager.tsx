@@ -46,8 +46,13 @@ export const VersionManager: React.FC = () => {
     setError(null);
     try {
       const res = await fetch(
-        'https://api.github.com/repos/erthman18/claude-code-launcher/releases'
+        'https://api.github.com/repos/Earthling18/claude-code-launcher/releases'
       );
+      // Anonymous GitHub API is limited to 60 req/hour PER IP — behind a
+      // corporate NAT/VPN the shared quota is often exhausted by others.
+      if (res.status === 403 || res.status === 429) {
+        throw new Error('GitHub 接口暂时限流（同出口 IP 共享额度），请约一小时后再试');
+      }
       if (!res.ok) throw new Error(`GitHub API returned ${res.status}`);
       const data: GitHubRelease[] = await res.json();
       setReleases(data);
