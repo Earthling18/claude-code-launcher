@@ -4,13 +4,16 @@ on:
   push:
     tags:
       - 'v*'
-  # Fires when a GitHub Release is published as NON-prerelease (i.e. you
-  # un-check "pre-release" / click "Set as latest release"). This is the
-  # all-users update switch: it (re)generates the OSS latest.json so the
-  # Tauri updater starts offering this version. Pushing a tag alone only
-  # mirrors the installers + lists the version — it never pushes to users.
+  # GitHub Release lifecycle drives the OSS update channel so the two never
+  # drift:
+  #   released                      -> promote-to-oss: point latest.json at it
+  #   prereleased/unpublished/deleted -> demote-oss: recompute latest.json from
+  #                                      the newest remaining NON-prerelease,
+  #                                      so withdrawing a release rolls users back.
+  # Pushing a tag alone only mirrors installers + lists the version; it never
+  # touches latest.json (no user push).
   release:
-    types: [released]
+    types: [released, prereleased, unpublished, deleted]
   workflow_dispatch:
 
 jobs:
@@ -378,7 +381,7 @@ jobs:
   # Best-effort (continue-on-error): GitHub stays the source of truth.
   # ========================================================================
   promote-to-oss:
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' && github.event.action == 'released'
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -460,3 +463,114 @@ jobs:
 
           rm -rf "$WORK"
           echo "Promote done."
+
+  # ========================================================================
+  # demote-oss — keeps OSS in sync when a release is withdrawn.
+  #
+  # Runs on release:prereleased / unpublished / deleted (you turn a release
+  # back into a pre-release, unpublish it, or delete it). It recomputes the
+  # OSS latest.json from the NEWEST remaining published non-prerelease release
+  # on GitHub, so users roll back to whatever the current "latest official"
+  # actually is — GitHub and OSS never drift. It also re-syncs the prerelease
+  # flags in releases.json to match GitHub.
+  #
+  # Best-effort (continue-on-error).
+  # ========================================================================
+  demote-oss:
+    if: github.event_name == 'release' && (github.event.action == 'prereleased' || github.event.action == 'unpublished' || github.event.action == 'deleted')
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - name: Re-sync OSS to newest official release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
+          OSS_CDN_DOMAIN: ${{ secrets.OSS_CDN_DOMAIN }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${OSS_ACCESS_KEY_ID:-}" ] || [ -z "${OSS_ACCESS_KEY_SECRET:-}" ] || [ -z "${OSS_BUCKET:-}" ] || [ -z "${OSS_ENDPOINT:-}" ]; then
+            echo "::warning::OSS secrets not configured; skipping OSS demote."
+            exit 0
+          fi
+
+          REGION="$(echo "$OSS_ENDPOINT" | sed -E 's/^oss-([a-z0-9-]+)\.aliyuncs\.com$/\1/')"
+          if [ -n "${OSS_CDN_DOMAIN:-}" ]; then
+            PUBLIC_BASE="https://${OSS_CDN_DOMAIN}"
+          else
+            PUBLIC_BASE="https://${OSS_BUCKET}.${OSS_ENDPOINT}"
+          fi
+
+          OSSUTIL_VER="2.1.1"
+          curl -sSL -o /tmp/ossutil.zip "https://gosspublic.alicdn.com/ossutil/v2/${OSSUTIL_VER}/ossutil-${OSSUTIL_VER}-linux-amd64.zip"
+          unzip -o -q /tmp/ossutil.zip -d /tmp/ossutil-dist
+          OSSUTIL="$(find /tmp/ossutil-dist -maxdepth 2 -name ossutil -type f | head -1)"
+          chmod +x "$OSSUTIL"
+          export OSS_REGION="$REGION"
+          WORK="$(mktemp -d)"
+          PUB_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # 1) Newest published, non-draft, non-prerelease release on GitHub.
+          #    --exclude-pre-releases + --exclude-drafts gives us exactly the
+          #    "latest official" set; take the highest version.
+          NEWEST="$(gh release list -R "$REPO" --exclude-pre-releases --exclude-drafts --limit 30 \
+            --json tagName,isPrerelease,isDraft --jq \
+            '[.[] | select(.isPrerelease==false and .isDraft==false) | .tagName]
+             | map(ltrimstr("v"))
+             | sort_by(split(".") | map(tonumber? // 0))
+             | last // empty')"
+
+          if [ -z "$NEWEST" ]; then
+            echo "::warning::No published non-prerelease release remains; leaving OSS latest.json unchanged."
+          else
+            echo "Rolling OSS latest.json back to newest official: v${NEWEST}"
+            VERSION="$NEWEST"
+            TAG="v${VERSION}"
+            WIN_EXE="CCLauncher_${VERSION}_x64-setup.exe"
+            MAC_TAR="CCLauncher_${VERSION}_universal.app.tar.gz"
+            OSS_VER_BASE="${PUBLIC_BASE}/releases/v${VERSION}"
+            gh release download "$TAG" -R "$REPO" --pattern "${WIN_EXE}.sig" --dir "$WORK" --clobber 2>/dev/null || true
+            gh release download "$TAG" -R "$REPO" --pattern "${MAC_TAR}.sig" --dir "$WORK" --clobber 2>/dev/null || true
+            if [ -f "$WORK/${WIN_EXE}.sig" ] && [ -f "$WORK/${MAC_TAR}.sig" ]; then
+              jq -n \
+                --arg version "$VERSION" \
+                --arg pub_date "$PUB_DATE" \
+                --arg win_url "${OSS_VER_BASE}/${WIN_EXE}" \
+                --arg win_sig "$(cat "$WORK/${WIN_EXE}.sig")" \
+                --arg mac_url "${OSS_VER_BASE}/${MAC_TAR}" \
+                --arg mac_sig "$(cat "$WORK/${MAC_TAR}.sig")" \
+                '{version: $version, notes: "", pub_date: $pub_date, platforms: {
+                   "windows-x86_64": {signature: $win_sig, url: $win_url},
+                   "darwin-x86_64":  {signature: $mac_sig, url: $mac_url},
+                   "darwin-aarch64": {signature: $mac_sig, url: $mac_url}
+                 }}' > "$WORK/latest.json"
+              "$OSSUTIL" cp "$WORK/latest.json" "oss://${OSS_BUCKET}/releases/latest.json" --force
+              echo "OSS latest.json rolled back to v${VERSION}."
+            else
+              echo "::warning::Missing .sig for v${VERSION}; could not rebuild latest.json."
+            fi
+          fi
+
+          # 2) Re-sync releases.json prerelease flags to match GitHub, and drop
+          #    any version whose GitHub release no longer exists (deleted).
+          if curl -fsSL "${PUBLIC_BASE}/releases/releases.json" -o "$WORK/releases.json" 2>/dev/null && jq empty "$WORK/releases.json" 2>/dev/null; then
+            # Map of tag -> prerelease from GitHub (existing releases only).
+            gh release list -R "$REPO" --limit 50 --json tagName,isPrerelease,isDraft \
+              --jq '[.[] | {key: (.tagName|ltrimstr("v")), value: (.isPrerelease or .isDraft)}] | from_entries' \
+              > "$WORK/gh_state.json"
+            jq --slurpfile gh "$WORK/gh_state.json" '
+              ($gh[0]) as $state
+              | map(select(.version as $v | $state | has($v)))          # drop deleted
+              | map(.prerelease = ($state[.version]))                    # sync flag
+            ' "$WORK/releases.json" > "$WORK/releases.new.json"
+            "$OSSUTIL" cp "$WORK/releases.new.json" "oss://${OSS_BUCKET}/releases/releases.json" --force
+            echo "releases.json re-synced with GitHub prerelease/draft state."
+          fi
+
+          rm -rf "$WORK"
+          echo "Demote done."
