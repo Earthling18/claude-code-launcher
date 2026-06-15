@@ -717,7 +717,11 @@ impl DependencyChecker {
                 cmd.args(&["show", "OpenJS.NodeJS.LTS"]);
                 #[cfg(windows)]
                 cmd.creation_flags(CREATE_NO_WINDOW);
-                if let Ok(output) = cmd.output().await
+                // 超时丢弃 future 时杀掉子进程，否则卡住的 winget 会在后台残留
+                cmd.kill_on_drop(true);
+                // winget 在部分机器上会挂住（首次运行/更新 source）；单次限时 8s，避免拖垮检测
+                if let Ok(Ok(output)) =
+                    tokio::time::timeout(std::time::Duration::from_secs(8), cmd.output()).await
                 {
                     if output.status.success() {
                         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -742,7 +746,7 @@ impl DependencyChecker {
             }
 
             // winget 失败，fallback 到 npmmirror
-            if let Ok(response) = reqwest::get("https://cdn.npmmirror.com/binaries/node/index.json").await {
+            if let Some(response) = Self::http_get_with_timeout("https://cdn.npmmirror.com/binaries/node/index.json").await {
                 if let Ok(json) = response.json::<Vec<serde_json::Value>>().await {
                     for entry in &json {
                         if entry.get("lts").and_then(|v| v.as_str()).is_some()
@@ -765,11 +769,16 @@ impl DependencyChecker {
 
         #[cfg(target_os = "macos")]
         {
-            // macOS: 使用 brew 检查最新版本
-            if let Ok(output) = tokio::process::Command::new("brew")
-                .args(&["info", "node", "--json=v2"])
-                .output()
-                .await
+            // macOS: 使用 brew 检查最新版本。brew 可能触发 auto-update 或网络阻塞，
+            // 限时 10s，避免把依赖检测卡在"检测中"。
+            if let Ok(Ok(output)) = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                tokio::process::Command::new("brew")
+                    .args(&["info", "node", "--json=v2"])
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await
             {
                 if output.status.success() {
                     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -787,6 +796,18 @@ impl DependencyChecker {
         {
             None
         }
+    }
+
+    /// reqwest GET，带超时。裸 reqwest::get 没有超时，连上但服务端不回数据时会永久挂住，
+    /// 进而把整个依赖检测卡在"检测中"。镜像兜底请求统一走这里。
+    /// 仅 Windows 的 winget 兜底链路使用（macOS 走 brew），故按平台门控避免 dead_code。
+    #[cfg(windows)]
+    async fn http_get_with_timeout(url: &str) -> Option<reqwest::Response> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(8))
+            .build()
+            .ok()?;
+        client.get(url).send().await.ok()
     }
 
     /// 从 npm registry 获取包的最新版本，npmjs 不通时兜底 npmmirror（内网/代理环境常见）
@@ -833,7 +854,11 @@ impl DependencyChecker {
                 cmd.args(&["show", "Git.Git"]);
                 #[cfg(windows)]
                 cmd.creation_flags(CREATE_NO_WINDOW);
-                if let Ok(output) = cmd.output().await
+                // 超时丢弃 future 时杀掉子进程，否则卡住的 winget 会在后台残留
+                cmd.kill_on_drop(true);
+                // winget 在部分机器上会挂住（首次运行/更新 source）；单次限时 8s，避免拖垮检测
+                if let Ok(Ok(output)) =
+                    tokio::time::timeout(std::time::Duration::from_secs(8), cmd.output()).await
                 {
                     if output.status.success() {
                         let stdout = String::from_utf8_lossy(&output.stdout);
@@ -858,7 +883,7 @@ impl DependencyChecker {
             }
 
             // winget 失败，fallback 到 npmmirror git-for-windows 镜像
-            if let Ok(response) = reqwest::get("https://registry.npmmirror.com/-/binary/git-for-windows/").await {
+            if let Some(response) = Self::http_get_with_timeout("https://registry.npmmirror.com/-/binary/git-for-windows/").await {
                 if let Ok(json) = response.json::<Vec<serde_json::Value>>().await {
                     let re = Regex::new(r"^v([\d.]+)\.windows\.\d+/$").unwrap();
                     let mut best_version: Option<String> = None;
@@ -886,11 +911,16 @@ impl DependencyChecker {
 
         #[cfg(target_os = "macos")]
         {
-            // macOS: 使用 brew 检查最新版本
-            if let Ok(output) = tokio::process::Command::new("brew")
-                .args(&["info", "git", "--json=v2"])
-                .output()
-                .await
+            // macOS: 使用 brew 检查最新版本。brew 可能触发 auto-update 或网络阻塞，
+            // 限时 10s，避免把依赖检测卡在"检测中"。
+            if let Ok(Ok(output)) = tokio::time::timeout(
+                std::time::Duration::from_secs(10),
+                tokio::process::Command::new("brew")
+                    .args(&["info", "git", "--json=v2"])
+                    .kill_on_drop(true)
+                    .output(),
+            )
+            .await
             {
                 if output.status.success() {
                     let stdout = String::from_utf8_lossy(&output.stdout);

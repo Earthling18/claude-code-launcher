@@ -8,6 +8,16 @@ import { CcConfigPanel } from './CcConfigPanel';
 
 const SKILL_MARKET_URL = 'http://uat.aiep.weoa.com/#/assets/plugin?microPath=/assets/plugin';
 
+// 单项检测最长等待时间。后端虽已加超时，这里再兜一层：任何一项卡住都不会
+// 让整个面板永远停在"检测中"。超时按失败处理（resolve null），不影响其他项。
+const CHECK_TIMEOUT_MS = 20000;
+function withTimeout<T>(p: Promise<T>): Promise<T | null> {
+  return Promise.race([
+    p,
+    new Promise<null>(resolve => setTimeout(() => resolve(null), CHECK_TIMEOUT_MS)),
+  ]);
+}
+
 interface DependencyFrameProps {
   projects?: Project[];
   platform?: string;
@@ -93,7 +103,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
       ];
       const results: Record<string, DependencyStatus | null> = {};
       await Promise.all(checks.map(async ({ key, fn }) => {
-        const status = await fn().catch(() => null);
+        const status = await withTimeout(fn()).catch(() => null);
         results[key] = status;
         setDeps(prev => ({ ...prev, [key]: { status, loading: false } }));
       }));
@@ -134,7 +144,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
       ];
       const results: Record<string, DependencyStatus | null> = {};
       await Promise.all(checks.map(async ({ key, fn }) => {
-        const status = await fn().catch(() => null);
+        const status = await withTimeout(fn()).catch(() => null);
         results[key] = status;
         // Update each row as it finishes; keep the previous status when a
         // check fails so a flaky round doesn't wipe out a valid result
