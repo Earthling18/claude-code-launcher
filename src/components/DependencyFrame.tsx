@@ -38,6 +38,15 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
   // One auto-update attempt per dep per session; a failed attempt leaves the
   // "有更新可用" badge for the user to handle manually.
   const autoUpdateAttempted = useRef<Set<string>>(new Set());
+  // Concurrency guards: withTimeout (Promise.race) unblocks the UI at 20s but
+  // does NOT cancel the underlying Tauri invoke — the backend keeps running.
+  // checkInFlight stops a second round from stacking on top of a running one;
+  // checkEpoch lets a fresh round discard the stale round's late results.
+  const checkInFlight = useRef(false);
+  const checkEpoch = useRef(0);
+  // True once at least one full check round has completed, so a row that never
+  // resolved shows a neutral "未检测到" instead of spinning on "checking…" forever.
+  const [checkDone, setCheckDone] = useState(false);
 
   const depConfig: Record<string, { label: string; checkFn: () => Promise<DependencyStatus>; installFn: () => Promise<unknown>; updateFn: () => Promise<unknown>; checkUpdateFn: () => Promise<DependencyStatus> }> = {
     nodejs: { label: 'Node.js', checkFn: api.checkNodejs, installFn: api.installNodejs, updateFn: api.updateNodejs, checkUpdateFn: api.checkNodejsWithUpdate },
@@ -92,6 +101,9 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
   // (e.g. backend auto-reinstall when claude/codex is missing) must not hide
   // the whole bar or block the other rows.
   const runParallelCheck = async () => {
+    if (checkInFlight.current) return; // a round is already running — don't stack
+    checkInFlight.current = true;
+    const epoch = ++checkEpoch.current;
     setChecking(true);
     try {
       const checks: Array<{ key: string; fn: () => Promise<DependencyStatus> }> = [
@@ -105,7 +117,10 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
       await Promise.all(checks.map(async ({ key, fn }) => {
         const status = await withTimeout(fn()).catch(() => null);
         results[key] = status;
-        setDeps(prev => ({ ...prev, [key]: { status, loading: false } }));
+        if (checkEpoch.current !== epoch) return; // newer round started — drop stale result
+        // null = no result this round; keep any prior status rather than
+        // regressing the row back to "checking…".
+        setDeps(prev => ({ ...prev, [key]: { status: status ?? prev[key].status, loading: false } }));
       }));
 
       // Auto-expand only if a *required* dep is missing. skill-market is best-effort
@@ -123,18 +138,28 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
     } catch (error) {
       console.error('检测失败:', error);
     } finally {
-      setChecking(false);
+      if (checkEpoch.current === epoch) {
+        checkInFlight.current = false;
+        setChecking(false);
+        setCheckDone(true);
+      }
     }
   };
 
   // silent=true runs in the background without flipping the UI into "检测中"
   const checkWithUpdates = async (silent = false) => {
-    if (!silent) {
-      sessionStorage.removeItem('dependencyStatus');
-      setChecking(true);
-    }
+    if (checkInFlight.current) return; // a round is already running — don't stack
+    checkInFlight.current = true;
+    const epoch = ++checkEpoch.current;
     try {
-      await api.refreshSystemPath();
+      if (!silent) {
+        sessionStorage.removeItem('dependencyStatus');
+        setChecking(true);
+      }
+      // Bounded like every other await in the guarded region: refresh_system_path
+      // is registry I/O on Windows (no-op on macOS), but wrapping it guarantees a
+      // stuck invoke can never strand checkInFlight and freeze all future checks.
+      await withTimeout(api.refreshSystemPath());
       const checks: Array<{ key: string; fn: () => Promise<DependencyStatus> }> = [
         { key: 'nodejs', fn: api.checkNodejsWithUpdate },
         { key: 'git', fn: api.checkGitbashWithUpdate },
@@ -146,11 +171,10 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
       await Promise.all(checks.map(async ({ key, fn }) => {
         const status = await withTimeout(fn()).catch(() => null);
         results[key] = status;
-        // Update each row as it finishes; keep the previous status when a
-        // check fails so a flaky round doesn't wipe out a valid result
-        if (status) {
-          setDeps(prev => ({ ...prev, [key]: { status, loading: false } }));
-        }
+        if (checkEpoch.current !== epoch) return; // newer round started — drop stale result
+        // null = couldn't fetch update info (timeout/offline); keep the prior
+        // local status (no badge) — treat as "no new version", never error or stick.
+        setDeps(prev => ({ ...prev, [key]: { status: status ?? prev[key].status, loading: false } }));
       }));
 
       // Cache the merged snapshot (reading latest state inside the updater)
@@ -171,7 +195,11 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
     } catch (error) {
       console.error('检测失败:', error);
     } finally {
-      if (!silent) setChecking(false);
+      if (checkEpoch.current === epoch) {
+        checkInFlight.current = false;
+        setCheckDone(true);
+        if (!silent) setChecking(false);
+      }
     }
   };
 
@@ -330,7 +358,9 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
                   )}
                 </span>
                 {!d.status ? (
-                  <span className="font-mono text-[10.5px] text-text-tertiary">checking…</span>
+                  <span className="font-mono text-[10.5px] text-text-tertiary">
+                    {checkDone ? '未检测到' : 'checking…'}
+                  </span>
                 ) : !d.status.installed ? (
                   <>
                     <span className="font-mono text-[10.5px] text-error/90">missing</span>
