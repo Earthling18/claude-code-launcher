@@ -20,6 +20,19 @@ pub fn run() {
         std::env::set_var("no_proxy", &new_val);
     }
 
+    // Windows: disable WebView2 GPU compositing as a fallback for the black-screen
+    // hang seen on some machines (e.g. AMD integrated graphics with buggy factory
+    // drivers). The launcher UI is lightweight, so software rendering is imperceptible,
+    // and this avoids the deterministic blank-render + frozen-window failure mode.
+    // Respect an existing value so power users can still override.
+    #[cfg(windows)]
+    if std::env::var("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").is_err() {
+        std::env::set_var(
+            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+            "--disable-gpu --disable-gpu-compositing",
+        );
+    }
+
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
