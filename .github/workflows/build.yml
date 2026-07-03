@@ -12,16 +12,25 @@ on:
   #                                      so withdrawing a release rolls users back.
   # Pushing a tag alone only mirrors installers + lists the version; it never
   # touches latest.json (no user push).
+  # NOTE: `unpublished` (published -> draft) does NOT actually trigger workflows —
+  # GitHub skips workflow runs for releases that are drafts at delivery time. After
+  # drafting a release, run this workflow manually with oss_sync_only=true to
+  # re-sync OSS (gh workflow run "Build and Release" -f oss_sync_only=true).
   release:
     types: [released, prereleased, unpublished, deleted]
   workflow_dispatch:
+    inputs:
+      oss_sync_only:
+        description: 'Only re-sync OSS latest.json/releases.json with GitHub release state (no build)'
+        type: boolean
+        default: false
 
 jobs:
   check-version:
     # Build chain runs for tag pushes / manual dispatch only. The `released`
     # event takes the lightweight publish-to-OSS path (promote-to-oss) instead,
     # reusing the already-built installers — no rebuild.
-    if: github.event_name != 'release'
+    if: github.event_name != 'release' && !(github.event_name == 'workflow_dispatch' && inputs.oss_sync_only)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -477,7 +486,7 @@ jobs:
   # Best-effort (continue-on-error).
   # ========================================================================
   demote-oss:
-    if: github.event_name == 'release' && (github.event.action == 'prereleased' || github.event.action == 'unpublished' || github.event.action == 'deleted')
+    if: (github.event_name == 'release' && (github.event.action == 'prereleased' || github.event.action == 'unpublished' || github.event.action == 'deleted')) || (github.event_name == 'workflow_dispatch' && inputs.oss_sync_only)
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
@@ -557,11 +566,13 @@ jobs:
           fi
 
           # 2) Re-sync releases.json prerelease flags to match GitHub, and drop
-          #    any version whose GitHub release no longer exists (deleted).
+          #    any version whose GitHub release no longer exists (deleted) or is
+          #    a draft — drafts are unpublished, so the in-app version list must
+          #    not offer them.
           if curl -fsSL "${PUBLIC_BASE}/releases/releases.json" -o "$WORK/releases.json" 2>/dev/null && jq empty "$WORK/releases.json" 2>/dev/null; then
-            # Map of tag -> prerelease from GitHub (existing releases only).
+            # Map of tag -> prerelease from GitHub (published releases only).
             gh release list -R "$REPO" --limit 50 --json tagName,isPrerelease,isDraft \
-              --jq '[.[] | {key: (.tagName|ltrimstr("v")), value: (.isPrerelease or .isDraft)}] | from_entries' \
+              --jq '[.[] | select(.isDraft | not) | {key: (.tagName|ltrimstr("v")), value: .isPrerelease}] | from_entries' \
               > "$WORK/gh_state.json"
             jq --slurpfile gh "$WORK/gh_state.json" '
               ($gh[0]) as $state
