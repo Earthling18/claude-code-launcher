@@ -14,6 +14,11 @@ edition = "2021"
 name = "cc_launcher_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Diagnostic-only: enables WebView2 DevTools + auto-open in setup. Build with
+# `cargo build --release --features devtools`. Not part of any release build.
+devtools = ["tauri/devtools"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
