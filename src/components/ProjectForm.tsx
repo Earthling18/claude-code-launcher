@@ -62,7 +62,16 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       : 'custom'
   );
   const [isPinned, setIsPinned] = useState(initialIsPinned);
-  const [proxyPresetId, setProxyPresetId] = useState<string | null>(initialConfig?.proxy_preset_id ?? null);
+  const [claudeProxyPresetId, setClaudeProxyPresetId] = useState<string | null>(
+    initialConfig?.claude_proxy_preset_id
+      ?? (initialConfig?.mode === 'claude' ? initialConfig?.proxy_preset_id : null)
+      ?? null
+  );
+  const [codexProxyPresetId, setCodexProxyPresetId] = useState<string | null>(
+    initialConfig?.codex_proxy_preset_id
+      ?? (initialConfig?.mode === 'codex' ? initialConfig?.proxy_preset_id : null)
+      ?? null
+  );
   const [modelPresetId, setModelPresetId] = useState<string | null>(initialConfig?.model_preset_id ?? null);
   const [skipPermissions, setSkipPermissions] = useState(initialConfig?.skip_permissions ?? true);
   const [customCli, setCustomCli] = useState<'claude' | 'codex'>(initialConfig?.custom_cli || 'claude');
@@ -81,7 +90,16 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
   useEffect(() => {
     if (initialConfig) {
       if (initialConfig.mode === 'claude' || initialConfig.mode === 'custom' || initialConfig.mode === 'codex') setMode(initialConfig.mode);
-      if (initialConfig.proxy_preset_id !== undefined) setProxyPresetId(initialConfig.proxy_preset_id ?? null);
+      setClaudeProxyPresetId(
+        initialConfig.claude_proxy_preset_id
+          ?? (initialConfig.mode === 'claude' ? initialConfig.proxy_preset_id : null)
+          ?? null
+      );
+      setCodexProxyPresetId(
+        initialConfig.codex_proxy_preset_id
+          ?? (initialConfig.mode === 'codex' ? initialConfig.proxy_preset_id : null)
+          ?? null
+      );
       if (initialConfig.model_preset_id !== undefined) setModelPresetId(initialConfig.model_preset_id ?? null);
       if (initialConfig.skip_permissions !== undefined) setSkipPermissions(initialConfig.skip_permissions);
       if (initialConfig.custom_cli) setCustomCli(initialConfig.custom_cli);
@@ -112,7 +130,9 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       skip_permissions: skipPermissions,
       codex_api_key: '',
       custom_cli: customCli,
-      proxy_preset_id: (mode === 'claude' || mode === 'codex') ? proxyPresetId : null,
+      proxy_preset_id: null,
+      claude_proxy_preset_id: claudeProxyPresetId,
+      codex_proxy_preset_id: codexProxyPresetId,
       model_preset_id: mode === 'custom' ? modelPresetId : null,
     };
 
@@ -191,7 +211,12 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
 
       {(mode === 'claude' || mode === 'codex') && (
         <Row label="代理" hint={`原版 ${mode === 'claude' ? 'Claude' : 'Codex'} 服务可能需要翻墙；不需要请留空`}>
-          <PresetSelect kind="proxy" value={proxyPresetId} onChange={setProxyPresetId} allowEmpty />
+          <PresetSelect
+            kind="proxy"
+            value={mode === 'claude' ? claudeProxyPresetId : codexProxyPresetId}
+            onChange={mode === 'claude' ? setClaudeProxyPresetId : setCodexProxyPresetId}
+            allowEmpty
+          />
         </Row>
       )}
 

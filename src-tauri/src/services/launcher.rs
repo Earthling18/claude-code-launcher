@@ -323,6 +323,28 @@ impl Launcher {
         }
     }
 
+    /// Locate the npm package dir behind a resolved shim and return the first
+    /// truncated/corrupted native exe inside it, if any. An interrupted update
+    /// can leave e.g. claude-code's ~250MB bin/claude.exe half-written; the
+    /// shim still resolves, so `where.exe` alone cannot catch this.
+    #[cfg(windows)]
+    fn find_corrupted_package_exe(where_stdout: &[u8], npm_package: &str) -> Option<PathBuf> {
+        use super::installer::Installer;
+        let shim_lines = String::from_utf8_lossy(where_stdout);
+        let shim = PathBuf::from(shim_lines.lines().next()?.trim());
+        let mut pkg_dir = shim.parent()?.join("node_modules");
+        for part in npm_package.split('/') {
+            pkg_dir.push(part);
+        }
+        // Not the npm-shim layout (e.g. native installer on PATH) — nothing to check.
+        if !pkg_dir.is_dir() {
+            return None;
+        }
+        let mut exes = Vec::new();
+        Installer::collect_package_exes(&pkg_dir, 0, &mut exes);
+        exes.into_iter().find(|e| Installer::exe_corrupted(e))
+    }
+
     #[cfg(windows)]
     fn execute_windows(command: &str, working_dir: Option<String>) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
@@ -370,7 +392,27 @@ impl Launcher {
             check.stderr.len()
         ));
 
-        if !check.status.success() || check.stdout.is_empty() {
+        let shim_missing = !check.status.success() || check.stdout.is_empty();
+
+        // Even when the shim resolves, an interrupted update can leave the
+        // package's native binary truncated (e.g. claude-code's ~250MB
+        // bin/claude.exe) — Windows then fails it with the misleading
+        // "不支持的 16 位应用程序" dialog. Catch that here too.
+        let corrupted_exe = if shim_missing {
+            None
+        } else {
+            Self::find_corrupted_package_exe(&check.stdout, npm_package)
+        };
+
+        if let Some(ref bad) = corrupted_exe {
+            Self::log_line(&format!("{} native exe corrupted: {}", cli_bin, bad.display()));
+            return Err(format!(
+                "{}安装已损坏，请在依赖面板点击“重装”后再启动",
+                cli_label
+            ));
+        }
+
+        if shim_missing {
             let npm_list_cmd = format!("npm list -g {} --depth=0 2>$null", npm_package);
             let npm_check = Command::new("powershell.exe")
                 .args(&["-Command", &npm_list_cmd])
@@ -392,8 +434,10 @@ impl Launcher {
                 Self::log_line(&format!("{} npm package exists but shim missing", cli_bin));
             }
 
-            // Attempt repair regardless — npm install -g will fix both broken symlinks and missing packages
-            Self::log_line(&format!("{} not in PATH, attempting reinstall...", cli_bin));
+            // A missing npm shim is inexpensive to repair automatically. A
+            // damaged native binary is handled above and requires explicit
+            // user confirmation through the Reinstall button.
+            Self::log_line(&format!("{} shim missing, attempting reinstall...", cli_bin));
             let repair = Command::new("cmd.exe")
                 .args(&["/c", "npm", "install", "-g", npm_package])
                 .creation_flags(CREATE_NO_WINDOW)
@@ -401,18 +445,17 @@ impl Launcher {
 
             match &repair {
                 Ok(out) => Self::log_line(&format!(
-                    "shim repair exit={:?} stdout={}B stderr={}B",
+                    "repair exit={:?} stdout={}B stderr={}B",
                     out.status.code(),
                     out.stdout.len(),
                     out.stderr.len()
                 )),
-                Err(e) => Self::log_line(&format!("shim repair failed to run: {}", e)),
+                Err(e) => Self::log_line(&format!("repair failed to run: {}", e)),
             }
 
             // Refresh PATH again after repair
             super::dependency_checker::DependencyChecker::refresh_system_path();
 
-            // Verify CLI is now findable
             let recheck = Command::new("where.exe")
                 .arg(cli_bin)
                 .creation_flags(CREATE_NO_WINDOW)
@@ -423,7 +466,7 @@ impl Launcher {
                 .map(|o| o.status.success() && !o.stdout.is_empty())
                 .unwrap_or(false);
 
-            Self::log_line(&format!("shim repair result: {}", if repaired { "OK" } else { "FAILED" }));
+            Self::log_line(&format!("repair result: {}", if repaired { "OK" } else { "FAILED" }));
 
             if !repaired {
                 return Err(format!("{}的命令文件丢失，自动修复失败。请手动运行: npm install -g {}", cli_label, npm_package));
@@ -714,5 +757,40 @@ impl Launcher {
 
         commands.push(Self::build_cli_command(config));
         commands.join(" && ")
+    }
+}
+
+#[cfg(all(test, windows))]
+mod corrupted_exe_tests {
+    use super::Launcher;
+
+    #[test]
+    fn finds_corrupted_exe_behind_resolved_shim() {
+        let root = std::env::temp_dir().join(format!("ccl-shim-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let pkg_bin = root
+            .join("node_modules")
+            .join("@anthropic-ai")
+            .join("claude-code")
+            .join("bin");
+        std::fs::create_dir_all(&pkg_bin).unwrap();
+        let shim = root.join("claude.cmd");
+        std::fs::write(&shim, "@echo off").unwrap();
+        // where.exe output: shim path + CRLF, possibly more lines
+        let where_out = format!("{}\r\n{}\r\n", shim.display(), root.join("claude").display()).into_bytes();
+        let exe = pkg_bin.join("claude.exe");
+
+        std::fs::write(&exe, b"").unwrap(); // truncated by an interrupted update
+        let found = Launcher::find_corrupted_package_exe(&where_out, "@anthropic-ai/claude-code");
+        assert_eq!(found.as_deref(), Some(exe.as_path()));
+
+        std::fs::write(&exe, b"MZ\x90\x00rest").unwrap(); // healthy binary
+        assert!(Launcher::find_corrupted_package_exe(&where_out, "@anthropic-ai/claude-code").is_none());
+
+        // Non-npm layout (e.g. native installer on PATH): no package dir → no check
+        let bare = format!("{}\r\n", root.join("elsewhere").join("claude.exe").display()).into_bytes();
+        assert!(Launcher::find_corrupted_package_exe(&bare, "@anthropic-ai/claude-code").is_none());
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

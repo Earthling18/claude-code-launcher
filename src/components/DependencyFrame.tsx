@@ -38,6 +38,8 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
   // One auto-update attempt per dep per session; a failed attempt leaves the
   // "有更新可用" badge for the user to handle manually.
   const autoUpdateAttempted = useRef<Set<string>>(new Set());
+  // Repeated checks may refresh status, but only one auto-update queue can run.
+  const autoUpdateInFlight = useRef(false);
   // Concurrency guards: withTimeout (Promise.race) unblocks the UI at 20s but
   // does NOT cancel the underlying Tauri invoke — the backend keeps running.
   // checkInFlight stops a second round from stacking on top of a running one;
@@ -98,7 +100,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
   }, []);
 
   // Each check updates its own row as soon as it finishes — a slow check
-  // (e.g. backend auto-reinstall when claude/codex is missing) must not hide
+  // (e.g. a slow CLI version probe) must not hide
   // the whole bar or block the other rows.
   const runParallelCheck = async () => {
     if (checkInFlight.current) return; // a round is already running — don't stack
@@ -217,41 +219,56 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
   // is detected. Node.js/Git stay manual — they run heavyweight system installers.
   // Success → toast; failure → keep the update badge so the user can do it manually.
   const autoUpdateDeps = async (results: Record<string, DependencyStatus | null>) => {
+    if (autoUpdateInFlight.current) return;
+
     const targets: Array<{ key: string; updateFn: () => Promise<unknown> }> = [
       { key: 'claude', updateFn: api.updateClaudeSilent },
       { key: 'codex', updateFn: api.updateCodexSilent },
       { key: 'skill_market', updateFn: api.installSkillMarket },
     ];
-    await Promise.all(targets.map(async ({ key, updateFn }) => {
+    const pendingTargets = targets.filter(({ key }) => {
       const st = results[key];
-      if (!st?.installed || !st.update_available) return;
-      if (autoUpdateAttempted.current.has(key)) return;
-      autoUpdateAttempted.current.add(key);
+      return !!st?.installed
+        && st.update_available
+        && !autoUpdateAttempted.current.has(key);
+    });
+    if (pendingTargets.length === 0) return;
 
-      setDeps(prev => ({ ...prev, [key]: { ...prev[key], loading: true } }));
-      try {
-        await updateFn();
-        const fresh = await depConfig[key].checkFn().catch(() => null);
-        // skill-market has no version number; npm deps must actually reach latest
-        const updated = key === 'skill_market'
-          ? !!fresh?.installed
-          : !!(fresh?.version && st.latest_version && fresh.version === st.latest_version);
-        if (updated) {
-          const finalStatus = fresh ?? { ...st, update_available: false };
-          setDeps(prev => ({ ...prev, [key]: { status: finalStatus, loading: false } }));
-          updateDepCache(key, finalStatus);
-          toast.success(
-            key === 'skill_market'
-              ? `${depConfig[key].label} 已自动更新`
-              : `${depConfig[key].label} 已自动更新到 v${st.latest_version}`
-          );
-          return;
+    // Global npm installs share the same prefix and temporary retirement
+    // directories. Run them sequentially to avoid EBUSY/race failures.
+    autoUpdateInFlight.current = true;
+    try {
+      for (const { key, updateFn } of pendingTargets) {
+        const st = results[key]!;
+        autoUpdateAttempted.current.add(key);
+
+        setDeps(prev => ({ ...prev, [key]: { ...prev[key], loading: true } }));
+        try {
+          await updateFn();
+          const fresh = await depConfig[key].checkFn().catch(() => null);
+          // skill-market has no version number; npm deps must actually reach latest
+          const updated = key === 'skill_market'
+            ? !!fresh?.installed
+            : !!(fresh?.version && st.latest_version && fresh.version === st.latest_version);
+          if (updated) {
+            const finalStatus = fresh ?? { ...st, update_available: false };
+            setDeps(prev => ({ ...prev, [key]: { status: finalStatus, loading: false } }));
+            updateDepCache(key, finalStatus);
+            toast.success(
+              key === 'skill_market'
+                ? `${depConfig[key].label} 已自动更新`
+                : `${depConfig[key].label} 已自动更新到 v${st.latest_version}`
+            );
+            continue;
+          }
+        } catch (_) {
+          // fall through: keep the badge, let the user update manually
         }
-      } catch (_) {
-        // fall through: keep the badge, let the user update manually
+        setDeps(prev => ({ ...prev, [key]: { status: st, loading: false } }));
       }
-      setDeps(prev => ({ ...prev, [key]: { status: st, loading: false } }));
-    }));
+    } finally {
+      autoUpdateInFlight.current = false;
+    }
   };
 
   const handleAction = async (key: string, action: 'install' | 'update' | 'reinstall') => {
@@ -283,7 +300,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
 
   // Check if any issues exist. The bar is always rendered — rows fill in as
   // each check finishes, so users see progress and keep the manual entry.
-  const hasIssues = Object.values(deps).some(d => d.status && (!d.status.installed || d.status.update_available));
+  const hasIssues = Object.values(deps).some(d => d.status && (!d.status.installed || d.status.update_available || !!d.status.error));
   const isInstalling = Object.values(deps).some(d => d.loading);
 
   // Show CC config panel
@@ -331,11 +348,13 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
             const config = depConfig[key];
             const dotClass = !d.status
               ? 'dot'
-              : !d.status.installed
+              : !d.status.installed || d.status.error?.startsWith('REPAIR_REQUIRED:')
               ? 'dot dot-error'
               : d.status.update_available
               ? 'dot dot-warn'
               : 'dot dot-ok';
+            const needsRepair = (key === 'claude' || key === 'codex')
+              && !!d.status?.error?.startsWith('REPAIR_REQUIRED:');
             const canReinstall = (key === 'claude' || key === 'codex') && d.status?.installed;
             const isSkillMarket = key === 'skill_market';
             return (
@@ -361,6 +380,20 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
                   <span className="font-mono text-[10.5px] text-text-tertiary">
                     {checkDone ? '未检测到' : 'checking…'}
                   </span>
+                ) : needsRepair ? (
+                  <>
+                    <span
+                      className="font-mono text-[10.5px] text-error/90"
+                      title={d.status.error?.replace('REPAIR_REQUIRED:', '')}
+                    >
+                      需要修复
+                    </span>
+                    {!d.loading && (
+                      <button onClick={() => handleAction(key, 'reinstall')} className="btn btn-secondary btn-sm ml-auto">
+                        重装
+                      </button>
+                    )}
+                  </>
                 ) : !d.status.installed ? (
                   <>
                     <span className="font-mono text-[10.5px] text-error/90">missing</span>

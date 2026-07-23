@@ -35,8 +35,11 @@ function getDetailTag(project: Project, presets?: GlobalPresets | null): string 
     return null;
   }
   if (cfg.mode === 'claude' || cfg.mode === 'codex') {
-    if (cfg.proxy_preset_id && presets) {
-      const p = presets.proxies.find(p => p.id === cfg.proxy_preset_id);
+    const proxyPresetId = cfg.mode === 'claude'
+      ? (cfg.claude_proxy_preset_id ?? cfg.proxy_preset_id)
+      : (cfg.codex_proxy_preset_id ?? cfg.proxy_preset_id);
+    if (proxyPresetId && presets) {
+      const p = presets.proxies.find(p => p.id === proxyPresetId);
       if (p) return p.name;
     }
     const fallback = cfg.mode === 'codex' ? cfg.codex_api_key : cfg.proxy;

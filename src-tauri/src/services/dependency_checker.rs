@@ -90,6 +90,93 @@ pub struct DependencyStatus {
 pub struct DependencyChecker;
 
 impl DependencyChecker {
+    #[cfg(windows)]
+    fn windows_npm_package_dir(package: &str) -> Option<std::path::PathBuf> {
+        let mut cmd = Command::new("cmd");
+        cmd.args(&["/c", "npm", "root", "-g"]);
+        hide_window(&mut cmd);
+        let output = cmd.output().ok()?;
+        if !output.status.success() {
+            return None;
+        }
+
+        let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if root.is_empty() {
+            return None;
+        }
+
+        let mut dir = std::path::PathBuf::from(root);
+        for part in package.split('/') {
+            dir.push(part);
+        }
+        dir.is_dir().then_some(dir)
+    }
+
+    #[cfg(windows)]
+    fn is_valid_windows_exe(path: &std::path::Path) -> bool {
+        use std::io::Read;
+
+        let Ok(mut file) = std::fs::File::open(path) else {
+            return false;
+        };
+        let mut magic = [0u8; 2];
+        file.read_exact(&mut magic).is_ok() && &magic == b"MZ"
+    }
+
+    #[cfg(windows)]
+    fn broken_cli_status(label: &str, detail: &str) -> DependencyStatus {
+        DependencyStatus {
+            // The npm package exists, but the CLI is not usable. Keeping this
+            // distinct from "not installed" lets the UI offer Reinstall.
+            installed: true,
+            version: None,
+            meets_requirement: false,
+            latest_version: None,
+            update_available: false,
+            error: Some(format!("REPAIR_REQUIRED:{} {}", label, detail)),
+        }
+    }
+
+    #[cfg(windows)]
+    fn validate_claude_package() -> Option<DependencyStatus> {
+        let package_dir = Self::windows_npm_package_dir("@anthropic-ai/claude-code")?;
+        let exe = package_dir.join("bin").join("claude.exe");
+        if Self::is_valid_windows_exe(&exe) {
+            None
+        } else {
+            Some(Self::broken_cli_status(
+                "Claude Code",
+                "Windows 原生组件缺失或损坏",
+            ))
+        }
+    }
+
+    #[cfg(windows)]
+    fn validate_codex_package() -> Option<DependencyStatus> {
+        let package_dir = Self::windows_npm_package_dir("@openai/codex")?;
+        let (platform_package, target_triple) = if cfg!(target_arch = "aarch64") {
+            ("codex-win32-arm64", "aarch64-pc-windows-msvc")
+        } else {
+            ("codex-win32-x64", "x86_64-pc-windows-msvc")
+        };
+        let exe = package_dir
+            .join("node_modules")
+            .join("@openai")
+            .join(platform_package)
+            .join("vendor")
+            .join(target_triple)
+            .join("bin")
+            .join("codex.exe");
+        if Self::is_valid_windows_exe(&exe) {
+            None
+        } else {
+            Some(Self::broken_cli_status(
+                "Codex",
+                "Windows 原生组件缺失或损坏",
+            ))
+        }
+    }
+
     pub fn check_nodejs() -> DependencyStatus {
         #[cfg(target_os = "macos")]
         {
@@ -237,7 +324,20 @@ impl DependencyChecker {
 
     pub fn check_claude() -> DependencyStatus {
         #[cfg(windows)]
-        Self::refresh_system_path();
+        {
+            Self::refresh_system_path();
+            // Never execute a placeholder/corrupted .exe: Windows otherwise
+            // shows the misleading "unsupported 16-bit application" dialog.
+            if let Some(status) = Self::validate_claude_package() {
+                return status;
+            }
+        }
+
+        #[cfg(windows)]
+        let package_present =
+            Self::windows_npm_package_dir("@anthropic-ai/claude-code").is_some();
+        #[cfg(not(windows))]
+        let package_present = false;
 
         // 跨平台检测 claude
         #[cfg(windows)]
@@ -299,89 +399,13 @@ impl DependencyChecker {
                 }
             }
             _ => {
-                // claude --version failed. Auto-repair: reinstall if npm is available.
-                #[cfg(windows)]
-                {
-                    let mut where_cmd = Command::new("cmd");
-                    where_cmd.args(&["/c", "where", "npm"]);
-                    hide_window(&mut where_cmd);
-                    let npm_available = where_cmd.output()
-                        .map(|o| o.status.success())
-                        .unwrap_or(false);
-
-                    if npm_available {
-                        eprintln!("[check_claude] Windows: claude not found, attempting reinstall...");
-                        let mut install_cmd = Command::new("cmd");
-                        install_cmd.args(&["/c", "npm", "install", "-g", "@anthropic-ai/claude-code"]);
-                        hide_window(&mut install_cmd);
-                        let _ = install_cmd.output();
-
-                        Self::refresh_system_path();
-
-                        let mut retry_cmd = Command::new("cmd");
-                        retry_cmd.args(&["/c", "claude", "--version"]);
-                        hide_window(&mut retry_cmd);
-                        let retry = retry_cmd.output();
-
-                        if let Ok(out) = retry {
-                            if out.status.success() {
-                                let stdout = String::from_utf8_lossy(&out.stdout);
-                                if let Ok(re) = Regex::new(r"(\d+\.\d+\.\d+)") {
-                                    if let Some(caps) = re.captures(&stdout) {
-                                        let version = caps.get(1).map(|m| m.as_str().to_string());
-                                        return DependencyStatus {
-                                            installed: true,
-                                            version,
-                                            meets_requirement: true,
-                                            latest_version: None,
-                                            update_available: false,
-                                            error: None,
-                                        };
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                #[cfg(target_os = "macos")]
-                {
-                    let extended_path = get_macos_extended_path();
-
-                    let npm_available = Command::new("sh")
-                        .args(&["-c", &format!("PATH='{}' which npm", extended_path)])
-                        .output()
-                        .map(|o| o.status.success())
-                        .unwrap_or(false);
-
-                    if npm_available {
-                        eprintln!("[check_claude] macOS: claude not found, attempting reinstall...");
-                        let _ = Command::new("sh")
-                            .args(&["-c", &format!("PATH='{}' npm install -g @anthropic-ai/claude-code", extended_path)])
-                            .output();
-
-                        let retry = Command::new("sh")
-                            .args(&["-c", &format!("PATH='{}' claude --version", extended_path)])
-                            .output();
-
-                        if let Ok(out) = retry {
-                            if out.status.success() {
-                                let stdout = String::from_utf8_lossy(&out.stdout);
-                                if let Ok(re) = Regex::new(r"(\d+\.\d+\.\d+)") {
-                                    if let Some(caps) = re.captures(&stdout) {
-                                        let version = caps.get(1).map(|m| m.as_str().to_string());
-                                        return DependencyStatus {
-                                            installed: true,
-                                            version,
-                                            meets_requirement: true,
-                                            latest_version: None,
-                                            update_available: false,
-                                            error: None,
-                                        };
-                                    }
-                                }
-                            }
-                        }
+                if package_present {
+                    #[cfg(windows)]
+                    {
+                        return Self::broken_cli_status(
+                            "Claude Code",
+                            "命令文件或 npm shim 异常",
+                        );
                     }
                 }
 
@@ -399,7 +423,17 @@ impl DependencyChecker {
 
     pub fn check_codex() -> DependencyStatus {
         #[cfg(windows)]
-        Self::refresh_system_path();
+        {
+            Self::refresh_system_path();
+            if let Some(status) = Self::validate_codex_package() {
+                return status;
+            }
+        }
+
+        #[cfg(windows)]
+        let package_present = Self::windows_npm_package_dir("@openai/codex").is_some();
+        #[cfg(not(windows))]
+        let package_present = false;
 
         #[cfg(windows)]
         let output = {
@@ -452,93 +486,13 @@ impl DependencyChecker {
                 }
             }
             _ => {
-                // codex --version failed. Auto-repair: reinstall if npm is available.
-                #[cfg(windows)]
-                {
-                    let mut where_cmd = Command::new("cmd");
-                    where_cmd.args(&["/c", "where", "npm"]);
-                    hide_window(&mut where_cmd);
-                    let npm_available = where_cmd.output()
-                        .map(|o| o.status.success())
-                        .unwrap_or(false);
-
-                    if npm_available {
-                        eprintln!("[check_codex] Windows: codex not found, attempting reinstall...");
-                        let mut install_cmd = Command::new("cmd");
-                        install_cmd.args(&["/c", "npm", "install", "-g", "@openai/codex"]);
-                        hide_window(&mut install_cmd);
-                        let _ = install_cmd.output();
-
-                        Self::refresh_system_path();
-
-                        let mut retry_cmd = Command::new("cmd");
-                        retry_cmd.args(&["/c", "codex", "--version"]);
-                        hide_window(&mut retry_cmd);
-                        let retry = retry_cmd.output();
-
-                        if let Ok(out) = retry {
-                            if out.status.success() {
-                                let stdout = String::from_utf8_lossy(&out.stdout);
-                                let stderr = String::from_utf8_lossy(&out.stderr);
-                                let combined = format!("{}{}", stdout, stderr);
-                                if let Ok(re) = Regex::new(r"(\d+\.\d+\.\d+)") {
-                                    if let Some(caps) = re.captures(&combined) {
-                                        let version = caps.get(1).map(|m| m.as_str().to_string());
-                                        return DependencyStatus {
-                                            installed: true,
-                                            version,
-                                            meets_requirement: true,
-                                            latest_version: None,
-                                            update_available: false,
-                                            error: None,
-                                        };
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                #[cfg(target_os = "macos")]
-                {
-                    let extended_path = get_macos_extended_path();
-
-                    let npm_available = Command::new("sh")
-                        .args(&["-c", &format!("PATH='{}' which npm", extended_path)])
-                        .output()
-                        .map(|o| o.status.success())
-                        .unwrap_or(false);
-
-                    if npm_available {
-                        eprintln!("[check_codex] macOS: codex not found, attempting reinstall...");
-                        let _ = Command::new("sh")
-                            .args(&["-c", &format!("PATH='{}' npm install -g @openai/codex", extended_path)])
-                            .output();
-
-                        let retry = Command::new("sh")
-                            .args(&["-c", &format!("PATH='{}' codex --version", extended_path)])
-                            .output();
-
-                        if let Ok(out) = retry {
-                            if out.status.success() {
-                                let stdout = String::from_utf8_lossy(&out.stdout);
-                                let stderr = String::from_utf8_lossy(&out.stderr);
-                                let combined = format!("{}{}", stdout, stderr);
-                                if let Ok(re) = Regex::new(r"(\d+\.\d+\.\d+)") {
-                                    if let Some(caps) = re.captures(&combined) {
-                                        let version = caps.get(1).map(|m| m.as_str().to_string());
-                                        return DependencyStatus {
-                                            installed: true,
-                                            version,
-                                            meets_requirement: true,
-                                            latest_version: None,
-                                            update_available: false,
-                                            error: None,
-                                        };
-                                    }
-                                }
-                            }
-                        }
+                if package_present {
+                    #[cfg(windows)]
+                    {
+                        return Self::broken_cli_status(
+                            "Codex",
+                            "命令文件或 npm shim 异常",
+                        );
                     }
                 }
 

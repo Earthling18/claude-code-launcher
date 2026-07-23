@@ -293,7 +293,20 @@ pub fn generate_project_bash_command(id: String) -> Result<String, String> {
 
 /// Resolve effective proxy URL: preset wins, legacy field is fallback.
 fn resolve_proxy(project: &Project, presets: &crate::models::GlobalPresets) -> String {
-    if let Some(id) = &project.config.proxy_preset_id {
+    let preset_id = match project.config.mode.as_str() {
+        "claude" => project
+            .config
+            .claude_proxy_preset_id
+            .as_ref()
+            .or(project.config.proxy_preset_id.as_ref()),
+        "codex" => project
+            .config
+            .codex_proxy_preset_id
+            .as_ref()
+            .or(project.config.proxy_preset_id.as_ref()),
+        _ => None,
+    };
+    if let Some(id) = preset_id {
         if let Some(p) = presets.proxies.iter().find(|p| &p.id == id) {
             return p.url.clone();
         }
@@ -527,6 +540,47 @@ pub fn update_model_preset(
     token: String,
 ) -> Result<ModelPreset, String> {
     PresetsStorage::update_model(&id, name, model, base_url, token)
+}
+
+#[cfg(test)]
+mod proxy_resolution_tests {
+    use super::resolve_proxy;
+    use crate::models::{GlobalPresets, Project, ProjectConfig, ProxyPreset};
+
+    #[test]
+    fn resolves_claude_and_codex_proxies_independently() {
+        let presets = GlobalPresets {
+            proxies: vec![
+                ProxyPreset {
+                    id: "claude-proxy".to_string(),
+                    name: "Claude proxy".to_string(),
+                    url: "http://127.0.0.1:7890".to_string(),
+                },
+                ProxyPreset {
+                    id: "codex-proxy".to_string(),
+                    name: "Codex proxy".to_string(),
+                    url: "http://127.0.0.1:7891".to_string(),
+                },
+            ],
+            ..GlobalPresets::default()
+        };
+        let config = ProjectConfig {
+            mode: "claude".to_string(),
+            claude_proxy_preset_id: Some("claude-proxy".to_string()),
+            codex_proxy_preset_id: Some("codex-proxy".to_string()),
+            ..ProjectConfig::default()
+        };
+        let mut project = Project::new(
+            "proxy-test".to_string(),
+            ".".to_string(),
+            config,
+            false,
+        );
+
+        assert_eq!(resolve_proxy(&project, &presets), "http://127.0.0.1:7890");
+        project.config.mode = "codex".to_string();
+        assert_eq!(resolve_proxy(&project, &presets), "http://127.0.0.1:7891");
+    }
 }
 
 #[tauri::command]

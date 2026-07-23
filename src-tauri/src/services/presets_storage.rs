@@ -261,7 +261,11 @@ impl PresetsStorage {
             .map(|projects| {
                 projects
                     .iter()
-                    .filter(|p| p.config.proxy_preset_id.as_deref() == Some(id))
+                    .filter(|p| {
+                        p.config.claude_proxy_preset_id.as_deref() == Some(id)
+                            || p.config.codex_proxy_preset_id.as_deref() == Some(id)
+                            || p.config.proxy_preset_id.as_deref() == Some(id)
+                    })
                     .count()
             })
             .unwrap_or(0)
@@ -299,9 +303,20 @@ fn clear_proxy_ref_from_projects(id: &str) -> Result<(), String> {
     use crate::services::ConfigStorage;
     let projects = ConfigStorage::get_projects()?;
     for p in projects {
-        if p.config.proxy_preset_id.as_deref() == Some(id) {
+        if p.config.claude_proxy_preset_id.as_deref() == Some(id)
+            || p.config.codex_proxy_preset_id.as_deref() == Some(id)
+            || p.config.proxy_preset_id.as_deref() == Some(id)
+        {
             let mut new_cfg = p.config.clone();
-            new_cfg.proxy_preset_id = None;
+            if new_cfg.claude_proxy_preset_id.as_deref() == Some(id) {
+                new_cfg.claude_proxy_preset_id = None;
+            }
+            if new_cfg.codex_proxy_preset_id.as_deref() == Some(id) {
+                new_cfg.codex_proxy_preset_id = None;
+            }
+            if new_cfg.proxy_preset_id.as_deref() == Some(id) {
+                new_cfg.proxy_preset_id = None;
+            }
             let _ = ConfigStorage::update_project(
                 &p.id,
                 UpdateProjectInput {
@@ -444,26 +459,28 @@ pub fn migrate_legacy_to_presets(projects: &mut [Project]) -> Option<GlobalPrese
     for proj in projects.iter_mut() {
         match proj.config.mode.as_str() {
             "claude" => {
-                if !proj.config.proxy.is_empty() && proj.config.proxy_preset_id.is_none() {
+                if !proj.config.proxy.is_empty()
+                    && proj.config.claude_proxy_preset_id.is_none()
+                {
                     if let Some(p) = presets
                         .proxies
                         .iter()
                         .find(|p| p.url == proj.config.proxy)
                     {
-                        proj.config.proxy_preset_id = Some(p.id.clone());
+                        proj.config.claude_proxy_preset_id = Some(p.id.clone());
                     }
                 }
             }
             "codex" => {
                 if !proj.config.codex_api_key.is_empty()
-                    && proj.config.proxy_preset_id.is_none()
+                    && proj.config.codex_proxy_preset_id.is_none()
                 {
                     if let Some(p) = presets
                         .proxies
                         .iter()
                         .find(|p| p.url == proj.config.codex_api_key)
                     {
-                        proj.config.proxy_preset_id = Some(p.id.clone());
+                        proj.config.codex_proxy_preset_id = Some(p.id.clone());
                     }
                 }
             }

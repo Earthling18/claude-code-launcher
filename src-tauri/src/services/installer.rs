@@ -203,8 +203,58 @@ impl Installer {
 
     /// Silent in-place npm update used by background auto-update — no terminal
     /// window, unlike update_claude/update_codex which show progress to the user.
-    #[allow(unused_variables)]
+    ///
+    /// Automatic updates are skipped while Clash is active or a package
+    /// executable is running. Manual install/update/reinstall commands do not
+    /// use this function and remain available to the user.
     pub async fn npm_update_silent(package: &str) -> Result<(), String> {
+        #[cfg(windows)]
+        {
+            if Self::clash_is_running().await {
+                return Err("检测到 Clash 正在运行，跳过本次自动更新".to_string());
+            }
+
+            if let Some(pkg_dir) = Self::npm_global_package_dir(package).await {
+                let mut exes = Vec::new();
+                Self::collect_package_exes(&pkg_dir, 0, &mut exes);
+                if let Some(busy) = exes.iter().find(|e| Self::exe_in_use(e)) {
+                    return Err(format!(
+                        "{} 正在运行，跳过本次自动更新",
+                        busy.display()
+                    ));
+                }
+            }
+        }
+
+        Self::run_npm_install_silent(package).await
+    }
+
+    #[cfg(windows)]
+    async fn clash_is_running() -> bool {
+        let Ok(output) = tokio::process::Command::new("tasklist.exe")
+            .args(["/FO", "CSV", "/NH"])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .output()
+            .await
+        else {
+            return false;
+        };
+
+        let processes = String::from_utf8_lossy(&output.stdout).to_ascii_lowercase();
+        [
+            "clash.exe",
+            "clash-verge.exe",
+            "clash-verge-service.exe",
+            "clash-core-service.exe",
+            "verge-mihomo.exe",
+            "mihomo.exe",
+        ]
+        .iter()
+        .any(|name| processes.contains(name))
+    }
+
+    #[allow(unused_variables)]
+    async fn run_npm_install_silent(package: &str) -> Result<(), String> {
         let pkg = format!("{}@latest", package);
 
         #[cfg(windows)]
@@ -244,6 +294,170 @@ impl Installer {
             }
         }
     }
+
+    /// Resolve a globally installed npm package's directory via `npm root -g`
+    /// (handles non-default prefixes like nvm-windows). None if npm is missing
+    /// or the package isn't installed.
+    #[cfg(windows)]
+    async fn npm_global_package_dir(package: &str) -> Option<std::path::PathBuf> {
+        let out = tokio::process::Command::new("cmd")
+            .args(["/c", "npm", "root", "-g"])
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .output()
+            .await
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let root = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if root.is_empty() {
+            return None;
+        }
+        let mut dir = std::path::PathBuf::from(root);
+        for part in package.split('/') {
+            dir.push(part);
+        }
+        dir.is_dir().then_some(dir)
+    }
+
+    /// Recursively collect .exe files under an npm package dir (bounded depth —
+    /// enough for bin/ and vendor/ layouts without walking huge trees).
+    #[cfg(windows)]
+    pub(crate) fn collect_package_exes(
+        dir: &std::path::Path,
+        depth: u8,
+        out: &mut Vec<std::path::PathBuf>,
+    ) {
+        // Codex keeps its native binaries several levels below the wrapper
+        // package (node_modules/@openai/.../vendor/<triple>/bin).
+        if depth > 8 {
+            return;
+        }
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                Self::collect_package_exes(&p, depth + 1, out);
+            } else if p
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|e| e.eq_ignore_ascii_case("exe"))
+                .unwrap_or(false)
+            {
+                out.push(p);
+            }
+        }
+    }
+
+    /// True if the exe looks truncated/corrupted: zero-length or missing the
+    /// "MZ" DOS header — the exact condition that makes Windows show the
+    /// misleading "不支持的 16 位应用程序" dialog.
+    #[cfg(windows)]
+    pub(crate) fn exe_corrupted(path: &std::path::Path) -> bool {
+        use std::io::Read;
+        let Ok(mut f) = std::fs::File::open(path) else { return true };
+        let mut magic = [0u8; 2];
+        match f.read_exact(&mut magic) {
+            Ok(()) => &magic != b"MZ",
+            Err(_) => true, // shorter than 2 bytes
+        }
+    }
+
+    /// True if the exe is locked by a running process. A running image cannot
+    /// be opened for write (ERROR_SHARING_VIOLATION), which is exactly the
+    /// condition under which npm cannot safely replace the file.
+    #[cfg(windows)]
+    pub(crate) fn exe_in_use(path: &std::path::Path) -> bool {
+        match std::fs::OpenOptions::new().write(true).open(path) {
+            Ok(_) => false,
+            Err(e) => matches!(e.raw_os_error(), Some(32) | Some(33)),
+        }
+    }
+}
+
+#[cfg(all(test, windows))]
+mod native_exe_tests {
+    use super::Installer;
+    use std::path::PathBuf;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ccl-test-{}-{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn detects_corrupted_exes() {
+        let d = temp_dir("corrupt");
+
+        let empty = d.join("empty.exe");
+        std::fs::File::create(&empty).unwrap();
+        assert!(Installer::exe_corrupted(&empty), "0-byte exe must be corrupted");
+
+        let garbage = d.join("garbage.exe");
+        std::fs::write(&garbage, b"\x00\x01junk").unwrap();
+        assert!(Installer::exe_corrupted(&garbage), "non-MZ header must be corrupted");
+
+        let valid = d.join("valid.exe");
+        std::fs::write(&valid, b"MZ\x90\x00rest").unwrap();
+        assert!(!Installer::exe_corrupted(&valid), "MZ header must pass");
+
+        let real = PathBuf::from(r"C:\Windows\System32\cmd.exe");
+        assert!(!Installer::exe_corrupted(&real), "real system exe must pass");
+
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn collects_exes_with_bounded_depth() {
+        let d = temp_dir("collect");
+        std::fs::create_dir_all(d.join("bin")).unwrap();
+        std::fs::write(d.join("bin").join("a.exe"), b"MZ").unwrap();
+        std::fs::write(d.join("TOP.EXE"), b"MZ").unwrap();
+        std::fs::write(d.join("bin").join("readme.txt"), b"x").unwrap();
+        let deep = d
+            .join("1")
+            .join("2")
+            .join("3")
+            .join("4")
+            .join("5")
+            .join("6")
+            .join("7")
+            .join("8")
+            .join("9");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("deep.exe"), b"MZ").unwrap();
+
+        let mut out = Vec::new();
+        Installer::collect_package_exes(&d, 0, &mut out);
+        let names: Vec<String> = out
+            .iter()
+            .map(|p| p.file_name().unwrap().to_string_lossy().to_lowercase())
+            .collect();
+        assert!(names.contains(&"a.exe".to_string()));
+        assert!(names.contains(&"top.exe".to_string()), "extension match must be case-insensitive");
+        assert!(!names.contains(&"deep.exe".to_string()), "depth cap must stop the walk");
+        assert!(!names.iter().any(|n| n.ends_with(".txt")));
+
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn detects_running_exe_as_in_use() {
+        // The test binary itself is executing, so its image is write-locked —
+        // same situation as a running claude.exe during an update.
+        let me = std::env::current_exe().unwrap();
+        assert!(Installer::exe_in_use(&me), "running exe must be in use");
+
+        // An identical copy that isn't running is replaceable.
+        let d = temp_dir("inuse");
+        let copy = d.join("copy.exe");
+        std::fs::copy(&me, &copy).unwrap();
+        assert!(!Installer::exe_in_use(&copy), "non-running copy must not be in use");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
 }
 
 impl Installer {

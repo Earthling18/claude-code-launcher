@@ -31,9 +31,13 @@ pub struct ProjectConfig {
     #[serde(default = "default_custom_cli")]
     pub custom_cli: String,
 
-    /// Reference to a ProxyPreset (claude/codex modes). When set, takes precedence over `proxy` / `codex_api_key`.
+    /// Legacy shared proxy reference. New writes use the CLI-specific fields below.
     #[serde(default)]
     pub proxy_preset_id: Option<String>,
+    #[serde(default)]
+    pub claude_proxy_preset_id: Option<String>,
+    #[serde(default)]
+    pub codex_proxy_preset_id: Option<String>,
     /// Reference to a ModelPreset (custom mode). When set, takes precedence over `model` / `base_url` / `token`.
     #[serde(default)]
     pub model_preset_id: Option<String>,
@@ -44,6 +48,11 @@ impl ProjectConfig {
     pub fn normalize_legacy_mode(&mut self) {
         if self.mode == "remote" {
             self.mode = "claude".to_string();
+        }
+        if self.mode == "claude" && self.claude_proxy_preset_id.is_none() {
+            self.claude_proxy_preset_id = self.proxy_preset_id.clone();
+        } else if self.mode == "codex" && self.codex_proxy_preset_id.is_none() {
+            self.codex_proxy_preset_id = self.proxy_preset_id.clone();
         }
     }
 }
@@ -60,6 +69,8 @@ impl Default for ProjectConfig {
             codex_api_key: String::new(),
             custom_cli: "claude".to_string(),
             proxy_preset_id: None,
+            claude_proxy_preset_id: None,
+            codex_proxy_preset_id: None,
             model_preset_id: None,
         }
     }
@@ -193,4 +204,46 @@ fn uuid_v4() -> String {
         (0x8000 | ((random_part >> 60) & 0x3FFF)) as u16,
         (random_part & 0xFFFFFFFFFFFF) as u64
     )
+}
+
+#[cfg(test)]
+mod proxy_config_tests {
+    use super::ProjectConfig;
+
+    #[test]
+    fn legacy_shared_proxy_moves_only_to_current_cli() {
+        let mut claude: ProjectConfig = serde_json::from_str(
+            r#"{"mode":"claude","proxy_preset_id":"proxy-a"}"#,
+        )
+        .unwrap();
+        claude.normalize_legacy_mode();
+        assert_eq!(claude.claude_proxy_preset_id.as_deref(), Some("proxy-a"));
+        assert_eq!(claude.codex_proxy_preset_id, None);
+
+        let mut codex: ProjectConfig =
+            serde_json::from_str(r#"{"mode":"codex","proxy_preset_id":"proxy-b"}"#).unwrap();
+        codex.normalize_legacy_mode();
+        assert_eq!(codex.claude_proxy_preset_id, None);
+        assert_eq!(codex.codex_proxy_preset_id.as_deref(), Some("proxy-b"));
+    }
+
+    #[test]
+    fn cli_specific_proxy_selections_survive_together() {
+        let config = ProjectConfig {
+            claude_proxy_preset_id: Some("claude-proxy".to_string()),
+            codex_proxy_preset_id: Some("codex-proxy".to_string()),
+            ..ProjectConfig::default()
+        };
+        let json = serde_json::to_string(&config).unwrap();
+        let restored: ProjectConfig = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(
+            restored.claude_proxy_preset_id.as_deref(),
+            Some("claude-proxy")
+        );
+        assert_eq!(
+            restored.codex_proxy_preset_id.as_deref(),
+            Some("codex-proxy")
+        );
+    }
 }

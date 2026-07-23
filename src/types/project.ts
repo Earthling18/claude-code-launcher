@@ -7,7 +7,10 @@ export interface ProjectConfig {
   skip_permissions: boolean;
   codex_api_key: string;
   custom_cli: 'claude' | 'codex';
+  /** Legacy shared proxy selection. Kept for reading old project data. */
   proxy_preset_id?: string | null;
+  claude_proxy_preset_id?: string | null;
+  codex_proxy_preset_id?: string | null;
   model_preset_id?: string | null;
 }
 
@@ -84,5 +87,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   codex_api_key: '',
   custom_cli: 'claude',
   proxy_preset_id: null,
+  claude_proxy_preset_id: null,
+  codex_proxy_preset_id: null,
   model_preset_id: null,
 };
