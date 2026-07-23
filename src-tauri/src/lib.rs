@@ -137,6 +137,7 @@ pub fn run() {
             commands::update_project,
             commands::delete_project,
             commands::launch_project,
+            commands::open_project_folder,
             commands::select_directory,
             commands::generate_project_powershell_command,
             commands::generate_project_cmd_command,

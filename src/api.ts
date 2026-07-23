@@ -75,6 +75,7 @@ export const projectApi = {
     invoke<Project>('update_project', { id, name, workingDirectory, config, isPinned }),
   delete: (id: string) => invoke<void>('delete_project', { id }),
   launch: (id: string) => invoke<void>('launch_project', { id }),
+  openFolder: (id: string) => invoke<void>('open_project_folder', { id }),
   generatePowershellCommand: (id: string) =>
     invoke<string>('generate_project_powershell_command', { id }),
   generateCmdCommand: (id: string) =>

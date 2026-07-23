@@ -1,6 +1,8 @@
 import type { Project } from '../types/project';
 import type { GlobalPresets } from '../types/presets';
+import { projectApi } from '../api';
 import { CopyCommandButton } from './CopyCommandButton';
+import { toast } from '../lib/toast';
 
 interface ProjectCardProps {
   project: Project;
@@ -65,6 +67,14 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
     e.stopPropagation();
     onLaunch(project.id);
   };
+  const handleOpenFolder = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await projectApi.openFolder(project.id);
+    } catch (err) {
+      toast.error(`打开文件夹失败: ${err}`);
+    }
+  };
 
   return (
     <div
@@ -72,8 +82,22 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
       data-dragging={isDragging}
       onClick={handleCardClick}
     >
+      <button
+        type="button"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={handleOpenFolder}
+        className="absolute top-2.5 right-2.5 z-10 flex h-6 w-6 items-center justify-center rounded text-text-disabled opacity-70 transition-all hover:bg-surface-1 hover:text-text-secondary hover:opacity-100"
+        title="打开项目文件夹"
+        aria-label={`打开 ${project.name} 文件夹`}
+      >
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M3 6.5h6l2 2h10v9.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5Z" />
+          <path d="M3 10h18" />
+        </svg>
+      </button>
+
       {/* Header row: mode dot + pinned star + name + default chip */}
-      <div className="flex items-center gap-1.5 min-w-0">
+      <div className="flex items-center gap-1.5 min-w-0 pr-6">
         <span className="mode-dot flex-shrink-0" data-mode={mode} aria-hidden />
         {project.is_pinned && (
           <svg width="10" height="10" viewBox="0 0 24 24" fill="var(--accent)" aria-label="已置顶" className="flex-shrink-0">
