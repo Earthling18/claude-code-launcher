@@ -413,31 +413,22 @@ impl Launcher {
         }
 
         if shim_missing {
-            let npm_list_cmd = format!("npm list -g {} --depth=0 2>$null", npm_package);
-            let npm_check = Command::new("powershell.exe")
-                .args(&["-Command", &npm_list_cmd])
-                .creation_flags(CREATE_NO_WINDOW)
-                .output()
-                .map_err(|e| format!("无法检查npm包: {}", e))?;
-
-            Self::log_line(&format!(
-                "npm list -g {} exit={:?} stdout={}B stderr={}B",
-                npm_package,
-                npm_check.status.code(),
-                npm_check.stdout.len(),
-                npm_check.stderr.len()
-            ));
-
-            if !npm_check.status.success() {
-                Self::log_line(&format!("{} npm package not found either, attempting full reinstall...", cli_bin));
-            } else {
-                Self::log_line(&format!("{} npm package exists but shim missing", cli_bin));
+            let package_present =
+                super::dependency_checker::DependencyChecker::npm_package_present(npm_package);
+            if package_present {
+                Self::log_line(&format!(
+                    "{} npm package exists but shim is missing; explicit reinstall required",
+                    cli_bin
+                ));
+                return Err(format!(
+                    "{}安装已损坏，请在依赖面板点击“重装”后再启动",
+                    cli_label
+                ));
             }
 
-            // A missing npm shim is inexpensive to repair automatically. A
-            // damaged native binary is handled above and requires explicit
-            // user confirmation through the Reinstall button.
-            Self::log_line(&format!("{} shim missing, attempting reinstall...", cli_bin));
+            // The package truly is absent, so this is a first install rather
+            // than a repair. Damaged installations always require Reinstall.
+            Self::log_line(&format!("{} package absent, attempting first install...", cli_bin));
             let repair = Command::new("cmd.exe")
                 .args(&["/c", "npm", "install", "-g", npm_package])
                 .creation_flags(CREATE_NO_WINDOW)
@@ -456,20 +447,28 @@ impl Launcher {
             // Refresh PATH again after repair
             super::dependency_checker::DependencyChecker::refresh_system_path();
 
-            let recheck = Command::new("where.exe")
-                .arg(cli_bin)
-                .creation_flags(CREATE_NO_WINDOW)
-                .output();
-
-            let repaired = recheck
-                .as_ref()
-                .map(|o| o.status.success() && !o.stdout.is_empty())
-                .unwrap_or(false);
+            // Validate the real CLI, not just the shim. `where.exe` can pass
+            // while the native binary behind the shim is truncated.
+            let installed_status = if cli_bin == "codex" {
+                super::dependency_checker::DependencyChecker::check_codex()
+            } else {
+                super::dependency_checker::DependencyChecker::check_claude()
+            };
+            let repaired = installed_status.installed
+                && installed_status.meets_requirement
+                && installed_status.error.is_none();
 
             Self::log_line(&format!("repair result: {}", if repaired { "OK" } else { "FAILED" }));
 
             if !repaired {
-                return Err(format!("{}的命令文件丢失，自动修复失败。请手动运行: npm install -g {}", cli_label, npm_package));
+                if super::dependency_checker::DependencyChecker::npm_package_present(npm_package)
+                {
+                    return Err(format!(
+                        "{}安装后仍不可用，请在依赖面板点击“重装”",
+                        cli_label
+                    ));
+                }
+                return Err(format!("{}安装失败，请在依赖面板点击“安装”", cli_label));
             }
         }
 
@@ -607,24 +606,37 @@ impl Launcher {
 
     #[cfg(target_os = "macos")]
     fn execute_macos(command: &str, working_dir: Option<String>) -> Result<(), String> {
-        // Pre-check CLI availability and auto-repair if needed.
-        // This catches cases where a failed auto-update removed the binary.
+        // Pre-check CLI usability. Existing-but-broken packages must be
+        // explicitly reinstalled; a plain npm install often leaves the broken
+        // shim/link untouched.
         {
-            let (cli_bin, npm_package) = if command.contains("codex") {
-                ("codex", "@openai/codex")
+            let (cli_bin, npm_package, cli_label) = if command.contains("codex") {
+                ("codex", "@openai/codex", "Codex CLI")
             } else {
-                ("claude", "@anthropic-ai/claude-code")
+                ("claude", "@anthropic-ai/claude-code", "Claude Code")
             };
 
             let extended_path = super::dependency_checker::get_macos_extended_path();
 
             let cli_ok = Command::new("sh")
-                .args(&["-c", &format!("PATH='{}' which {}", extended_path, cli_bin)])
+                .args(&[
+                    "-c",
+                    &format!("PATH='{}' {} --version", extended_path, cli_bin),
+                ])
                 .output()
                 .map(|o| o.status.success())
                 .unwrap_or(false);
 
             if !cli_ok {
+                let package_present =
+                    super::dependency_checker::DependencyChecker::npm_package_present(npm_package);
+                if package_present {
+                    return Err(format!(
+                        "{}安装已损坏，请在依赖面板点击“重装”后再启动",
+                        cli_label
+                    ));
+                }
+
                 let npm_available = Command::new("sh")
                     .args(&["-c", &format!("PATH='{}' which npm", extended_path)])
                     .output()
@@ -632,10 +644,40 @@ impl Launcher {
                     .unwrap_or(false);
 
                 if npm_available {
-                    eprintln!("[launcher] macOS: {} not found before launch, attempting reinstall...", cli_bin);
-                    let _ = Command::new("sh")
+                    eprintln!(
+                        "[launcher] macOS: {} package absent, attempting first install...",
+                        cli_bin
+                    );
+                    let install = Command::new("sh")
                         .args(&["-c", &format!("PATH='{}' npm install -g {}", extended_path, npm_package)])
                         .output();
+                    let installed = install
+                        .as_ref()
+                        .map(|output| output.status.success())
+                        .unwrap_or(false);
+                    if !installed {
+                        return Err(format!(
+                            "{}安装失败，请在依赖面板点击“安装”",
+                            cli_label
+                        ));
+                    }
+
+                    let recheck = Command::new("sh")
+                        .args(&[
+                            "-c",
+                            &format!("PATH='{}' {} --version", extended_path, cli_bin),
+                        ])
+                        .output()
+                        .map(|output| output.status.success())
+                        .unwrap_or(false);
+                    if !recheck {
+                        return Err(format!(
+                            "{}安装后仍不可用，请在依赖面板点击“重装”",
+                            cli_label
+                        ));
+                    }
+                } else {
+                    return Err("未找到 npm，请先安装 Node.js".to_string());
                 }
             }
         }

@@ -123,7 +123,7 @@ impl DependencyChecker {
         file.read_exact(&mut magic).is_ok() && &magic == b"MZ"
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     fn broken_cli_status(label: &str, detail: &str) -> DependencyStatus {
         DependencyStatus {
             // The npm package exists, but the CLI is not usable. Keeping this
@@ -134,6 +134,77 @@ impl DependencyChecker {
             latest_version: None,
             update_available: false,
             error: Some(format!("REPAIR_REQUIRED:{} {}", label, detail)),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    fn macos_npm_package_dir(package: &str) -> Option<std::path::PathBuf> {
+        fn package_under_root(root: &str, package: &str) -> Option<std::path::PathBuf> {
+            let root = root.lines().rev().find(|line| !line.trim().is_empty())?.trim();
+            let mut dir = std::path::PathBuf::from(root);
+            for part in package.split('/') {
+                dir.push(part);
+            }
+            dir.is_dir().then_some(dir)
+        }
+
+        let extended_path = get_macos_extended_path();
+
+        // Match the npm used by the user's Terminal first. GUI applications
+        // do not inherit .zshrc/.bash_profile, which is a common reason the
+        // package exists while `claude`/`codex` is invisible to the launcher.
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+        if let Ok(output) = Command::new(shell)
+            .args(["-lic", "npm root -g"])
+            .output()
+        {
+            if output.status.success() {
+                if let Some(dir) =
+                    package_under_root(&String::from_utf8_lossy(&output.stdout), package)
+                {
+                    return Some(dir);
+                }
+            }
+        }
+
+        // Also inspect every npm installation visible through the launcher's
+        // extended PATH (Homebrew, nvm, fnm, Volta, and the system installer).
+        for bin_dir in extended_path.split(':').filter(|path| !path.is_empty()) {
+            let npm = std::path::Path::new(bin_dir).join("npm");
+            if !npm.is_file() {
+                continue;
+            }
+            let Ok(output) = Command::new(&npm)
+                .args(["root", "-g"])
+                .env("PATH", &extended_path)
+                .output()
+            else {
+                continue;
+            };
+            if output.status.success() {
+                if let Some(dir) =
+                    package_under_root(&String::from_utf8_lossy(&output.stdout), package)
+                {
+                    return Some(dir);
+                }
+            }
+        }
+        None
+    }
+
+    pub(crate) fn npm_package_present(package: &str) -> bool {
+        #[cfg(windows)]
+        {
+            return Self::windows_npm_package_dir(package).is_some();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            return Self::macos_npm_package_dir(package).is_some();
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        {
+            let _ = package;
+            false
         }
     }
 
@@ -334,11 +405,7 @@ impl DependencyChecker {
         }
 
         #[cfg(windows)]
-        let package_present =
-            Self::windows_npm_package_dir("@anthropic-ai/claude-code").is_some();
-        #[cfg(not(windows))]
-        let package_present = false;
-
+        let package_present = Self::npm_package_present("@anthropic-ai/claude-code");
         // 跨平台检测 claude
         #[cfg(windows)]
         let output = {
@@ -399,14 +466,19 @@ impl DependencyChecker {
                 }
             }
             _ => {
+                #[cfg(windows)]
                 if package_present {
-                    #[cfg(windows)]
-                    {
-                        return Self::broken_cli_status(
-                            "Claude Code",
-                            "命令文件或 npm shim 异常",
-                        );
-                    }
+                    return Self::broken_cli_status(
+                        "Claude Code",
+                        "命令文件或 npm shim 异常",
+                    );
+                }
+                #[cfg(target_os = "macos")]
+                if Self::npm_package_present("@anthropic-ai/claude-code") {
+                    return Self::broken_cli_status(
+                        "Claude Code",
+                        "npm 包已存在，但命令入口或 PATH 异常",
+                    );
                 }
 
                 DependencyStatus {
@@ -431,10 +503,7 @@ impl DependencyChecker {
         }
 
         #[cfg(windows)]
-        let package_present = Self::windows_npm_package_dir("@openai/codex").is_some();
-        #[cfg(not(windows))]
-        let package_present = false;
-
+        let package_present = Self::npm_package_present("@openai/codex");
         #[cfg(windows)]
         let output = {
             let mut cmd = Command::new("cmd");
@@ -486,14 +555,19 @@ impl DependencyChecker {
                 }
             }
             _ => {
+                #[cfg(windows)]
                 if package_present {
-                    #[cfg(windows)]
-                    {
-                        return Self::broken_cli_status(
-                            "Codex",
-                            "命令文件或 npm shim 异常",
-                        );
-                    }
+                    return Self::broken_cli_status(
+                        "Codex",
+                        "命令文件或 npm shim 异常",
+                    );
+                }
+                #[cfg(target_os = "macos")]
+                if Self::npm_package_present("@openai/codex") {
+                    return Self::broken_cli_status(
+                        "Codex",
+                        "npm 包已存在，但命令入口或 PATH 异常",
+                    );
                 }
 
                 DependencyStatus {
