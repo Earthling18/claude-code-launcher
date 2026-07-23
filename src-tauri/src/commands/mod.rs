@@ -5,6 +5,7 @@ use crate::models::{
     GlobalPresets, ModelPreset, ProxyPreset,
 };
 use std::collections::HashMap;
+use std::path::Path;
 
 #[tauri::command]
 pub async fn check_nodejs() -> Result<dependency_checker::DependencyStatus, String> {
@@ -255,6 +256,22 @@ pub async fn launch_project(id: String) -> Result<(), String> {
     })
     .await
     .map_err(|e| format!("任务调度失败: {}", e))?
+}
+
+#[tauri::command]
+pub fn open_project_folder(id: String) -> Result<(), String> {
+    let project = ConfigStorage::get_project(&id)?;
+    let folder = Path::new(&project.working_directory);
+
+    if !folder.exists() {
+        return Err(format!("项目文件夹不存在: {}", folder.display()));
+    }
+    if !folder.is_dir() {
+        return Err(format!("项目路径不是文件夹: {}", folder.display()));
+    }
+
+    tauri_plugin_opener::open_path(folder, None::<&str>)
+        .map_err(|e| format!("系统无法打开该文件夹: {}", e))
 }
 
 #[tauri::command]
