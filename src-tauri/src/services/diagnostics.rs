@@ -21,14 +21,14 @@ pub enum CompatibilityStage {
 }
 
 impl CompatibilityStage {
-    pub fn browser_args(self) -> Option<String> {
+    pub fn browser_args(self) -> String {
         match self {
-            // Do not set `additional_browser_args` at all on healthy machines.
-            // Even re-applying WebView2's usual feature flags creates a distinct
-            // browser environment and regresses warm startup by several seconds.
-            Self::Standard => None,
-            Self::NoSandbox => Some("--no-sandbox".to_string()),
-            Self::NoSandboxDisableGpu => Some("--no-sandbox --disable-gpu".to_string()),
+            // An explicit empty value prevents Wry from injecting its default
+            // feature flags. Those flags create a distinct WebView2 environment
+            // and regress warm startup by several seconds on healthy machines.
+            Self::Standard => String::new(),
+            Self::NoSandbox => "--no-sandbox".to_string(),
+            Self::NoSandboxDisableGpu => "--no-sandbox --disable-gpu".to_string(),
         }
     }
 
@@ -54,7 +54,7 @@ pub struct BootstrapDiagnostics {
     pub stage: CompatibilityStage,
     pub preferred_fallback: Option<CompatibilityStage>,
     pub incident_id: String,
-    pub browser_args: Option<String>,
+    pub browser_args: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -733,14 +733,12 @@ mod tests {
             Some(CompatibilityStage::NoSandboxDisableGpu)
         );
         assert_eq!(CompatibilityStage::NoSandboxDisableGpu.next(), None);
-        assert_eq!(CompatibilityStage::Standard.browser_args(), None);
+        assert_eq!(CompatibilityStage::Standard.browser_args(), "");
         assert!(CompatibilityStage::NoSandbox
             .browser_args()
-            .unwrap()
             .contains("--no-sandbox"));
         assert!(CompatibilityStage::NoSandboxDisableGpu
             .browser_args()
-            .unwrap()
             .contains("--disable-gpu"));
     }
 
