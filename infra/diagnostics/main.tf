@@ -19,7 +19,7 @@ resource "alicloud_log_store" "diagnostics" {
   project_name     = alicloud_log_project.diagnostics.project_name
   logstore_name    = "launcher-diagnostics"
   retention_period = var.retention_days
-  shard_count      = 2
+  shard_count      = 1
   append_meta      = true
   auto_split       = false
 }
@@ -48,16 +48,16 @@ data "archive_file" "function" {
 }
 
 resource "alicloud_fcv3_function" "ingest" {
-  function_name       = "${var.name_prefix}-ingest"
-  description         = "Validate, re-sanitize and store CC Launcher diagnostics"
-  runtime             = "nodejs20"
-  handler             = "index.handler"
-  memory_size         = 256
-  cpu                 = 0.25
-  disk_size           = 512
-  timeout             = 10
+  function_name        = "${var.name_prefix}-ingest"
+  description          = "Validate, re-sanitize and store CC Launcher diagnostics"
+  runtime              = "nodejs20"
+  handler              = "index.handler"
+  memory_size          = 256
+  cpu                  = 0.25
+  disk_size            = 512
+  timeout              = 10
   instance_concurrency = 10
-  internet_access     = false
+  internet_access      = false
 
   environment_variables = {
     INGEST_SHARED_SECRET = random_password.ingest_secret.result
@@ -78,11 +78,11 @@ resource "alicloud_fcv3_function" "ingest" {
 }
 
 resource "alicloud_fcv3_trigger" "http" {
-  function_name  = alicloud_fcv3_function.ingest.function_name
-  trigger_name   = "diagnostic-http"
-  description    = "Private backend URL for API Gateway"
-  qualifier      = "LATEST"
-  trigger_type   = "http"
+  function_name = alicloud_fcv3_function.ingest.function_name
+  trigger_name  = "diagnostic-http"
+  description   = "Private backend URL for API Gateway"
+  qualifier     = "LATEST"
+  trigger_type  = "http"
   trigger_config = jsonencode({
     authType = "anonymous"
     methods  = ["POST"]
@@ -108,8 +108,8 @@ resource "alicloud_ram_policy" "invoke_diagnostics" {
   policy_document = jsonencode({
     Version = "1"
     Statement = [{
-      Action   = ["fc:InvokeFunction"]
-      Effect   = "Allow"
+      Action = ["fc:InvokeFunction"]
+      Effect = "Allow"
       Resource = [
         "acs:fc:${var.region}:${data.alicloud_account.current.id}:functions/${alicloud_fcv3_function.ingest.function_name}",
         "acs:fc:${var.region}:${data.alicloud_account.current.id}:functions/${alicloud_fcv3_function.ingest.function_name}/*"
@@ -154,11 +154,11 @@ resource "alicloud_api_gateway_api" "diagnostics" {
     function_type      = "HttpTrigger"
     region             = var.region
     function_base_url  = alicloud_fcv3_trigger.http.http_trigger[0].url_internet
-    path                = "/"
-    method              = "POST"
-    only_business_path  = true
-    arn_role            = alicloud_ram_role.api_gateway.arn
-    timeout             = 10000
+    path               = "/"
+    method             = "POST"
+    only_business_path = true
+    arn_role           = alicloud_ram_role.api_gateway.arn
+    timeout            = 10000
   }
 
   constant_parameters {
@@ -173,22 +173,22 @@ resource "alicloud_api_gateway_api" "diagnostics" {
 
 resource "alicloud_api_gateway_plugin" "traffic_control" {
   plugin_name = "${replace(var.name_prefix, "-", "_")}_rate_limit"
-  description = "Low-volume endpoint global and per-IP throttling"
+  description = "Hard daily budget for the endpoint and each source IP"
   plugin_type = "trafficControl"
   plugin_data = jsonencode({
     scope                     = "PLUGIN"
     blockingMode              = "QUICK_RETURN"
-    defaultLimit              = var.api_requests_per_minute
-    defaultPeriod             = "MINUTE"
-    defaultRetryAfterBySecond = 60
+    defaultLimit              = var.api_requests_per_day
+    defaultPeriod             = "DAY"
+    defaultRetryAfterBySecond = 3600
     parameters                = { ClientIP = "System:CaClientIp" }
     rules = [{
       name               = "PerClientIP"
       byParameters       = "ClientIP"
       bypassEmptyValue   = false
-      limit              = var.client_ip_requests_per_minute
-      period             = "MINUTE"
-      retryAfterBySecond = 60
+      limit              = var.client_ip_requests_per_day
+      period             = "DAY"
+      retryAfterBySecond = 3600
     }]
   })
 }

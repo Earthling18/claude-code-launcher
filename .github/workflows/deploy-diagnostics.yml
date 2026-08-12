@@ -1,0 +1,122 @@
+name: Deploy diagnostics backend
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: 'Create or update the diagnostics resources'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnostics-infrastructure
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infra/diagnostics
+    env:
+      ALICLOUD_ACCESS_KEY: ${{ secrets.OSS_ACCESS_KEY_ID }}
+      ALICLOUD_SECRET_KEY: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+      ALICLOUD_REGION: cn-shanghai
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+      TFSTATE_PASSPHRASE: ${{ secrets.DIAGNOSTICS_TFSTATE_PASSPHRASE }}
+      OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+      OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.5
+          terraform_wrapper: false
+
+      - name: Check required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in ALICLOUD_ACCESS_KEY ALICLOUD_SECRET_KEY TFSTATE_PASSPHRASE OSS_BUCKET OSS_ENDPOINT; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Required secret for $name is not configured."
+              exit 1
+            fi
+          done
+
+      - name: Install ossutil
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/ossutil.zip \
+            https://gosspublic.alicdn.com/ossutil/v2/2.1.1/ossutil-2.1.1-linux-amd64.zip
+          unzip -q /tmp/ossutil.zip -d /tmp/ossutil-dist
+          OSSUTIL="$(find /tmp/ossutil-dist -maxdepth 2 -name ossutil -type f | head -1)"
+          chmod +x "$OSSUTIL"
+          echo "OSSUTIL=$OSSUTIL" >> "$GITHUB_ENV"
+          echo "OSS_REGION=$(echo "$OSS_ENDPOINT" | sed -E 's/^oss-([a-z0-9-]+)\.aliyuncs\.com$/\1/')" >> "$GITHUB_ENV"
+
+      - name: Restore encrypted Terraform state
+        shell: bash
+        run: |
+          set -euo pipefail
+          if "$OSSUTIL" cp \
+            "oss://${OSS_BUCKET}/private-state/diagnostics/terraform.tfstate.enc" \
+            terraform.tfstate.enc 2>/dev/null; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 \
+              -in terraform.tfstate.enc -out terraform.tfstate \
+              -pass env:TFSTATE_PASSPHRASE
+          else
+            echo "No previous encrypted state; this will be the first deployment."
+          fi
+
+      - name: Terraform validate and plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT_NAME="ccl-diagnostics-$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')-prod"
+          terraform init -input=false
+          terraform fmt -check -recursive
+          terraform validate
+          terraform plan -out=tfplan -var="sls_project_name=$PROJECT_NAME"
+
+      - name: Terraform apply
+        if: inputs.apply
+        shell: bash
+        run: terraform apply -auto-approve tfplan
+
+      - name: Publish endpoint summary
+        if: inputs.apply
+        shell: bash
+        run: |
+          set -euo pipefail
+          ENDPOINT="$(terraform output -raw diagnostics_endpoint)"
+          {
+            echo '### Diagnostics backend deployed'
+            echo
+            echo "Endpoint: \`$ENDPOINT\`"
+            echo
+            echo 'Set this value as the repository secret `CCL_DIAGNOSTICS_ENDPOINT` before building a release.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save encrypted Terraform state
+        if: always() && inputs.apply
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s terraform.tfstate
+          openssl enc -aes-256-cbc -salt -pbkdf2 -iter 200000 \
+            -in terraform.tfstate -out terraform.tfstate.enc \
+            -pass env:TFSTATE_PASSPHRASE
+          "$OSSUTIL" cp terraform.tfstate.enc \
+            "oss://${OSS_BUCKET}/private-state/diagnostics/terraform.tfstate.enc" --force
+
+      - name: Remove plaintext state
+        if: always()
+        shell: bash
+        run: rm -f terraform.tfstate terraform.tfstate.backup tfplan

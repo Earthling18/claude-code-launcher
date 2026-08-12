@@ -12,6 +12,7 @@ pub fn run() {
     let app_version = env!("CARGO_PKG_VERSION").to_string();
     services::diagnostics::wait_for_recovery_parent();
     let boot = services::diagnostics::prepare_boot(&app_version);
+    services::diagnostics::record_boot_attempt(&boot, &app_version);
     services::diagnostics::install_panic_hook(app_version.clone(), boot.stage);
     let page_loaded = Arc::new(AtomicBool::new(false));
 
@@ -69,6 +70,20 @@ pub fn run() {
             }
         })
         .setup(move |app| {
+            let executable_size = std::env::current_exe()
+                .ok()
+                .and_then(|path| std::fs::metadata(path).ok())
+                .map(|metadata| metadata.len())
+                .unwrap_or(0);
+            log::info!(
+                target: "diagnostics",
+                "Launcher startup version={} stage={:?} executable_size={} diagnostics_endpoint={}",
+                monitor_version,
+                monitor_boot.stage,
+                executable_size,
+                services::diagnostics::status().endpoint_configured,
+            );
+
             #[cfg(desktop)]
             app.handle()
                 .plugin(tauri_plugin_updater::Builder::new().build())?;

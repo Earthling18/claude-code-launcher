@@ -49,3 +49,9 @@ src-tauri/resources/bridge/bridge_admin.json
 src-tauri/resources/wt/*
 !src-tauri/resources/wt/README.md
 .playwright-mcp/
+
+# Terraform local caches and sensitive state
+.terraform/
+*.tfstate
+*.tfstate.*
+tfplan

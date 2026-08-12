@@ -1,21 +1,25 @@
 # CC 启动器诊断接收端
 
-这套 Terraform 创建 API Gateway、Function Compute 3.0 和 SLS。客户端只上报白名单事件；函数会再次校验固定 schema、拒绝扩展字段、复核 WebView `renderer` 缺失证据并二次脱敏，然后由 Function Compute 的日志配置写入 SLS。
+这套 Terraform 创建 API Gateway、Function Compute 3.0 和 SLS。安装包仍然放在原有 OSS；诊断事件写入独立 SLS Logstore，不占用安装包 OSS 空间。
 
-## 安全边界
+## 安全与费用边界
 
-- API 仅接收 POST，正文上限 128 KiB。
-- 自动事件仅允许 `webview_renderer_missing`、`rust_panic`、`tauri_startup_fatal`；另允许用户主动提交 `manual_diagnostic`。
+- API 只接收 POST，单份正文硬上限 48 KiB。
+- 自动事件只允许 `webview_renderer_missing`、`rust_panic`、`tauri_startup_fatal`；另允许用户主动提交 `manual_diagnostic`。
 - 白屏事件必须包含 3 次连续采样，且每次都满足 `browser_count > 0 && renderer_count == 0`，否则返回 422，不写 SLS。
-- API Gateway 对来源 IP 和接口总量限流；Gateway 到 FC 使用随机共享密钥，FC 公网地址本身无法绕过校验。
-- API Gateway 不记录请求正文；SLS 只接收函数输出的白名单字段。
-- Terraform state 包含 Gateway/FC 共享密钥，应放在加密的远端 state 后端并限制读取权限。
+- 日志尾部最多 30 行、每行最多 300 字；备注最多 500 字。未知字段一律拒绝。
+- 客户端对同版本、同故障类型 24 小时最多自动上报一次，本地待传队列最多保留 10 份。
+- API Gateway 默认全局 300 次/天、同一来源 IP 10 次/天。按最大请求体计算，入口理论封顶约 14 MiB/天。
+- Logstore 只使用 1 个分片，默认保留 14 天后自动删除。
+- Gateway 到 FC 使用随机共享密钥；FC 公网地址本身无法绕过校验。SLS 只接收函数输出的白名单字段。
+- Terraform state 包含共享密钥，只能以加密形式存放，并限制读取权限。
 
 ## 部署与发布
 
-1. 准备阿里云凭据，并为 `sls_project_name` 选择全局唯一的小写名称。
-2. 在本目录初始化并应用 Terraform；首次执行会显式开通 SLS 与传统 API Gateway 服务。
-3. 获取 `diagnostics_endpoint` 输出，在发布构建环境中设置 `CCL_DIAGNOSTICS_ENDPOINT` 后再编译 Tauri。该值通过 `option_env!` 固化进发布包，不需要把任何云端密钥放进客户端。
-4. 先用函数目录内的 Node 测试验证 schema，再用测试包完成一次“手动提交诊断”冒烟测试。
+1. 准备具备 FC、SLS、传统 API Gateway 和 RAM 最小管理权限的阿里云凭据。
+2. 为 `sls_project_name` 选择全局唯一的小写名称，执行 Terraform。
+3. 取得 `diagnostics_endpoint` 输出，并设置 GitHub Secret `CCL_DIAGNOSTICS_ENDPOINT`。
+4. 发布构建会通过 `option_env!` 将 HTTPS endpoint 固化进客户端；客户端不包含任何云端密钥。
+5. 先运行函数目录内的 Node 测试，再用测试包完成一次“手动提交诊断”冒烟测试。
 
-默认二级域名适合小流量验证，正式长期使用建议在 API Gateway 绑定已备案的 HTTPS 自定义域名，并同步更新发布构建中的 endpoint。
+默认二级域名适合当前低流量诊断。若后续改用自定义 HTTPS 域名，需要同步更新 `CCL_DIAGNOSTICS_ENDPOINT` 并重新构建客户端。

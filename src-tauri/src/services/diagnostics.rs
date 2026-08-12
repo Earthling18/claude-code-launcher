@@ -12,6 +12,11 @@ use sysinfo::{Pid, ProcessesToUpdate, System};
 
 const REPORT_SCHEMA: u32 = 1;
 const DEDUPE_SECONDS: u64 = 24 * 60 * 60;
+const MAX_DIAGNOSTIC_LOG_LINES: usize = 30;
+const MAX_DIAGNOSTIC_LOG_LINE_CHARS: usize = 300;
+const MAX_NOTE_CHARS: usize = 500;
+const MAX_PENDING_REPORTS: usize = 10;
+const MAX_REPORT_BYTES: usize = 48 * 1024;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompatibilityStage {
@@ -34,7 +39,7 @@ impl CompatibilityStage {
 
     fn next(self) -> Option<Self> {
         match self {
-            Self::Standard => Some(Self::NoSandbox),
+            Self::Standard => Some(Self::NoSandboxDisableGpu),
             Self::NoSandbox => Some(Self::NoSandboxDisableGpu),
             Self::NoSandboxDisableGpu => None,
         }
@@ -62,6 +67,16 @@ struct RecoveryState {
     stage: CompatibilityStage,
     app_version: String,
     updated_at: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StartupMarker {
+    schema_version: u32,
+    incident_id: String,
+    app_version: String,
+    compatibility_stage: CompatibilityStage,
+    started_at: u64,
+    executable_size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +150,20 @@ struct SubmitResponse {
     report_id: Option<String>,
 }
 
+#[derive(Debug)]
+enum SubmitError {
+    Retryable(String),
+    Permanent(String),
+}
+
+impl std::fmt::Display for SubmitError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Retryable(message) | Self::Permanent(message) => formatter.write_str(message),
+        }
+    }
+}
+
 pub fn diagnostics_dir() -> PathBuf {
     dirs::data_local_dir()
         .unwrap_or_else(std::env::temp_dir)
@@ -193,6 +222,10 @@ fn dedupe_path() -> PathBuf {
 }
 fn pending_dir() -> PathBuf {
     ensure_dir().join("pending")
+}
+
+fn startup_path() -> PathBuf {
+    ensure_dir().join("startup.json")
 }
 
 fn load_settings() -> DiagnosticSettings {
@@ -272,6 +305,27 @@ pub fn prepare_boot(app_version: &str) -> BootstrapDiagnostics {
         incident_id: incident_arg().unwrap_or_else(|| new_id("incident")),
         browser_args: stage.browser_args(),
     }
+}
+
+/// Persist a privacy-safe marker before Tauri and WebView initialization. This
+/// gives support a version/stage fingerprint even if window creation is blocked
+/// before the logging plugin can start. No executable path or user name is
+/// recorded.
+pub fn record_boot_attempt(boot: &BootstrapDiagnostics, app_version: &str) {
+    let executable_size = std::env::current_exe()
+        .ok()
+        .and_then(|path| fs::metadata(path).ok())
+        .map(|metadata| metadata.len())
+        .unwrap_or(0);
+    let marker = StartupMarker {
+        schema_version: REPORT_SCHEMA,
+        incident_id: boot.incident_id.clone(),
+        app_version: app_version.to_string(),
+        compatibility_stage: boot.stage,
+        started_at: now_secs(),
+        executable_size,
+    };
+    let _ = write_json(&startup_path(), &marker);
 }
 
 pub fn mark_page_loaded(stage: CompatibilityStage, app_version: &str) {
@@ -391,9 +445,15 @@ pub fn start_white_screen_monitor(
         );
         submit_or_queue(report, true);
 
+        // The incident report only demonstrated one working workaround:
+        // --no-sandbox --disable-gpu. Skip the unverified no-sandbox-only
+        // stage so an affected user does not wait through a second 16-second
+        // white-screen cycle.
         let next = boot
             .preferred_fallback
-            .filter(|stage| *stage > boot.stage)
+            .filter(|stage| {
+                *stage == CompatibilityStage::NoSandboxDisableGpu && *stage > boot.stage
+            })
             .or_else(|| boot.stage.next());
         if let Some(next) = next {
             if let Ok(exe) = std::env::current_exe() {
@@ -431,13 +491,17 @@ fn diagnostic_tail() -> Vec<String> {
         lines.extend(
             body.lines()
                 .filter(|line| line.contains("[diagnostics]") || line.contains("diagnostics]"))
-                .map(|line| line.chars().take(500).collect::<String>()),
+                .map(|line| {
+                    line.chars()
+                        .take(MAX_DIAGNOSTIC_LOG_LINE_CHARS)
+                        .collect::<String>()
+                }),
         );
     }
     lines
         .into_iter()
         .rev()
-        .take(80)
+        .take(MAX_DIAGNOSTIC_LOG_LINES)
         .collect::<Vec<_>>()
         .into_iter()
         .rev()
@@ -472,7 +536,7 @@ fn sanitize_note(value: &str) -> String {
     let mut clean = value
         .chars()
         .filter(|character| !character.is_control() || *character == '\n')
-        .take(1000)
+        .take(MAX_NOTE_CHARS)
         .collect::<String>();
     for marker in ["token", "api_key", "authorization", "base_url"] {
         if clean.to_ascii_lowercase().contains(marker) {
@@ -531,8 +595,15 @@ fn submit_or_queue(report: DiagnosticReport, automatic: bool) {
         return;
     }
     if let Err(error) = submit_report(&report) {
-        log::warn!(target: "diagnostics", "diagnostic upload deferred: {}", error);
-        queue_report(&report);
+        match error {
+            SubmitError::Retryable(message) => {
+                log::warn!(target: "diagnostics", "diagnostic upload deferred: {}", message);
+                queue_report(&report);
+            }
+            SubmitError::Permanent(message) => {
+                log::warn!(target: "diagnostics", "diagnostic report rejected locally: {}", message);
+            }
+        }
     }
 }
 
@@ -540,25 +611,75 @@ fn queue_report(report: &DiagnosticReport) {
     let dir = pending_dir();
     let _ = fs::create_dir_all(&dir);
     let _ = write_json(&dir.join(format!("{}.json", report.incident_id)), report);
+    prune_pending_reports(&dir);
 }
 
-fn submit_report(report: &DiagnosticReport) -> Result<String, String> {
-    let endpoint = diagnostics_endpoint().ok_or("diagnostics endpoint is not configured")?;
+fn prune_pending_reports(dir: &PathBuf) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut reports = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("json") {
+                return None;
+            }
+            let modified = entry
+                .metadata()
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .unwrap_or(UNIX_EPOCH);
+            Some((modified, path))
+        })
+        .collect::<Vec<_>>();
+    reports.sort_by_key(|(modified, _)| *modified);
+    let remove_count = reports.len().saturating_sub(MAX_PENDING_REPORTS);
+    for (_, path) in reports.into_iter().take(remove_count) {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn submit_report(report: &DiagnosticReport) -> Result<String, SubmitError> {
+    let payload =
+        serde_json::to_vec(report).map_err(|error| SubmitError::Permanent(error.to_string()))?;
+    if payload.len() > MAX_REPORT_BYTES {
+        return Err(SubmitError::Permanent(format!(
+            "serialized report exceeds {} bytes",
+            MAX_REPORT_BYTES
+        )));
+    }
+    let endpoint = diagnostics_endpoint().ok_or_else(|| {
+        SubmitError::Retryable("diagnostics endpoint is not configured".to_string())
+    })?;
     let client = reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(8))
         .build()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| SubmitError::Retryable(error.to_string()))?;
     let response = client
         .post(endpoint)
-        .json(report)
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(payload)
         .send()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| SubmitError::Retryable(error.to_string()))?;
     if !response.status().is_success() {
-        return Err(format!("HTTP {}", response.status()));
+        let status = response.status();
+        let message = format!("HTTP {}", status);
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS
+            || status == reqwest::StatusCode::REQUEST_TIMEOUT
+            || status.is_server_error()
+        {
+            return Err(SubmitError::Retryable(message));
+        }
+        return Err(SubmitError::Permanent(message));
     }
-    let result: SubmitResponse = response.json().map_err(|error| error.to_string())?;
+    let result: SubmitResponse = response
+        .json()
+        .map_err(|error| SubmitError::Permanent(error.to_string()))?;
     if !result.accepted {
-        return Err("server rejected diagnostic report".to_string());
+        return Err(SubmitError::Permanent(
+            "server rejected diagnostic report".to_string(),
+        ));
     }
     let report_id = result
         .report_id
@@ -576,18 +697,22 @@ fn retry_pending_reports() {
         return;
     }
     let dir = pending_dir();
+    prune_pending_reports(&dir);
     let Ok(entries) = fs::read_dir(&dir) else {
         return;
     };
-    for entry in entries.flatten().take(10) {
+    for entry in entries.flatten().take(MAX_PENDING_REPORTS) {
         let Some(report) = read_json::<DiagnosticReport>(&entry.path()) else {
             continue;
         };
         if !is_automatic_report_kind(&report.kind) {
             continue;
         }
-        if submit_report(&report).is_ok() {
-            let _ = fs::remove_file(entry.path());
+        match submit_report(&report) {
+            Ok(_) | Err(SubmitError::Permanent(_)) => {
+                let _ = fs::remove_file(entry.path());
+            }
+            Err(SubmitError::Retryable(_)) => {}
         }
     }
 }
@@ -683,14 +808,14 @@ pub fn submit_manual(app_version: &str, note: Option<String>) -> Result<String, 
         vec![snapshot_webview_processes(std::process::id())],
         note,
     );
-    submit_report(&report)
+    submit_report(&report).map_err(|error| error.to_string())
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        is_automatic_report_kind, renderer_missing_confirmed, sanitize_note, CompatibilityStage,
-        ProcessSnapshot,
+        is_automatic_report_kind, renderer_missing_confirmed, sanitize_note, submit_report,
+        CompatibilityStage, DiagnosticReport, ProcessSnapshot, SubmitError, MAX_REPORT_BYTES,
     };
 
     fn sample(browser: usize, renderer: usize) -> ProcessSnapshot {
@@ -723,10 +848,10 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_fallback_is_bounded_to_two_restarts() {
+    fn compatibility_fallback_uses_the_verified_workaround_in_one_restart() {
         assert_eq!(
             CompatibilityStage::Standard.next(),
-            Some(CompatibilityStage::NoSandbox)
+            Some(CompatibilityStage::NoSandboxDisableGpu)
         );
         assert_eq!(
             CompatibilityStage::NoSandbox.next(),
@@ -758,5 +883,37 @@ mod tests {
         assert!(!is_automatic_report_kind("manual_diagnostic"));
         assert!(!is_automatic_report_kind("frontend_error"));
         assert!(!is_automatic_report_kind("network_error"));
+    }
+
+    fn maximum_generated_report() -> DiagnosticReport {
+        DiagnosticReport {
+            schema_version: 1,
+            incident_id: "incident-abcdef-10".to_string(),
+            install_id: "install-abcdef-10".to_string(),
+            kind: "webview_renderer_missing".to_string(),
+            occurred_at: 1_700_000_000,
+            app_version: "1.2.7".to_string(),
+            os_version: "系".repeat(200),
+            compatibility_stage: CompatibilityStage::Standard,
+            samples: vec![sample(1, 0), sample(1, 0), sample(1, 0)],
+            note: Some("注".repeat(500)),
+            diagnostic_log_tail: vec!["🚀".repeat(300); 30],
+        }
+    }
+
+    #[test]
+    fn maximum_client_report_fits_the_transport_byte_limit() {
+        let payload = serde_json::to_vec(&maximum_generated_report()).unwrap();
+        assert!(payload.len() < MAX_REPORT_BYTES, "{} bytes", payload.len());
+    }
+
+    #[test]
+    fn oversized_report_is_rejected_before_network_access() {
+        let mut report = maximum_generated_report();
+        report.diagnostic_log_tail = vec!["x".repeat(MAX_REPORT_BYTES)];
+        assert!(matches!(
+            submit_report(&report),
+            Err(SubmitError::Permanent(_))
+        ));
     }
 }

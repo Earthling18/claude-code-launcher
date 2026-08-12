@@ -1,6 +1,9 @@
 'use strict';
 
-const MAX_BODY_BYTES = 128 * 1024;
+const MAX_BODY_BYTES = 48 * 1024;
+const MAX_LOG_LINES = 30;
+const MAX_LOG_LINE_CHARS = 300;
+const MAX_NOTE_CHARS = 500;
 const ALLOWED_KINDS = new Set([
   'webview_renderer_missing',
   'rust_panic',
@@ -104,10 +107,12 @@ function validateAndSanitize(report) {
       || report.samples.length > 3
       || !report.samples.every(validateSample)
       || !(report.note === null || typeof report.note === 'string')
-      || (typeof report.note === 'string' && report.note.length > 1000)
+      || (typeof report.note === 'string' && report.note.length > MAX_NOTE_CHARS)
       || !Array.isArray(report.diagnostic_log_tail)
-      || report.diagnostic_log_tail.length > 80
-      || !report.diagnostic_log_tail.every((line) => typeof line === 'string' && line.length <= 500)) {
+      || report.diagnostic_log_tail.length > MAX_LOG_LINES
+      || !report.diagnostic_log_tail.every(
+        (line) => typeof line === 'string' && line.length <= MAX_LOG_LINE_CHARS,
+      )) {
     return null;
   }
 
@@ -123,8 +128,10 @@ function validateAndSanitize(report) {
   return {
     ...report,
     os_version: scrubText(report.os_version, 200),
-    note: report.note === null ? null : scrubText(report.note, 1000),
-    diagnostic_log_tail: report.diagnostic_log_tail.map((line) => scrubText(line, 500)),
+    note: report.note === null ? null : scrubText(report.note, MAX_NOTE_CHARS),
+    diagnostic_log_tail: report.diagnostic_log_tail.map(
+      (line) => scrubText(line, MAX_LOG_LINE_CHARS),
+    ),
   };
 }
 

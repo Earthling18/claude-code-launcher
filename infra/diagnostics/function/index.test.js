@@ -70,3 +70,21 @@ test('hides the direct Function Compute endpoint without the gateway secret', as
   const result = await handler(event(validReport(), 'wrong-secret'));
   assert.equal(result.statusCode, 404);
 });
+
+test('rejects request bodies above the hard byte limit', async () => {
+  process.env.INGEST_SHARED_SECRET = 'test-secret';
+  const oversized = event(validReport());
+  oversized.body = 'x'.repeat(_internal.MAX_BODY_BYTES + 1);
+  const result = await handler(oversized);
+  assert.equal(result.statusCode, 413);
+});
+
+test('rejects log tails that exceed line count or line length limits', () => {
+  const tooManyLines = validReport();
+  tooManyLines.diagnostic_log_tail = Array.from({ length: 31 }, () => 'safe');
+  assert.equal(_internal.validateAndSanitize(tooManyLines), null);
+
+  const tooLongLine = validReport();
+  tooLongLine.diagnostic_log_tail = ['x'.repeat(301)];
+  assert.equal(_internal.validateAndSanitize(tooLongLine), null);
+});
