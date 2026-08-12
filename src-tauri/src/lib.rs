@@ -33,8 +33,10 @@ pub fn run() {
 
     let mut context = tauri::generate_context!();
     #[cfg(windows)]
-    if let Some(main_window) = context.config_mut().app.windows.first_mut() {
-        main_window.additional_browser_args = Some(boot.browser_args.clone());
+    if let Some(browser_args) = &boot.browser_args {
+        if let Some(main_window) = context.config_mut().app.windows.first_mut() {
+            main_window.additional_browser_args = Some(browser_args.clone());
+        }
     }
 
     let load_flag = page_loaded.clone();

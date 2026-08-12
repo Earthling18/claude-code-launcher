@@ -12,8 +12,6 @@ use sysinfo::{Pid, ProcessesToUpdate, System};
 
 const REPORT_SCHEMA: u32 = 1;
 const DEDUPE_SECONDS: u64 = 24 * 60 * 60;
-const WRY_DEFAULT_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompatibilityStage {
@@ -23,13 +21,14 @@ pub enum CompatibilityStage {
 }
 
 impl CompatibilityStage {
-    pub fn browser_args(self) -> String {
+    pub fn browser_args(self) -> Option<String> {
         match self {
-            Self::Standard => WRY_DEFAULT_ARGS.to_string(),
-            Self::NoSandbox => format!("{} --no-sandbox", WRY_DEFAULT_ARGS),
-            Self::NoSandboxDisableGpu => {
-                format!("{} --no-sandbox --disable-gpu", WRY_DEFAULT_ARGS)
-            }
+            // Do not set `additional_browser_args` at all on healthy machines.
+            // Even re-applying WebView2's usual feature flags creates a distinct
+            // browser environment and regresses warm startup by several seconds.
+            Self::Standard => None,
+            Self::NoSandbox => Some("--no-sandbox".to_string()),
+            Self::NoSandboxDisableGpu => Some("--no-sandbox --disable-gpu".to_string()),
         }
     }
 
@@ -55,7 +54,7 @@ pub struct BootstrapDiagnostics {
     pub stage: CompatibilityStage,
     pub preferred_fallback: Option<CompatibilityStage>,
     pub incident_id: String,
-    pub browser_args: String,
+    pub browser_args: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -691,7 +690,7 @@ pub fn submit_manual(app_version: &str, note: Option<String>) -> Result<String, 
 mod tests {
     use super::{
         is_automatic_report_kind, renderer_missing_confirmed, sanitize_note, CompatibilityStage,
-        ProcessSnapshot, WRY_DEFAULT_ARGS,
+        ProcessSnapshot,
     };
 
     fn sample(browser: usize, renderer: usize) -> ProcessSnapshot {
@@ -734,15 +733,14 @@ mod tests {
             Some(CompatibilityStage::NoSandboxDisableGpu)
         );
         assert_eq!(CompatibilityStage::NoSandboxDisableGpu.next(), None);
-        assert_eq!(
-            CompatibilityStage::Standard.browser_args(),
-            WRY_DEFAULT_ARGS
-        );
+        assert_eq!(CompatibilityStage::Standard.browser_args(), None);
         assert!(CompatibilityStage::NoSandbox
             .browser_args()
+            .unwrap()
             .contains("--no-sandbox"));
         assert!(CompatibilityStage::NoSandboxDisableGpu
             .browser_args()
+            .unwrap()
             .contains("--disable-gpu"));
     }
 
