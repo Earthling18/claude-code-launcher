@@ -9,6 +9,7 @@ import { VersionManager } from './components/VersionManager';
 import { ToastHost } from './components/ToastHost';
 import { useUpdateChecker } from './hooks/useUpdateChecker';
 import './index.css';
+import { diagnosticsApi } from './api';
 
 // 全局拖拽上下文
 import { createContext, useContext, useRef, useCallback } from 'react';
@@ -107,6 +108,22 @@ function AppContent() {
       window.removeEventListener('dragover', handleDragOver);
       window.removeEventListener('dragleave', handleDragLeave);
       window.removeEventListener('drop', handleDrop);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onError = (event: ErrorEvent) => {
+      diagnosticsApi.recordFrontendError(event.message || 'Unhandled frontend error').catch(() => {});
+    };
+    const onRejection = (event: PromiseRejectionEvent) => {
+      const message = event.reason instanceof Error ? event.reason.message : String(event.reason);
+      diagnosticsApi.recordFrontendError(`Unhandled promise rejection: ${message}`).catch(() => {});
+    };
+    window.addEventListener('error', onError);
+    window.addEventListener('unhandledrejection', onRejection);
+    return () => {
+      window.removeEventListener('error', onError);
+      window.removeEventListener('unhandledrejection', onRejection);
     };
   }, []);
 

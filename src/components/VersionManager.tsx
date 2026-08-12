@@ -3,6 +3,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { exit } from '@tauri-apps/plugin-process';
+import { DiagnosticsPanel } from './DiagnosticsPanel';
 
 interface GitHubAsset {
   name: string;
@@ -309,6 +310,7 @@ export const VersionManager: React.FC = () => {
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto">
+            <DiagnosticsPanel />
             {loading && !hasFetched && (
               <div className="px-4 py-6 text-center text-[13px] text-[#999999]">
                 正在获取版本列表...

@@ -89,8 +89,8 @@ export const ProjectCreatePage: React.FC = () => {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
-      <div className="flex-shrink-0 px-5 py-2.5 border-b border-line">
-        <div className="flex items-center gap-2">
+      <div className="flex-shrink-0 border-b border-line px-5 py-2.5">
+        <div className="mx-auto flex w-full max-w-[680px] items-center gap-2">
           <button onClick={handleCancel} className="btn btn-ghost btn-sm">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
             返回
@@ -100,7 +100,7 @@ export const ProjectCreatePage: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto px-5 py-5">
+      <div className="flex-1 overflow-x-hidden overflow-y-auto px-5 py-4">
         <ProjectForm
           initialWorkingDirectory={defaultWorkingDirectory}
           initialConfig={lastConfig}

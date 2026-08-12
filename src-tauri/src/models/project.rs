@@ -41,6 +41,11 @@ pub struct ProjectConfig {
     /// Reference to a ModelPreset (custom mode). When set, takes precedence over `model` / `base_url` / `token`.
     #[serde(default)]
     pub model_preset_id: Option<String>,
+    /// CLI-specific model references. `model_preset_id` remains the legacy fallback.
+    #[serde(default)]
+    pub claude_model_preset_id: Option<String>,
+    #[serde(default)]
+    pub codex_model_preset_id: Option<String>,
 }
 
 impl ProjectConfig {
@@ -53,6 +58,13 @@ impl ProjectConfig {
             self.claude_proxy_preset_id = self.proxy_preset_id.clone();
         } else if self.mode == "codex" && self.codex_proxy_preset_id.is_none() {
             self.codex_proxy_preset_id = self.proxy_preset_id.clone();
+        }
+        if self.mode == "custom" {
+            if self.custom_cli == "codex" && self.codex_model_preset_id.is_none() {
+                self.codex_model_preset_id = self.model_preset_id.clone();
+            } else if self.custom_cli != "codex" && self.claude_model_preset_id.is_none() {
+                self.claude_model_preset_id = self.model_preset_id.clone();
+            }
         }
     }
 }
@@ -72,6 +84,8 @@ impl Default for ProjectConfig {
             claude_proxy_preset_id: None,
             codex_proxy_preset_id: None,
             model_preset_id: None,
+            claude_model_preset_id: None,
+            codex_model_preset_id: None,
         }
     }
 }
@@ -245,5 +259,27 @@ mod proxy_config_tests {
             restored.codex_proxy_preset_id.as_deref(),
             Some("codex-proxy")
         );
+    }
+
+    #[test]
+    fn legacy_custom_model_moves_only_to_the_selected_cli() {
+        let mut codex: ProjectConfig = serde_json::from_str(
+            r#"{"mode":"custom","custom_cli":"codex","model_preset_id":"legacy-model"}"#,
+        )
+        .unwrap();
+        codex.normalize_legacy_mode();
+        assert_eq!(codex.codex_model_preset_id.as_deref(), Some("legacy-model"));
+        assert_eq!(codex.claude_model_preset_id, None);
+
+        let mut claude: ProjectConfig = serde_json::from_str(
+            r#"{"mode":"custom","custom_cli":"claude","model_preset_id":"legacy-model"}"#,
+        )
+        .unwrap();
+        claude.normalize_legacy_mode();
+        assert_eq!(
+            claude.claude_model_preset_id.as_deref(),
+            Some("legacy-model")
+        );
+        assert_eq!(claude.codex_model_preset_id, None);
     }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 // Module-level scroll memory: persists across mount/unmount of ProjectListPage
@@ -57,6 +57,7 @@ export const ProjectListPage: React.FC = () => {
   const [presets, setPresets] = useState<GlobalPresets | null>(null);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollRestoredRef = useRef(false);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -105,19 +106,36 @@ export const ProjectListPage: React.FC = () => {
     return () => window.removeEventListener('cc-launcher:show-onboarding', handler);
   }, []);
 
-  // Preserve scroll position across navigations (edit → save → list, back, etc.)
-  // We continuously persist scrollTop into a module-level variable, then restore on mount.
+  // Keep listening from the initial mount, but do not let the empty loading state overwrite
+  // the saved position before the project cards have been rendered.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    // Restore. Wait for layout/render so projects are mounted before scrolling.
-    requestAnimationFrame(() => {
-      if (scrollRef.current) scrollRef.current.scrollTop = lastScrollTop;
-    });
-    const onScroll = () => { lastScrollTop = el.scrollTop; };
+    const onScroll = () => {
+      if (scrollRestoredRef.current) lastScrollTop = el.scrollTop;
+    };
     el.addEventListener('scroll', onScroll, { passive: true });
-    return () => el.removeEventListener('scroll', onScroll);
-  }, [loading]); // re-run after loading flips so children are present when we restore
+    return () => {
+      if (scrollRestoredRef.current) lastScrollTop = el.scrollTop;
+      el.removeEventListener('scroll', onScroll);
+    };
+  }, [depsReady]);
+
+  // Restore only after loading finishes and the cards exist. Assign once synchronously to
+  // avoid a visible jump, then once on the next frame for late layout measurements.
+  useLayoutEffect(() => {
+    if (!depsReady || loading || error || scrollRestoredRef.current) return;
+    const el = scrollRef.current;
+    if (!el) return;
+
+    const target = lastScrollTop;
+    el.scrollTop = target;
+    const frame = requestAnimationFrame(() => {
+      if (scrollRef.current) scrollRef.current.scrollTop = target;
+      scrollRestoredRef.current = true;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [depsReady, loading, error, sortedProjects.length]);
 
   const handleOnboardingComplete = () => {
     onboardingApi.setCompleted().catch(() => {});
@@ -201,10 +219,12 @@ export const ProjectListPage: React.FC = () => {
   };
 
   const handleSelect = (id: string) => {
+    if (scrollRef.current) lastScrollTop = scrollRef.current.scrollTop;
     navigate(`/local/project/${id}/edit`);
   };
 
   const handleCreate = () => {
+    if (scrollRef.current) lastScrollTop = scrollRef.current.scrollTop;
     navigate('/local/project/new');
   };
 

@@ -1,4 +1,5 @@
 pub mod dependency_checker;
+pub mod diagnostics;
 pub mod installer;
 pub mod launcher;
 pub mod settings_manager;

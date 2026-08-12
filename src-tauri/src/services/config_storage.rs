@@ -1,8 +1,11 @@
+use crate::models::{
+    CreateProjectInput, PinnedOrderItem, Project, ProjectConfig, ProjectOrderItem,
+    UpdateProjectInput,
+};
+use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
-use base64::{Engine as _, engine::general_purpose};
-use crate::models::{Project, ProjectConfig, CreateProjectInput, UpdateProjectInput, ProjectOrderItem, PinnedOrderItem};
 
 fn default_skip_permissions() -> bool {
     true
@@ -63,8 +66,7 @@ pub struct ConfigStorage;
 
 impl ConfigStorage {
     fn get_config_path() -> Result<PathBuf, String> {
-        let base = dirs::config_dir()
-            .ok_or("无法获取配置目录")?;
+        let base = dirs::config_dir().ok_or("无法获取配置目录")?;
         let new_dir = base.join("CCLauncher");
         let mobot_dir = base.join("MobotLauncher");
         let legacy_dir = base.join("ClaudeCodeLauncher");
@@ -101,8 +103,7 @@ impl ConfigStorage {
         };
 
         if !config_dir.exists() {
-            fs::create_dir_all(&config_dir)
-                .map_err(|e| format!("无法创建配置目录: {}", e))?;
+            fs::create_dir_all(&config_dir).map_err(|e| format!("无法创建配置目录: {}", e))?;
         }
 
         Ok(config_dir.join("config.json"))
@@ -124,12 +125,7 @@ impl ConfigStorage {
             ..Default::default()
         };
 
-        let default_project = Project::new(
-            "默认项目".to_string(),
-            home_dir,
-            project_config,
-            true,
-        );
+        let default_project = Project::new("默认项目".to_string(), home_dir, project_config, true);
 
         AppConfigV2 {
             version: 2,
@@ -144,7 +140,8 @@ impl ConfigStorage {
             project.config.token = general_purpose::STANDARD.encode(&project.config.token);
         }
         if !project.config.codex_api_key.is_empty() {
-            project.config.codex_api_key = general_purpose::STANDARD.encode(&project.config.codex_api_key);
+            project.config.codex_api_key =
+                general_purpose::STANDARD.encode(&project.config.codex_api_key);
         }
     }
 
@@ -174,17 +171,17 @@ impl ConfigStorage {
             return Ok(AppConfigV2::default());
         }
 
-        let content = fs::read_to_string(&config_path)
-            .map_err(|e| format!("无法读取配置文件: {}", e))?;
+        let content =
+            fs::read_to_string(&config_path).map_err(|e| format!("无法读取配置文件: {}", e))?;
 
         // Detect version
-        let raw: RawConfig = serde_json::from_str(&content)
-            .map_err(|e| format!("无法解析配置文件: {}", e))?;
+        let raw: RawConfig =
+            serde_json::from_str(&content).map_err(|e| format!("无法解析配置文件: {}", e))?;
 
         if raw.version == Some(2) {
             // Load v2 config directly
-            let mut config: AppConfigV2 = serde_json::from_str(&content)
-                .map_err(|e| format!("无法解析v2配置: {}", e))?;
+            let mut config: AppConfigV2 =
+                serde_json::from_str(&content).map_err(|e| format!("无法解析v2配置: {}", e))?;
 
             // Decode tokens + coerce legacy mode='remote' → 'claude'
             for project in &mut config.projects {
@@ -194,9 +191,9 @@ impl ConfigStorage {
 
             // One-shot legacy → presets migration. Only runs if presets.json doesn't exist yet.
             // Failures are logged and don't block startup; legacy fields stay as fallback.
-            if let Some(presets) = crate::services::presets_storage::migrate_legacy_to_presets(
-                &mut config.projects,
-            ) {
+            if let Some(presets) =
+                crate::services::presets_storage::migrate_legacy_to_presets(&mut config.projects)
+            {
                 if let Err(e) = crate::services::PresetsStorage::save(&presets) {
                     log::warn!("Preset migration save failed: {}", e);
                 } else if let Err(e) = Self::save_config_v2(&config) {
@@ -210,11 +207,22 @@ impl ConfigStorage {
                 }
             }
 
+            // Upgrade legacy single-endpoint presets to shared Claude/Codex endpoints.
+            match crate::services::presets_storage::migrate_model_protocols(&mut config.projects) {
+                Ok(true) => {
+                    if let Err(e) = Self::save_config_v2(&config) {
+                        log::warn!("Model protocol migration: save projects failed: {}", e);
+                    }
+                }
+                Ok(false) => {}
+                Err(e) => log::warn!("Model protocol migration failed: {}", e),
+            }
+
             Ok(config)
         } else {
             // Migrate from v1
-            let mut v1_config: AppConfig = serde_json::from_str(&content)
-                .map_err(|e| format!("无法解析v1配置: {}", e))?;
+            let mut v1_config: AppConfig =
+                serde_json::from_str(&content).map_err(|e| format!("无法解析v1配置: {}", e))?;
 
             // Decode v1 token
             if !v1_config.token.is_empty() {
@@ -247,8 +255,7 @@ impl ConfigStorage {
         let json_string = serde_json::to_string_pretty(&config_to_save)
             .map_err(|e| format!("无法序列化配置: {}", e))?;
 
-        fs::write(&config_path, json_string)
-            .map_err(|e| format!("无法写入配置文件: {}", e))?;
+        fs::write(&config_path, json_string).map_err(|e| format!("无法写入配置文件: {}", e))?;
 
         Ok(())
     }
@@ -262,7 +269,8 @@ impl ConfigStorage {
     /// Get a single project by ID
     pub fn get_project(id: &str) -> Result<Project, String> {
         let config = Self::load_config_v2()?;
-        config.projects
+        config
+            .projects
             .into_iter()
             .find(|p| p.id == id)
             .ok_or_else(|| format!("项目不存在: {}", id))
@@ -272,7 +280,8 @@ impl ConfigStorage {
     pub fn create_project(input: CreateProjectInput) -> Result<Project, String> {
         let mut config = Self::load_config_v2()?;
 
-        let max_order = config.projects
+        let max_order = config
+            .projects
             .iter()
             .filter(|p| !p.is_pinned)
             .map(|p| p.sort_order)
@@ -297,14 +306,16 @@ impl ConfigStorage {
     pub fn update_project(id: &str, updates: UpdateProjectInput) -> Result<Project, String> {
         let mut config = Self::load_config_v2()?;
 
-        let max_order = config.projects
+        let max_order = config
+            .projects
             .iter()
             .filter(|p| !p.is_pinned && p.id != id)
             .map(|p| p.sort_order)
             .max()
             .unwrap_or(0);
 
-        let project = config.projects
+        let project = config
+            .projects
             .iter_mut()
             .find(|p| p.id == id)
             .ok_or_else(|| format!("项目不存在: {}", id))?;
@@ -349,7 +360,8 @@ impl ConfigStorage {
     pub fn delete_project(id: &str) -> Result<(), String> {
         let mut config = Self::load_config_v2()?;
 
-        let project = config.projects
+        let project = config
+            .projects
             .iter()
             .find(|p| p.id == id)
             .ok_or_else(|| format!("项目不存在: {}", id))?;
@@ -373,7 +385,7 @@ impl ConfigStorage {
                 std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .unwrap_or_default()
-                    .as_secs()
+                    .as_secs(),
             );
             Self::save_config_v2(&config)?;
         }
@@ -466,7 +478,8 @@ impl ConfigStorage {
     pub fn load_config() -> Result<AppConfig, String> {
         let config = Self::load_config_v2()?;
 
-        let default_project = config.projects
+        let default_project = config
+            .projects
             .iter()
             .find(|p| p.is_default)
             .cloned()

@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { DependencyStatus, AppConfig } from './types';
+import type { DependencyStatus, AppConfig, DiagnosticsStatus } from './types';
 import type { Project, ProjectConfig, ProjectOrderItem, PinnedOrderItem, ConfigScanResult } from './types/project';
-import type { GlobalPresets, ProxyPreset, ModelPreset, ModelProbeResult } from './types/presets';
+import type { GlobalPresets, ProxyPreset, ModelPreset, ModelProbeResult, ModelApiFormat } from './types/presets';
 
 export const api = {
   // 依赖检测
@@ -135,15 +135,15 @@ export const presetsApi = {
   deleteProxy: (id: string) => invoke<void>('delete_proxy_preset', { id }),
   countProxyRefs: (id: string) => invoke<number>('count_proxy_preset_refs', { id }),
 
-  createModel: (name: string, model: string, baseUrl: string, token: string) =>
-    invoke<ModelPreset>('create_model_preset', { name, model, baseUrl, token }),
-  updateModel: (id: string, name: string, model: string, baseUrl: string, token: string) =>
-    invoke<ModelPreset>('update_model_preset', { id, name, model, baseUrl, token }),
+  createModel: (name: string, model: string, claudeBaseUrl: string, codexBaseUrl: string, token: string) =>
+    invoke<ModelPreset>('create_model_preset', { name, model, claudeBaseUrl, codexBaseUrl, token }),
+  updateModel: (id: string, name: string, model: string, claudeBaseUrl: string, codexBaseUrl: string, token: string) =>
+    invoke<ModelPreset>('update_model_preset', { id, name, model, claudeBaseUrl, codexBaseUrl, token }),
   deleteModel: (id: string) => invoke<void>('delete_model_preset', { id }),
   countModelRefs: (id: string) => invoke<number>('count_model_preset_refs', { id }),
 
-  probeModel: (baseUrl: string, token: string) =>
-    invoke<ModelProbeResult>('probe_model_endpoint', { baseUrl, token }),
+  probeModel: (baseUrl: string, token: string, model: string, apiFormat: ModelApiFormat) =>
+    invoke<ModelProbeResult>('probe_model_endpoint', { baseUrl, token, model, apiFormat }),
 
   getLastUsed: () => invoke<ProjectConfig | null>('get_last_used_project_config'),
   setLastUsed: (config: ProjectConfig) =>
@@ -156,5 +156,14 @@ export const presetsApi = {
 export const onboardingApi = {
   getStatus: () => invoke<boolean>('get_onboarding_status'),
   setCompleted: () => invoke<void>('set_onboarding_completed'),
+};
+
+export const diagnosticsApi = {
+  getStatus: () => invoke<DiagnosticsStatus>('get_diagnostics_status'),
+  setAutoReport: (enabled: boolean) => invoke<void>('set_diagnostics_auto_report', { enabled }),
+  openFolder: () => invoke<void>('open_diagnostics_folder'),
+  resetCompatibilityAndRestart: () => invoke<void>('reset_webview_compatibility_and_restart'),
+  submit: (note?: string) => invoke<string>('submit_diagnostics', { note: note || null }),
+  recordFrontendError: (message: string) => invoke<void>('record_frontend_error', { message }),
 };
 

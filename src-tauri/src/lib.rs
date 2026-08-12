@@ -4,6 +4,17 @@ mod models;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+
+    let app_version = env!("CARGO_PKG_VERSION").to_string();
+    services::diagnostics::wait_for_recovery_parent();
+    let boot = services::diagnostics::prepare_boot(&app_version);
+    services::diagnostics::install_panic_hook(app_version.clone(), boot.stage);
+    let page_loaded = Arc::new(AtomicBool::new(false));
+
     // Clear CLAUDECODE env var so child processes (claude CLI, bridge agents)
     // don't think they're running inside a nested Claude Code session.
     std::env::remove_var("CLAUDECODE");
@@ -20,14 +31,47 @@ pub fn run() {
         std::env::set_var("no_proxy", &new_val);
     }
 
-    tauri::Builder::default()
+    let mut context = tauri::generate_context!();
+    #[cfg(windows)]
+    if let Some(main_window) = context.config_mut().app.windows.first_mut() {
+        main_window.additional_browser_args = Some(boot.browser_args.clone());
+    }
+
+    let load_flag = page_loaded.clone();
+    let load_stage = boot.stage;
+    let load_version = app_version.clone();
+    let monitor_flag = page_loaded.clone();
+    let monitor_boot = boot.clone();
+    let monitor_version = app_version.clone();
+
+    let builder = tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([tauri_plugin_log::Target::new(
+                    tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("cc-launcher".to_string()),
+                    },
+                )])
+                .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(3))
+                .max_file_size(2 * 1024 * 1024)
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_process::init())
-        .setup(|app| {
+        .on_page_load(move |_webview, payload| {
+            if matches!(payload.event(), tauri::webview::PageLoadEvent::Finished)
+                && !load_flag.swap(true, Ordering::AcqRel)
+            {
+                services::diagnostics::mark_page_loaded(load_stage, &load_version);
+            }
+        })
+        .setup(move |app| {
             #[cfg(desktop)]
-            app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+            app.handle()
+                .plugin(tauri_plugin_updater::Builder::new().build())?;
 
             // macOS: cleanup old / duplicate app bundles on launch.
             //   - Old branding: "Mobot Launcher.app" / "Claude Code Launcher.app"
@@ -91,6 +135,13 @@ pub fn run() {
                     window.open_devtools();
                 }
             }
+
+            services::diagnostics::start_white_screen_monitor(
+                app.handle().clone(),
+                monitor_flag.clone(),
+                monitor_boot.clone(),
+                monitor_version.clone(),
+            );
 
             Ok(())
         })
@@ -178,7 +229,16 @@ pub fn run() {
             // Onboarding commands
             commands::get_onboarding_status,
             commands::set_onboarding_completed,
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+            // Diagnostics and WebView recovery commands
+            commands::get_diagnostics_status,
+            commands::set_diagnostics_auto_report,
+            commands::open_diagnostics_folder,
+            commands::reset_webview_compatibility_and_restart,
+            commands::submit_diagnostics,
+            commands::record_frontend_error,
+        ]);
+
+    if let Err(error) = builder.run(context) {
+        services::diagnostics::record_startup_fatal(&app_version, boot.stage, &error.to_string());
+    }
 }

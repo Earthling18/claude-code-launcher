@@ -1,0 +1,6 @@
+{
+  "name": "cc-launcher-diagnostics-ingest",
+  "private": true,
+  "version": "1.0.0",
+  "type": "commonjs"
+}

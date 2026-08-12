@@ -10,9 +10,15 @@ export interface ModelPreset {
   id: string;
   name: string;
   model: string;
-  base_url: string;
+  claude_base_url: string;
+  codex_base_url: string;
   token: string;
+  /** Legacy fields returned while old presets are being migrated. */
+  base_url?: string;
+  api_format?: ModelApiFormat | null;
 }
+
+export type ModelApiFormat = 'anthropic_messages' | 'openai_responses';
 
 export interface GlobalPresets {
   proxies: ProxyPreset[];

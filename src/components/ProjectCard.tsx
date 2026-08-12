@@ -13,12 +13,6 @@ interface ProjectCardProps {
   isDragging?: boolean;
 }
 
-const MODE_LABEL: Record<string, string> = {
-  claude: 'Claude',
-  codex: 'Codex',
-  custom: 'Custom',
-};
-
 function formatPath(path: string) {
   if (path.length <= 36) return path;
   const parts = path.split(/[/\\]/);
@@ -29,8 +23,11 @@ function formatPath(path: string) {
 function getDetailTag(project: Project, presets?: GlobalPresets | null): string | null {
   const cfg = project.config;
   if (cfg.mode === 'custom') {
-    if (cfg.model_preset_id && presets) {
-      const m = presets.models.find(m => m.id === cfg.model_preset_id);
+    const modelPresetId = cfg.custom_cli === 'codex'
+      ? (cfg.codex_model_preset_id ?? cfg.model_preset_id)
+      : (cfg.claude_model_preset_id ?? cfg.model_preset_id);
+    if (modelPresetId && presets) {
+      const m = presets.models.find(m => m.id === modelPresetId);
       if (m) return m.name;
     }
     if (cfg.model) return cfg.model;
@@ -59,7 +56,9 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
   onSelect,
   isDragging = false,
 }) => {
-  const mode = project.config.mode;
+  const mode = project.config.mode === 'custom' ? project.config.custom_cli : project.config.mode;
+  const sourceLabel = project.config.mode === 'custom' ? '自定义 API' : '官方账号';
+  const cliLabel = mode === 'codex' ? 'Codex' : 'Claude Code';
   const detailTag = getDetailTag(project, presets);
 
   const handleCardClick = () => onSelect(project.id);
@@ -123,7 +122,7 @@ export const ProjectCard: React.FC<ProjectCardProps> = ({
           {formatPath(project.working_directory)}
         </div>
         <div className="text-[10.5px] text-text-tertiary truncate flex items-center gap-1.5">
-          <span className="flex-shrink-0">{MODE_LABEL[mode] || mode}</span>
+          <span className="flex-shrink-0">{cliLabel} · {sourceLabel}</span>
           {detailTag && (
             <>
               <span className="text-text-disabled flex-shrink-0">·</span>

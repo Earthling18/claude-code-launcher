@@ -141,15 +141,16 @@ export const ProjectEditPage: React.FC = () => {
 
   return (
     <div className="h-screen flex flex-col overflow-hidden">
-      <div className="flex-shrink-0 px-5 py-2.5 border-b border-line">
-        <div className="flex items-center gap-2">
+      <div className="flex-shrink-0 border-b border-line px-5 py-2.5">
+        <div className="mx-auto flex w-full max-w-[680px] items-center gap-2">
           <button onClick={handleCancel} className="btn btn-ghost btn-sm">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
             返回
           </button>
           <div className="h-4 w-px bg-line-strong mx-1" />
-          <span className="mode-dot" data-mode={project.config.mode} />
-          <h2 className="text-[13px] font-semibold text-text-primary truncate flex-1">{project.name}</h2>
+          <h2 className="text-[12.5px] font-semibold text-text-primary">编辑项目</h2>
+          <span className="text-text-disabled">/</span>
+          <span className="min-w-0 flex-1 truncate text-[11px] text-text-tertiary">{project.name}</span>
           {project.is_default && (
             <span className="font-mono text-[9.5px] uppercase tracking-[0.18em] text-text-tertiary border border-line-strong px-1.5 py-0.5 rounded-sm">默认</span>
           )}
@@ -161,7 +162,7 @@ export const ProjectEditPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto px-5 py-5">
+      <div className="flex-1 overflow-x-hidden overflow-y-auto px-5 py-4">
         <ProjectForm
           initialName={project.name}
           initialWorkingDirectory={droppedWorkingDirectory || project.working_directory}

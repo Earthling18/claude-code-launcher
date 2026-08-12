@@ -12,6 +12,8 @@ export interface ProjectConfig {
   claude_proxy_preset_id?: string | null;
   codex_proxy_preset_id?: string | null;
   model_preset_id?: string | null;
+  claude_model_preset_id?: string | null;
+  codex_model_preset_id?: string | null;
 }
 
 export interface Project {
@@ -90,4 +92,6 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
   claude_proxy_preset_id: null,
   codex_proxy_preset_id: null,
   model_preset_id: null,
+  claude_model_preset_id: null,
+  codex_model_preset_id: null,
 };

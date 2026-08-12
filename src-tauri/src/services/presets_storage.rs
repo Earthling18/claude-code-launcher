@@ -4,7 +4,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::models::{
-    new_preset_id, GlobalPresets, ModelPreset, Project, ProjectConfig, ProxyPreset,
+    new_preset_id, GlobalPresets, ModelApiFormat, ModelPreset, Project, ProjectConfig, ProxyPreset,
 };
 
 /// On-disk wrapper that mirrors GlobalPresets but with token base64-encoded.
@@ -123,8 +123,8 @@ impl PresetsStorage {
         if let Some(cfg) = &mut stored.last_used_config {
             Self::encode_last_used(cfg);
         }
-        let json = serde_json::to_string_pretty(&stored)
-            .map_err(|e| format!("无法序列化预设: {}", e))?;
+        let json =
+            serde_json::to_string_pretty(&stored).map_err(|e| format!("无法序列化预设: {}", e))?;
         fs::write(&path, json).map_err(|e| format!("无法写入预设文件: {}", e))?;
         Ok(())
     }
@@ -187,7 +187,8 @@ impl PresetsStorage {
     pub fn create_model(
         name: String,
         model: String,
-        base_url: String,
+        claude_base_url: String,
+        codex_base_url: String,
         token: String,
     ) -> Result<ModelPreset, String> {
         let mut presets = Self::load();
@@ -195,8 +196,11 @@ impl PresetsStorage {
             id: new_preset_id(),
             name: ensure_unique_name(&name, presets.models.iter().map(|p| p.name.as_str())),
             model,
-            base_url,
+            claude_base_url,
+            codex_base_url,
+            base_url: String::new(),
             token,
+            api_format: None,
         };
         presets.models.push(preset.clone());
         Self::save(&presets)?;
@@ -207,7 +211,8 @@ impl PresetsStorage {
         id: &str,
         name: String,
         model: String,
-        base_url: String,
+        claude_base_url: String,
+        codex_base_url: String,
         token: String,
     ) -> Result<ModelPreset, String> {
         let mut presets = Self::load();
@@ -224,8 +229,11 @@ impl PresetsStorage {
             .ok_or_else(|| format!("模型预设不存在: {}", id))?;
         target.name = ensure_unique_name(&name, names.iter().map(|s| s.as_str()));
         target.model = model;
-        target.base_url = base_url;
+        target.claude_base_url = claude_base_url;
+        target.codex_base_url = codex_base_url;
+        target.base_url.clear();
         target.token = token;
+        target.api_format = None;
         let updated = target.clone();
         Self::save(&presets)?;
         Ok(updated)
@@ -276,7 +284,11 @@ impl PresetsStorage {
             .map(|projects| {
                 projects
                     .iter()
-                    .filter(|p| p.config.model_preset_id.as_deref() == Some(id))
+                    .filter(|p| {
+                        p.config.model_preset_id.as_deref() == Some(id)
+                            || p.config.claude_model_preset_id.as_deref() == Some(id)
+                            || p.config.codex_model_preset_id.as_deref() == Some(id)
+                    })
                     .count()
             })
             .unwrap_or(0)
@@ -336,9 +348,20 @@ fn clear_model_ref_from_projects(id: &str) -> Result<(), String> {
     use crate::services::ConfigStorage;
     let projects = ConfigStorage::get_projects()?;
     for p in projects {
-        if p.config.model_preset_id.as_deref() == Some(id) {
+        if p.config.model_preset_id.as_deref() == Some(id)
+            || p.config.claude_model_preset_id.as_deref() == Some(id)
+            || p.config.codex_model_preset_id.as_deref() == Some(id)
+        {
             let mut new_cfg = p.config.clone();
-            new_cfg.model_preset_id = None;
+            if new_cfg.model_preset_id.as_deref() == Some(id) {
+                new_cfg.model_preset_id = None;
+            }
+            if new_cfg.claude_model_preset_id.as_deref() == Some(id) {
+                new_cfg.claude_model_preset_id = None;
+            }
+            if new_cfg.codex_model_preset_id.as_deref() == Some(id) {
+                new_cfg.codex_model_preset_id = None;
+            }
             let _ = ConfigStorage::update_project(
                 &p.id,
                 UpdateProjectInput {
@@ -450,8 +473,11 @@ pub fn migrate_legacy_to_presets(projects: &mut [Project]) -> Option<GlobalPrese
             id: new_preset_id(),
             name,
             model,
+            claude_base_url: String::new(),
+            codex_base_url: String::new(),
             base_url,
             token,
+            api_format: None,
         });
     }
 
@@ -459,14 +485,8 @@ pub fn migrate_legacy_to_presets(projects: &mut [Project]) -> Option<GlobalPrese
     for proj in projects.iter_mut() {
         match proj.config.mode.as_str() {
             "claude" => {
-                if !proj.config.proxy.is_empty()
-                    && proj.config.claude_proxy_preset_id.is_none()
-                {
-                    if let Some(p) = presets
-                        .proxies
-                        .iter()
-                        .find(|p| p.url == proj.config.proxy)
-                    {
+                if !proj.config.proxy.is_empty() && proj.config.claude_proxy_preset_id.is_none() {
+                    if let Some(p) = presets.proxies.iter().find(|p| p.url == proj.config.proxy) {
                         proj.config.claude_proxy_preset_id = Some(p.id.clone());
                     }
                 }
@@ -496,6 +516,11 @@ pub fn migrate_legacy_to_presets(projects: &mut [Project]) -> Option<GlobalPrese
                             && m.token == proj.config.token
                     }) {
                         proj.config.model_preset_id = Some(m.id.clone());
+                        if proj.config.custom_cli == "codex" {
+                            proj.config.codex_model_preset_id = Some(m.id.clone());
+                        } else {
+                            proj.config.claude_model_preset_id = Some(m.id.clone());
+                        }
                     }
                 }
             }
@@ -504,4 +529,309 @@ pub fn migrate_legacy_to_presets(projects: &mut [Project]) -> Option<GlobalPrese
     }
 
     Some(presets)
+}
+
+/// Upgrade single-endpoint presets to shared presets with independent Claude
+/// and Codex URLs. References keep their original IDs. Complementary presets
+/// created by v1.2.7 are merged when their shared model and token are equal.
+pub fn migrate_model_protocols(projects: &mut [Project]) -> Result<bool, String> {
+    let mut presets = PresetsStorage::load();
+    let changed = migrate_model_protocols_in_memory(&mut presets, projects);
+    if changed {
+        PresetsStorage::save(&presets)?;
+    }
+    Ok(changed)
+}
+
+fn migrate_model_protocols_in_memory(
+    presets: &mut GlobalPresets,
+    projects: &mut [Project],
+) -> bool {
+    let mut changed = false;
+
+    for project in projects.iter_mut().filter(|p| p.config.mode == "custom") {
+        if project.config.custom_cli == "codex" {
+            if project.config.codex_model_preset_id.is_none() {
+                project.config.codex_model_preset_id = project.config.model_preset_id.clone();
+                changed |= project.config.codex_model_preset_id.is_some();
+            }
+        } else if project.config.claude_model_preset_id.is_none() {
+            project.config.claude_model_preset_id = project.config.model_preset_id.clone();
+            changed |= project.config.claude_model_preset_id.is_some();
+        }
+    }
+
+    for index in 0..presets.models.len() {
+        if !presets.models[index].claude_base_url.is_empty()
+            || !presets.models[index].codex_base_url.is_empty()
+            || presets.models[index].base_url.is_empty()
+        {
+            continue;
+        }
+        let id = presets.models[index].id.clone();
+        let mut used_by_claude = false;
+        let mut used_by_codex = false;
+        for project in projects.iter() {
+            if project.config.mode != "custom" {
+                continue;
+            }
+            let active_id = if project.config.custom_cli == "codex" {
+                project
+                    .config
+                    .codex_model_preset_id
+                    .as_ref()
+                    .or(project.config.model_preset_id.as_ref())
+            } else {
+                project
+                    .config
+                    .claude_model_preset_id
+                    .as_ref()
+                    .or(project.config.model_preset_id.as_ref())
+            };
+            if active_id.map(|value| value == &id).unwrap_or(false) {
+                if project.config.custom_cli == "codex" {
+                    used_by_codex = true;
+                } else {
+                    used_by_claude = true;
+                }
+            }
+        }
+
+        let legacy_url = presets.models[index].base_url.clone();
+        match presets.models[index].api_format {
+            Some(ModelApiFormat::OpenaiResponses) => {
+                presets.models[index].codex_base_url = legacy_url;
+            }
+            Some(ModelApiFormat::AnthropicMessages) => {
+                presets.models[index].claude_base_url = legacy_url;
+            }
+            None if used_by_claude && used_by_codex => {
+                presets.models[index].claude_base_url = legacy_url.clone();
+                presets.models[index].codex_base_url = legacy_url;
+            }
+            None if used_by_codex => {
+                presets.models[index].codex_base_url = legacy_url;
+            }
+            None => {
+                presets.models[index].claude_base_url = legacy_url;
+            }
+        }
+        changed = true;
+    }
+
+    let mut keep = 0;
+    while keep < presets.models.len() {
+        let mut candidate = keep + 1;
+        while candidate < presets.models.len() {
+            let left = &presets.models[keep];
+            let right = &presets.models[candidate];
+            let same_shared_values = left.model == right.model && left.token == right.token;
+            let complementary = (left.supports(ModelApiFormat::AnthropicMessages)
+                && !left.supports(ModelApiFormat::OpenaiResponses)
+                && !right.supports(ModelApiFormat::AnthropicMessages)
+                && right.supports(ModelApiFormat::OpenaiResponses))
+                || (!left.supports(ModelApiFormat::AnthropicMessages)
+                    && left.supports(ModelApiFormat::OpenaiResponses)
+                    && right.supports(ModelApiFormat::AnthropicMessages)
+                    && !right.supports(ModelApiFormat::OpenaiResponses));
+            if !same_shared_values || !complementary {
+                candidate += 1;
+                continue;
+            }
+
+            let removed_id = presets.models[candidate].id.clone();
+            let kept_id = presets.models[keep].id.clone();
+            let candidate_claude = presets.models[candidate]
+                .endpoint(ModelApiFormat::AnthropicMessages)
+                .to_string();
+            let candidate_codex = presets.models[candidate]
+                .endpoint(ModelApiFormat::OpenaiResponses)
+                .to_string();
+            if presets.models[keep].claude_base_url.is_empty() {
+                presets.models[keep].claude_base_url = candidate_claude;
+            }
+            if presets.models[keep].codex_base_url.is_empty() {
+                presets.models[keep].codex_base_url = candidate_codex;
+            }
+            for project in projects.iter_mut() {
+                rewire_model_id(&mut project.config, &removed_id, &kept_id);
+            }
+            if let Some(config) = &mut presets.last_used_config {
+                rewire_model_id(config, &removed_id, &kept_id);
+            }
+            presets.models.remove(candidate);
+            changed = true;
+        }
+        keep += 1;
+    }
+
+    changed
+}
+
+fn rewire_model_id(config: &mut ProjectConfig, from: &str, to: &str) {
+    for field in [
+        &mut config.model_preset_id,
+        &mut config.claude_model_preset_id,
+        &mut config.codex_model_preset_id,
+    ] {
+        if field.as_deref() == Some(from) {
+            *field = Some(to.to_string());
+        }
+    }
+}
+
+#[cfg(test)]
+mod model_protocol_migration_tests {
+    use super::migrate_model_protocols_in_memory;
+    use crate::models::{GlobalPresets, ModelApiFormat, ModelPreset, Project, ProjectConfig};
+
+    fn legacy_preset() -> ModelPreset {
+        ModelPreset {
+            id: "legacy-model".to_string(),
+            name: "Legacy".to_string(),
+            model: String::new(),
+            claude_base_url: String::new(),
+            codex_base_url: String::new(),
+            base_url: "https://api.example".to_string(),
+            token: "secret".to_string(),
+            api_format: None,
+        }
+    }
+
+    fn custom_project(name: &str, cli: &str) -> Project {
+        Project::new(
+            name.to_string(),
+            ".".to_string(),
+            ProjectConfig {
+                mode: "custom".to_string(),
+                custom_cli: cli.to_string(),
+                model_preset_id: Some("legacy-model".to_string()),
+                ..ProjectConfig::default()
+            },
+            false,
+        )
+    }
+
+    #[test]
+    fn claude_only_legacy_preset_keeps_identity_and_moves_its_url() {
+        let mut presets = GlobalPresets {
+            models: vec![legacy_preset()],
+            ..GlobalPresets::default()
+        };
+        let mut projects = vec![custom_project("Claude", "claude")];
+
+        assert!(migrate_model_protocols_in_memory(
+            &mut presets,
+            &mut projects
+        ));
+        assert_eq!(presets.models.len(), 1);
+        assert_eq!(
+            presets.models[0].claude_base_url,
+            "https://api.example"
+        );
+        assert!(presets.models[0].codex_base_url.is_empty());
+        assert_eq!(
+            projects[0].config.claude_model_preset_id.as_deref(),
+            Some("legacy-model")
+        );
+    }
+
+    #[test]
+    fn codex_only_legacy_preset_moves_its_url() {
+        let mut presets = GlobalPresets {
+            models: vec![legacy_preset()],
+            ..GlobalPresets::default()
+        };
+        let mut projects = vec![custom_project("Codex", "codex")];
+
+        assert!(migrate_model_protocols_in_memory(
+            &mut presets,
+            &mut projects
+        ));
+        assert_eq!(presets.models.len(), 1);
+        assert!(presets.models[0].claude_base_url.is_empty());
+        assert_eq!(presets.models[0].codex_base_url, "https://api.example");
+        assert_eq!(
+            projects[0].config.codex_model_preset_id.as_deref(),
+            Some("legacy-model")
+        );
+    }
+
+    #[test]
+    fn shared_legacy_preset_keeps_one_identity_and_supports_both_clis() {
+        let mut presets = GlobalPresets {
+            models: vec![legacy_preset()],
+            ..GlobalPresets::default()
+        };
+        let mut projects = vec![
+            custom_project("Claude", "claude"),
+            custom_project("Codex", "codex"),
+        ];
+
+        assert!(migrate_model_protocols_in_memory(
+            &mut presets,
+            &mut projects
+        ));
+        assert_eq!(presets.models.len(), 1);
+        assert_eq!(presets.models[0].claude_base_url, "https://api.example");
+        assert_eq!(presets.models[0].codex_base_url, "https://api.example");
+        assert_eq!(
+            projects[0].config.claude_model_preset_id.as_deref(),
+            Some("legacy-model")
+        );
+        assert_eq!(
+            projects[1].config.codex_model_preset_id.as_deref(),
+            Some("legacy-model")
+        );
+        assert_eq!(
+            projects[1].config.model_preset_id.as_deref(),
+            Some("legacy-model")
+        );
+    }
+
+    #[test]
+    fn typed_single_endpoint_preset_is_upgraded_once() {
+        let mut preset = legacy_preset();
+        preset.api_format = Some(ModelApiFormat::AnthropicMessages);
+        let mut presets = GlobalPresets {
+            models: vec![preset],
+            ..GlobalPresets::default()
+        };
+        let mut projects = Vec::new();
+
+        assert!(migrate_model_protocols_in_memory(
+            &mut presets,
+            &mut projects
+        ));
+        assert_eq!(presets.models[0].claude_base_url, "https://api.example");
+        assert!(!migrate_model_protocols_in_memory(
+            &mut presets,
+            &mut projects
+        ));
+        assert_eq!(presets.models.len(), 1);
+    }
+
+    #[test]
+    fn complementary_v127_presets_merge_and_rewire_projects() {
+        let mut claude = legacy_preset();
+        claude.api_format = Some(ModelApiFormat::AnthropicMessages);
+        let mut codex = legacy_preset();
+        codex.id = "codex-copy".to_string();
+        codex.name = "Legacy (Codex)".to_string();
+        codex.base_url = "https://api.example/v1".to_string();
+        codex.api_format = Some(ModelApiFormat::OpenaiResponses);
+        let mut presets = GlobalPresets {
+            models: vec![claude, codex],
+            ..GlobalPresets::default()
+        };
+        let mut projects = vec![custom_project("Claude", "claude"), custom_project("Codex", "codex")];
+        projects[1].config.model_preset_id = Some("codex-copy".to_string());
+        projects[1].config.codex_model_preset_id = Some("codex-copy".to_string());
+
+        assert!(migrate_model_protocols_in_memory(&mut presets, &mut projects));
+        assert_eq!(presets.models.len(), 1);
+        assert_eq!(presets.models[0].claude_base_url, "https://api.example");
+        assert_eq!(presets.models[0].codex_base_url, "https://api.example/v1");
+        assert_eq!(projects[1].config.codex_model_preset_id.as_deref(), Some("legacy-model"));
+    }
 }

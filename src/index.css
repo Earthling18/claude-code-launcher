@@ -38,8 +38,8 @@ body::before {
   position: fixed;
   inset: 0;
   pointer-events: none;
-  background-image: radial-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px);
-  background-size: 22px 22px;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.010) 1px, transparent 1px);
+  background-size: 24px 24px;
   background-position: 0 0;
   z-index: 0;
 }

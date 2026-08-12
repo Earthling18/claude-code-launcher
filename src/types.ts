@@ -16,6 +16,20 @@ export interface AppConfig {
   skip_permissions: boolean;
 }
 
+export type CompatibilityStage = 'standard' | 'no_sandbox' | 'no_sandbox_disable_gpu';
+
+export interface DiagnosticsStatus {
+  auto_report_enabled: boolean;
+  compatibility_stage: CompatibilityStage;
+  compatibility_label: string;
+  log_directory: string;
+  endpoint_configured: boolean;
+  pending_reports: number;
+  last_report_id: string | null;
+  last_report_kind: string | null;
+  last_report_at: number | null;
+}
+
 export const DEFAULT_CONFIG: AppConfig = {
   mode: 'claude',
   proxy: '',

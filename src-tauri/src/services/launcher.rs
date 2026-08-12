@@ -1,12 +1,20 @@
 use std::collections::HashMap;
-use std::process::Command;
 #[cfg(windows)]
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 pub struct Launcher;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LaunchSpec {
+    program: String,
+    args: Vec<String>,
+    env_keys: Vec<String>,
+    custom_codex_provider: bool,
+}
 
 impl Launcher {
     fn escape_ps_single_quotes(value: &str) -> String {
@@ -114,7 +122,12 @@ impl Launcher {
     /// Spawn a PowerShell session inside Windows Terminal (system wt.exe or the
     /// bundled WindowsTerminal.exe — both accept the same command line).
     #[cfg(windows)]
-    fn spawn_in_wt(program: &Path, work_dir: &str, title: &str, encoded: &str) -> std::io::Result<()> {
+    fn spawn_in_wt(
+        program: &Path,
+        work_dir: &str,
+        title: &str,
+        encoded: &str,
+    ) -> std::io::Result<()> {
         use std::os::windows::process::CommandExt;
         Command::new(program)
             .args(&[
@@ -172,27 +185,158 @@ impl Launcher {
     }
 
     /// Internal config keys that are NOT environment variables
-    const INTERNAL_KEYS: &'static [&'static str] = &["SKIP_PERMISSIONS", "CLI_COMMAND"];
+    const INTERNAL_KEYS: &'static [&'static str] = &[
+        "SKIP_PERMISSIONS",
+        "CLI_COMMAND",
+        "CLI_PROGRAM",
+        "CLI_ARGS_JSON",
+        "CODEX_CUSTOM_PROVIDER",
+    ];
 
     /// Sensitive env var keys whose values should be redacted in logs
-    const SENSITIVE_KEYS: &'static [&'static str] = &["ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY"];
+    const SENSITIVE_KEYS: &'static [&'static str] = &[
+        "ANTHROPIC_AUTH_TOKEN",
+        "OPENAI_API_KEY",
+        "CCL_CODEX_API_KEY",
+    ];
 
-    /// Build the CLI launch command string from config map.
-    /// Reads CLI_COMMAND (default "claude") and SKIP_PERMISSIONS to determine the command.
-    fn build_cli_command(config: &HashMap<String, String>) -> String {
-        let cli = config.get("CLI_COMMAND").map(|s| s.as_str()).unwrap_or("claude");
-        let skip_permissions = config.get("SKIP_PERMISSIONS").map(|v| v == "true").unwrap_or(false);
-
+    fn build_launch_spec(config: &HashMap<String, String>) -> LaunchSpec {
+        let program = config
+            .get("CLI_PROGRAM")
+            .cloned()
+            .or_else(|| {
+                config
+                    .get("CLI_COMMAND")
+                    .and_then(|value| value.split_whitespace().next().map(str::to_string))
+            })
+            .unwrap_or_else(|| "claude".to_string());
+        let mut args: Vec<String> = config
+            .get("CLI_ARGS_JSON")
+            .and_then(|value| serde_json::from_str(value).ok())
+            .unwrap_or_else(|| {
+                config
+                    .get("CLI_COMMAND")
+                    .map(|value| {
+                        value
+                            .split_whitespace()
+                            .skip(1)
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            });
+        let skip_permissions = config
+            .get("SKIP_PERMISSIONS")
+            .map(|value| value == "true")
+            .unwrap_or(false);
         if skip_permissions {
-            // For codex, use --yolo; for claude, use --dangerously-skip-permissions
-            if cli.starts_with("codex") {
-                format!("{} --yolo", cli)
+            if program == "codex" {
+                args.push("--dangerously-bypass-approvals-and-sandbox".to_string());
             } else {
-                format!("{} --dangerously-skip-permissions", cli)
+                args.push("--dangerously-skip-permissions".to_string());
             }
-        } else {
-            cli.to_string()
         }
+        LaunchSpec {
+            program,
+            args,
+            env_keys: Self::env_keys_from_config(config),
+            custom_codex_provider: config
+                .get("CODEX_CUSTOM_PROVIDER")
+                .map(|value| value == "true")
+                .unwrap_or(false),
+        }
+    }
+
+    fn render_powershell_invocation(spec: &LaunchSpec) -> String {
+        let mut parts = vec![format!(
+            "& '{}'",
+            Self::escape_ps_single_quotes(&spec.program)
+        )];
+        parts.extend(
+            spec.args
+                .iter()
+                .map(|arg| format!("'{}'", Self::escape_ps_single_quotes(arg))),
+        );
+        parts.join(" ")
+    }
+
+    fn escape_bash_single_quotes(value: &str) -> String {
+        value.replace('\'', "'\\''")
+    }
+
+    fn render_bash_invocation(spec: &LaunchSpec) -> String {
+        std::iter::once(spec.program.as_str())
+            .chain(spec.args.iter().map(String::as_str))
+            .map(|value| format!("'{}'", Self::escape_bash_single_quotes(value)))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn render_bash_export(key: &str, value: &str) -> String {
+        format!(
+            "export {}='{}'",
+            key,
+            Self::escape_bash_single_quotes(value)
+        )
+    }
+
+    fn render_macos_terminal_script(command: &str, target_dir: &str, cli_bin: &str) -> String {
+        let startup_msg = if cli_bin == "codex" {
+            "Starting Codex..."
+        } else {
+            "Starting Claude Code..."
+        };
+        let shell_command = format!(
+            "cd '{}' && echo '{}' && {}",
+            Self::escape_bash_single_quotes(target_dir),
+            Self::escape_bash_single_quotes(startup_msg),
+            command
+        );
+        let escaped_shell_command = shell_command
+            .replace('\\', "\\\\")
+            .replace('\"', "\\\"")
+            .replace('\r', "\\r")
+            .replace('\n', "\\n");
+        format!(
+            r#"tell application "Terminal"
+                activate
+                do script "{}"
+            end tell"#,
+            escaped_shell_command
+        )
+    }
+
+    fn codex_capability_probe_spec() -> LaunchSpec {
+        LaunchSpec {
+            program: "codex".to_string(),
+            args: vec![
+                "debug".to_string(),
+                "models".to_string(),
+                "--bundled".to_string(),
+                "-c".to_string(),
+                "model_provider=\"cc_launcher_probe\"".to_string(),
+                "-c".to_string(),
+                "model_providers.cc_launcher_probe.name=\"CC Launcher Probe\"".to_string(),
+                "-c".to_string(),
+                "model_providers.cc_launcher_probe.base_url=\"http://127.0.0.1:9/v1\"".to_string(),
+                "-c".to_string(),
+                "model_providers.cc_launcher_probe.wire_api=\"responses\"".to_string(),
+            ],
+            env_keys: Vec::new(),
+            custom_codex_provider: false,
+        }
+    }
+
+    fn escape_cmd_arg(value: &str) -> String {
+        format!("\"{}\"", value.replace('%', "%%").replace('"', "\\\""))
+    }
+
+    fn render_cmd_invocation(spec: &LaunchSpec) -> String {
+        std::iter::once(spec.program.as_str())
+            .chain(spec.args.iter().map(String::as_str))
+            .map(Self::escape_cmd_arg)
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// Collect env var keys from config (excluding internal keys), preserving a stable order.
@@ -204,6 +348,7 @@ impl Launcher {
             "ANTHROPIC_AUTH_TOKEN",
             "OPENAI_BASE_URL",
             "OPENAI_API_KEY",
+            "CCL_CODEX_API_KEY",
             "HTTP_PROXY",
             "HTTPS_PROXY",
         ];
@@ -214,8 +359,11 @@ impl Launcher {
             }
         }
         // Add any remaining keys not in preferred_order and not internal
-        let mut remaining: Vec<String> = config.keys()
-            .filter(|k| !preferred_order.contains(&k.as_str()) && !Self::INTERNAL_KEYS.contains(&k.as_str()))
+        let mut remaining: Vec<String> = config
+            .keys()
+            .filter(|k| {
+                !preferred_order.contains(&k.as_str()) && !Self::INTERNAL_KEYS.contains(&k.as_str())
+            })
             .cloned()
             .collect();
         remaining.sort();
@@ -262,18 +410,28 @@ impl Launcher {
         Self::launch_with_temp_env(config, None)
     }
 
-    pub fn launch_with_config_and_dir(config: HashMap<String, String>, working_dir: Option<String>) -> Result<(), String> {
+    pub fn launch_with_config_and_dir(
+        config: HashMap<String, String>,
+        working_dir: Option<String>,
+    ) -> Result<(), String> {
         Self::launch_with_temp_env(config, working_dir)
     }
 
     pub fn launch_simple() -> Result<(), String> {
+        let config = HashMap::new();
+        let spec = Self::build_launch_spec(&config);
         #[cfg(windows)]
         {
-            Self::execute_windows("claude", None)
+            Self::execute_windows(
+                &Self::render_powershell_invocation(&spec),
+                None,
+                &spec.program,
+                false,
+            )
         }
         #[cfg(target_os = "macos")]
         {
-            Self::execute_macos("claude", None)
+            Self::execute_macos(&Self::render_bash_invocation(&spec), None, &spec.program)
         }
         #[cfg(all(not(windows), not(target_os = "macos")))]
         {
@@ -281,14 +439,16 @@ impl Launcher {
         }
     }
 
-    fn launch_with_temp_env(config: HashMap<String, String>, working_dir: Option<String>) -> Result<(), String> {
-        let env_keys = Self::env_keys_from_config(&config);
-        let cli_cmd = Self::build_cli_command(&config);
+    fn launch_with_temp_env(
+        config: HashMap<String, String>,
+        working_dir: Option<String>,
+    ) -> Result<(), String> {
+        let spec = Self::build_launch_spec(&config);
 
         #[cfg(windows)]
         {
             let mut commands = Vec::new();
-            for key in env_keys.iter() {
+            for key in spec.env_keys.iter() {
                 if let Some(value) = config.get(key.as_str()) {
                     if !value.is_empty() {
                         let escaped_value = Self::escape_ps_single_quotes(value);
@@ -296,25 +456,29 @@ impl Launcher {
                     }
                 }
             }
-            commands.push(cli_cmd);
+            commands.push(Self::render_powershell_invocation(&spec));
             let full_command = commands.join("; ");
-            Self::execute_windows(&full_command, working_dir)
+            Self::execute_windows(
+                &full_command,
+                working_dir,
+                &spec.program,
+                spec.custom_codex_provider,
+            )
         }
 
         #[cfg(target_os = "macos")]
         {
             let mut env_exports = Vec::new();
-            for key in env_keys.iter() {
+            for key in spec.env_keys.iter() {
                 if let Some(value) = config.get(key.as_str()) {
                     if !value.is_empty() {
-                        let escaped_value = value.replace("\"", "\\\"");
-                        env_exports.push(format!("export {}=\"{}\"", key, escaped_value));
+                        env_exports.push(Self::render_bash_export(key, value));
                     }
                 }
             }
-            env_exports.push(cli_cmd);
+            env_exports.push(Self::render_bash_invocation(&spec));
             let full_command = env_exports.join(" && ");
-            Self::execute_macos(&full_command, working_dir)
+            Self::execute_macos(&full_command, working_dir, &spec.program)
         }
 
         #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -346,11 +510,74 @@ impl Launcher {
     }
 
     #[cfg(windows)]
-    fn execute_windows(command: &str, working_dir: Option<String>) -> Result<(), String> {
+    fn ensure_codex_custom_provider_supported() -> Result<(), String> {
+        use std::os::windows::process::CommandExt;
+        use std::process::Stdio;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::{Duration, Instant};
+
+        static SUPPORTED: AtomicBool = AtomicBool::new(false);
+        if SUPPORTED.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        // npm installs Codex as a .cmd shim on Windows. CreateProcess cannot
+        // execute that shim directly, while PowerShell resolves it correctly.
+        let probe = Self::render_powershell_invocation(&Self::codex_capability_probe_spec());
+        let mut child = Command::new("powershell.exe")
+            .args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                &probe,
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| format!("无法启动 Codex 能力检测: {}", e))?;
+        let started = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => {
+                    SUPPORTED.store(true, Ordering::Relaxed);
+                    return Ok(());
+                }
+                Ok(Some(_)) => {
+                    return Err(
+                        "当前 Codex CLI 不支持自定义 Responses Provider，请先更新 Codex"
+                            .to_string(),
+                    )
+                }
+                Ok(None) if started.elapsed() < Duration::from_secs(15) => {
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+                Ok(None) => {
+                    let _ = child.kill();
+                    return Err(
+                        "Codex 自定义 Provider 能力检测超时，请更新或重装 Codex".to_string()
+                    );
+                }
+                Err(e) => return Err(format!("Codex 能力检测失败: {}", e)),
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    fn execute_windows(
+        command: &str,
+        working_dir: Option<String>,
+        cli_bin: &str,
+        custom_codex_provider: bool,
+    ) -> Result<(), String> {
         use std::os::windows::process::CommandExt;
 
         Self::log_line("=== launch start ===");
-        Self::log_line(&format!("raw command: {}", Self::sanitize_command_for_log(command)));
+        Self::log_line(&format!(
+            "raw command: {}",
+            Self::sanitize_command_for_log(command)
+        ));
         if let Some(ref wd) = working_dir {
             Self::log_line(&format!("working_dir arg: {}", wd));
         } else {
@@ -359,17 +586,10 @@ impl Launcher {
 
         // GUI apps can have a stale PATH after installs; refresh from registry so CLI tools are discoverable.
         super::dependency_checker::DependencyChecker::refresh_system_path();
-        Self::log_line(&format!("PATH len: {}", std::env::var("PATH").unwrap_or_default().len()));
-
-        // Determine CLI binary name from the command string.
-        // Command format: "$env:KEY='val'; $env:KEY2='val2'; codex --yolo"
-        // Split by ';', take the last segment (the CLI command), then extract the first word.
-        let cli_bin = command.split(';')
-            .map(|s| s.trim())
-            .filter(|s| !s.is_empty() && !s.starts_with("$env:"))
-            .last()
-            .and_then(|s| s.split_whitespace().next())
-            .unwrap_or("claude");
+        Self::log_line(&format!(
+            "PATH len: {}",
+            std::env::var("PATH").unwrap_or_default().len()
+        ));
 
         let (npm_package, cli_label) = if cli_bin == "codex" {
             ("@openai/codex", "Codex CLI")
@@ -405,7 +625,11 @@ impl Launcher {
         };
 
         if let Some(ref bad) = corrupted_exe {
-            Self::log_line(&format!("{} native exe corrupted: {}", cli_bin, bad.display()));
+            Self::log_line(&format!(
+                "{} native exe corrupted: {}",
+                cli_bin,
+                bad.display()
+            ));
             return Err(format!(
                 "{}安装已损坏，请在依赖面板点击“重装”后再启动",
                 cli_label
@@ -428,7 +652,10 @@ impl Launcher {
 
             // The package truly is absent, so this is a first install rather
             // than a repair. Damaged installations always require Reinstall.
-            Self::log_line(&format!("{} package absent, attempting first install...", cli_bin));
+            Self::log_line(&format!(
+                "{} package absent, attempting first install...",
+                cli_bin
+            ));
             let repair = Command::new("cmd.exe")
                 .args(&["/c", "npm", "install", "-g", npm_package])
                 .creation_flags(CREATE_NO_WINDOW)
@@ -458,11 +685,13 @@ impl Launcher {
                 && installed_status.meets_requirement
                 && installed_status.error.is_none();
 
-            Self::log_line(&format!("repair result: {}", if repaired { "OK" } else { "FAILED" }));
+            Self::log_line(&format!(
+                "repair result: {}",
+                if repaired { "OK" } else { "FAILED" }
+            ));
 
             if !repaired {
-                if super::dependency_checker::DependencyChecker::npm_package_present(npm_package)
-                {
+                if super::dependency_checker::DependencyChecker::npm_package_present(npm_package) {
                     return Err(format!(
                         "{}安装后仍不可用，请在依赖面板点击“重装”",
                         cli_label
@@ -470,6 +699,10 @@ impl Launcher {
                 }
                 return Err(format!("{}安装失败，请在依赖面板点击“安装”", cli_label));
             }
+        }
+
+        if custom_codex_provider {
+            Self::ensure_codex_custom_provider_supported()?;
         }
 
         // Determine the working directory
@@ -481,8 +714,7 @@ impl Launcher {
                 return Err(format!("工作目录不存在: {}", dir));
             }
         } else {
-            dirs::home_dir()
-                .ok_or("无法获取用户主目录".to_string())?
+            dirs::home_dir().ok_or("无法获取用户主目录".to_string())?
         };
 
         // Capture *all* output into a log file, but still show it in the terminal.
@@ -553,18 +785,16 @@ impl Launcher {
         if !launched_in_wt {
             if let Some(dir) = Self::bundled_wt_dir() {
                 match Self::prepare_bundled_wt(&dir) {
-                    Ok(exe) => {
-                        match Self::spawn_in_wt(&exe, &work_dir_str, cli_label, &encoded) {
-                            Ok(()) => {
-                                Self::log_line(&format!("spawned bundled wt OK: {}", exe.display()));
-                                launched_in_wt = true;
-                            }
-                            Err(e) => Self::log_line(&format!(
-                                "spawn bundled wt failed, falling back to conhost: {}",
-                                e
-                            )),
+                    Ok(exe) => match Self::spawn_in_wt(&exe, &work_dir_str, cli_label, &encoded) {
+                        Ok(()) => {
+                            Self::log_line(&format!("spawned bundled wt OK: {}", exe.display()));
+                            launched_in_wt = true;
                         }
-                    }
+                        Err(e) => Self::log_line(&format!(
+                            "spawn bundled wt failed, falling back to conhost: {}",
+                            e
+                        )),
+                    },
                     Err(e) => Self::log_line(&format!(
                         "prepare bundled wt failed, falling back to conhost: {}",
                         e
@@ -605,12 +835,16 @@ impl Launcher {
     }
 
     #[cfg(target_os = "macos")]
-    fn execute_macos(command: &str, working_dir: Option<String>) -> Result<(), String> {
+    fn execute_macos(
+        command: &str,
+        working_dir: Option<String>,
+        cli_bin: &str,
+    ) -> Result<(), String> {
         // Pre-check CLI usability. Existing-but-broken packages must be
         // explicitly reinstalled; a plain npm install often leaves the broken
         // shim/link untouched.
         {
-            let (cli_bin, npm_package, cli_label) = if command.contains("codex") {
+            let (cli_bin, npm_package, cli_label) = if cli_bin == "codex" {
                 ("codex", "@openai/codex", "Codex CLI")
             } else {
                 ("claude", "@anthropic-ai/claude-code", "Claude Code")
@@ -649,17 +883,17 @@ impl Launcher {
                         cli_bin
                     );
                     let install = Command::new("sh")
-                        .args(&["-c", &format!("PATH='{}' npm install -g {}", extended_path, npm_package)])
+                        .args(&[
+                            "-c",
+                            &format!("PATH='{}' npm install -g {}", extended_path, npm_package),
+                        ])
                         .output();
                     let installed = install
                         .as_ref()
                         .map(|output| output.status.success())
                         .unwrap_or(false);
                     if !installed {
-                        return Err(format!(
-                            "{}安装失败，请在依赖面板点击“安装”",
-                            cli_label
-                        ));
+                        return Err(format!("{}安装失败，请在依赖面板点击“安装”", cli_label));
                     }
 
                     let recheck = Command::new("sh")
@@ -688,24 +922,9 @@ impl Launcher {
                 .unwrap_or_else(|| "~".to_string())
         });
 
-        // Determine startup message based on CLI tool
-        let startup_msg = if command.contains("codex") {
-            "Starting Codex..."
-        } else {
-            "Starting Claude Code..."
-        };
-
         // Use osascript to open Terminal.app with the command
         // Terminal.app runs as a login shell by default, so PATH will be correct
-        let script = format!(
-            r#"tell application "Terminal"
-                activate
-                do script "cd '{}' && echo '{}' && {}"
-            end tell"#,
-            target_dir.replace("'", "'\\''"),
-            startup_msg,
-            command.replace("\"", "\\\"")
-        );
+        let script = Self::render_macos_terminal_script(command, &target_dir, cli_bin);
 
         Command::new("osascript")
             .args(&["-e", &script])
@@ -720,9 +939,12 @@ impl Launcher {
         Self::generate_powershell_command_with_dir(config, None)
     }
 
-    pub fn generate_powershell_command_with_dir(config: &HashMap<String, String>, working_dir: Option<String>) -> String {
+    pub fn generate_powershell_command_with_dir(
+        config: &HashMap<String, String>,
+        working_dir: Option<String>,
+    ) -> String {
         let mut commands = Vec::new();
-        let env_keys = Self::env_keys_from_config(config);
+        let spec = Self::build_launch_spec(config);
 
         // Add cd command if working directory specified
         if let Some(dir) = working_dir {
@@ -730,7 +952,7 @@ impl Launcher {
             commands.push(format!("Set-Location -LiteralPath '{}'", escaped_dir));
         }
 
-        for key in env_keys.iter() {
+        for key in spec.env_keys.iter() {
             if let Some(value) = config.get(key.as_str()) {
                 if !value.is_empty() {
                     let escaped_value = Self::escape_ps_single_quotes(value);
@@ -739,7 +961,7 @@ impl Launcher {
             }
         }
 
-        commands.push(Self::build_cli_command(config));
+        commands.push(Self::render_powershell_invocation(&spec));
         commands.join("; ")
     }
 
@@ -748,19 +970,26 @@ impl Launcher {
         Self::generate_cmd_command_with_dir(config, None)
     }
 
-    pub fn generate_cmd_command_with_dir(config: &HashMap<String, String>, working_dir: Option<String>) -> String {
+    pub fn generate_cmd_command_with_dir(
+        config: &HashMap<String, String>,
+        working_dir: Option<String>,
+    ) -> String {
         let mut commands = Vec::new();
-        let env_keys = Self::env_keys_from_config(config);
+        let spec = Self::build_launch_spec(config);
 
         // Add cd command if working directory specified
         if let Some(dir) = working_dir {
             commands.push(format!("cd /d \"{}\"", dir));
         }
 
-        for key in env_keys.iter() {
+        for key in spec.env_keys.iter() {
             if let Some(value) = config.get(key.as_str()) {
                 if !value.is_empty() {
-                    let escaped = if value.contains(' ') || value.contains('&') || value.contains('|') || value.contains('"') {
+                    let escaped = if value.contains(' ')
+                        || value.contains('&')
+                        || value.contains('|')
+                        || value.contains('"')
+                    {
                         value.replace("\"", "\"\"")
                     } else {
                         value.clone()
@@ -770,7 +999,7 @@ impl Launcher {
             }
         }
 
-        commands.push(Self::build_cli_command(config));
+        commands.push(Self::render_cmd_invocation(&spec));
         commands.join(" & ")
     }
 
@@ -779,25 +1008,27 @@ impl Launcher {
         Self::generate_bash_command_with_dir(config, None)
     }
 
-    pub fn generate_bash_command_with_dir(config: &HashMap<String, String>, working_dir: Option<String>) -> String {
+    pub fn generate_bash_command_with_dir(
+        config: &HashMap<String, String>,
+        working_dir: Option<String>,
+    ) -> String {
         let mut commands = Vec::new();
-        let env_keys = Self::env_keys_from_config(config);
+        let spec = Self::build_launch_spec(config);
 
         // Add cd command if working directory specified
         if let Some(dir) = working_dir {
             commands.push(format!("cd '{}'", dir.replace("'", "'\\''")));
         }
 
-        for key in env_keys.iter() {
+        for key in spec.env_keys.iter() {
             if let Some(value) = config.get(key.as_str()) {
                 if !value.is_empty() {
-                    let escaped_value = value.replace("\"", "\\\"");
-                    commands.push(format!("export {}=\"{}\"", key, escaped_value));
+                    commands.push(Self::render_bash_export(key, value));
                 }
             }
         }
 
-        commands.push(Self::build_cli_command(config));
+        commands.push(Self::render_bash_invocation(&spec));
         commands.join(" && ")
     }
 }
@@ -819,7 +1050,12 @@ mod corrupted_exe_tests {
         let shim = root.join("claude.cmd");
         std::fs::write(&shim, "@echo off").unwrap();
         // where.exe output: shim path + CRLF, possibly more lines
-        let where_out = format!("{}\r\n{}\r\n", shim.display(), root.join("claude").display()).into_bytes();
+        let where_out = format!(
+            "{}\r\n{}\r\n",
+            shim.display(),
+            root.join("claude").display()
+        )
+        .into_bytes();
         let exe = pkg_bin.join("claude.exe");
 
         std::fs::write(&exe, b"").unwrap(); // truncated by an interrupted update
@@ -827,12 +1063,117 @@ mod corrupted_exe_tests {
         assert_eq!(found.as_deref(), Some(exe.as_path()));
 
         std::fs::write(&exe, b"MZ\x90\x00rest").unwrap(); // healthy binary
-        assert!(Launcher::find_corrupted_package_exe(&where_out, "@anthropic-ai/claude-code").is_none());
+        assert!(
+            Launcher::find_corrupted_package_exe(&where_out, "@anthropic-ai/claude-code").is_none()
+        );
 
         // Non-npm layout (e.g. native installer on PATH): no package dir → no check
-        let bare = format!("{}\r\n", root.join("elsewhere").join("claude.exe").display()).into_bytes();
+        let bare = format!(
+            "{}\r\n",
+            root.join("elsewhere").join("claude.exe").display()
+        )
+        .into_bytes();
         assert!(Launcher::find_corrupted_package_exe(&bare, "@anthropic-ai/claude-code").is_none());
 
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod launch_spec_tests {
+    use super::Launcher;
+    use std::collections::HashMap;
+
+    #[test]
+    fn codex_provider_arguments_stay_structured_and_secrets_stay_in_env() {
+        let args = vec![
+            "--model",
+            "gpt custom",
+            "-c",
+            "model_provider=\"cc_launcher\"",
+            "-c",
+            "model_providers.cc_launcher.base_url=\"https://api.example/v1\"",
+        ];
+        let mut config = HashMap::new();
+        config.insert("CLI_PROGRAM".to_string(), "codex".to_string());
+        config.insert(
+            "CLI_ARGS_JSON".to_string(),
+            serde_json::to_string(&args).unwrap(),
+        );
+        config.insert("CCL_CODEX_API_KEY".to_string(), "top-secret".to_string());
+        config.insert("CODEX_CUSTOM_PROVIDER".to_string(), "true".to_string());
+        config.insert("SKIP_PERMISSIONS".to_string(), "true".to_string());
+
+        let spec = Launcher::build_launch_spec(&config);
+        assert_eq!(spec.program, "codex");
+        assert_eq!(spec.args[1], "gpt custom");
+        assert_eq!(
+            spec.args.last().map(String::as_str),
+            Some("--dangerously-bypass-approvals-and-sandbox")
+        );
+        assert_eq!(spec.env_keys, vec!["CCL_CODEX_API_KEY"]);
+        assert!(spec.custom_codex_provider);
+
+        let rendered = Launcher::render_powershell_invocation(&spec);
+        assert!(rendered.starts_with("& 'codex' '--model' 'gpt custom'"));
+        assert!(!rendered.contains("top-secret"));
+    }
+
+    #[test]
+    fn powershell_renderer_escapes_single_quotes_in_arguments() {
+        let mut config = HashMap::new();
+        config.insert("CLI_PROGRAM".to_string(), "codex".to_string());
+        config.insert(
+            "CLI_ARGS_JSON".to_string(),
+            serde_json::to_string(&vec!["--model", "team's-model"]).unwrap(),
+        );
+        let spec = Launcher::build_launch_spec(&config);
+        assert_eq!(
+            Launcher::render_powershell_invocation(&spec),
+            "& 'codex' '--model' 'team''s-model'"
+        );
+    }
+
+    #[test]
+    fn bash_exports_do_not_expand_secret_characters() {
+        assert_eq!(
+            Launcher::render_bash_export("CCL_CODEX_API_KEY", "a'$`b"),
+            "export CCL_CODEX_API_KEY='a'\\''$`b'"
+        );
+    }
+
+    #[test]
+    fn codex_probe_uses_the_same_structured_powershell_path_as_launch() {
+        let rendered =
+            Launcher::render_powershell_invocation(&Launcher::codex_capability_probe_spec());
+        assert!(rendered.starts_with("& 'codex' 'debug' 'models' '--bundled'"));
+        assert!(rendered.contains("'model_providers.cc_launcher_probe.wire_api=\"responses\"'"));
+    }
+
+    #[test]
+    fn macos_terminal_script_preserves_shell_and_applescript_quoting() {
+        let script = Launcher::render_macos_terminal_script(
+            "export TOKEN='a'\\''$b' && 'codex' '--model' 'team'\\''s'",
+            "/Users/O'Brien/work",
+            "codex",
+        );
+        assert!(script.contains("Starting Codex..."));
+        assert!(script.contains("cd '/Users/O'\\\\''Brien/work'"));
+        assert!(script.contains("do script \""));
+        assert!(!script.contains("\r"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn installed_codex_capability_probe_supports_npm_cmd_shims() {
+        super::super::dependency_checker::DependencyChecker::refresh_system_path();
+        let available = std::process::Command::new("where.exe")
+            .arg("codex")
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+        if available {
+            Launcher::ensure_codex_custom_provider_supported().unwrap();
+        }
     }
 }
