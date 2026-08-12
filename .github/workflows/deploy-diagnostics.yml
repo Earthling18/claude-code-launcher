@@ -22,12 +22,14 @@ jobs:
       run:
         working-directory: infra/diagnostics
     env:
-      ALICLOUD_ACCESS_KEY: ${{ secrets.OSS_ACCESS_KEY_ID }}
-      ALICLOUD_SECRET_KEY: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+      ALICLOUD_ACCESS_KEY: ${{ secrets.DIAGNOSTICS_ACCESS_KEY_ID }}
+      ALICLOUD_SECRET_KEY: ${{ secrets.DIAGNOSTICS_ACCESS_KEY_SECRET }}
       ALICLOUD_REGION: cn-shanghai
       TF_IN_AUTOMATION: 'true'
       TF_INPUT: 'false'
       TFSTATE_PASSPHRASE: ${{ secrets.DIAGNOSTICS_TFSTATE_PASSPHRASE }}
+      OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+      OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
       OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
       OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
     steps:
@@ -42,7 +44,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for name in ALICLOUD_ACCESS_KEY ALICLOUD_SECRET_KEY TFSTATE_PASSPHRASE OSS_BUCKET OSS_ENDPOINT; do
+          for name in ALICLOUD_ACCESS_KEY ALICLOUD_SECRET_KEY TFSTATE_PASSPHRASE OSS_ACCESS_KEY_ID OSS_ACCESS_KEY_SECRET OSS_BUCKET OSS_ENDPOINT; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Required secret for $name is not configured."
               exit 1
