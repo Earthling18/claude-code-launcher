@@ -89,41 +89,6 @@ resource "alicloud_fcv3_trigger" "http" {
   })
 }
 
-resource "alicloud_ram_role" "api_gateway" {
-  role_name   = "${replace(var.name_prefix, "-", "")}-apigateway"
-  description = "API Gateway may invoke only the diagnostics Function Compute function"
-  assume_role_policy_document = jsonencode({
-    Version = "1"
-    Statement = [{
-      Action    = "sts:AssumeRole"
-      Effect    = "Allow"
-      Principal = { Service = ["apigateway.aliyuncs.com"] }
-    }]
-  })
-}
-
-resource "alicloud_ram_policy" "invoke_diagnostics" {
-  policy_name = "${replace(var.name_prefix, "-", "")}-invoke"
-  description = "Invoke only the CC Launcher diagnostics function"
-  policy_document = jsonencode({
-    Version = "1"
-    Statement = [{
-      Action = ["fc:InvokeFunction"]
-      Effect = "Allow"
-      Resource = [
-        "acs:fc:${var.region}:${data.alicloud_account.current.id}:functions/${alicloud_fcv3_function.ingest.function_name}",
-        "acs:fc:${var.region}:${data.alicloud_account.current.id}:functions/${alicloud_fcv3_function.ingest.function_name}/*"
-      ]
-    }]
-  })
-}
-
-resource "alicloud_ram_role_policy_attachment" "gateway_invoke" {
-  policy_name = alicloud_ram_policy.invoke_diagnostics.policy_name
-  policy_type = alicloud_ram_policy.invoke_diagnostics.type
-  role_name   = alicloud_ram_role.api_gateway.role_name
-}
-
 resource "alicloud_api_gateway_group" "diagnostics" {
   name        = replace(var.name_prefix, "-", "_")
   description = "CC Launcher diagnostic ingestion"
@@ -157,7 +122,7 @@ resource "alicloud_api_gateway_api" "diagnostics" {
     path               = "/"
     method             = "POST"
     only_business_path = true
-    arn_role           = alicloud_ram_role.api_gateway.arn
+    arn_role           = "acs:ram::${data.alicloud_account.current.id}:role/aliyunserviceroleforapigateway"
     timeout            = 10000
   }
 
@@ -167,8 +132,6 @@ resource "alicloud_api_gateway_api" "diagnostics" {
     value       = random_password.ingest_secret.result
     description = "Gateway-to-function shared secret"
   }
-
-  depends_on = [alicloud_ram_role_policy_attachment.gateway_invoke]
 }
 
 resource "alicloud_api_gateway_plugin" "traffic_control" {

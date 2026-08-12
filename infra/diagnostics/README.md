@@ -16,12 +16,14 @@
 
 ## 部署与发布
 
-1. 创建诊断专用 RAM 用户，准备具备 FC、SLS、传统 API Gateway 和 RAM 资源管理权限的独立凭据；不要复用安装包 OSS AccessKey。
+1. 由阿里云账号管理员先开通 FC、SLS、传统 API Gateway，再创建诊断专用 RAM 用户并授予 `AliyunFCFullAccess`、`AliyunLogFullAccess`、`AliyunApiGatewayFullAccess`；不要复用安装包 OSS AccessKey，也不需要授予 `AliyunRAMFullAccess`。
 2. 为 `sls_project_name` 选择全局唯一的小写名称，执行 Terraform。
 3. 取得 `diagnostics_endpoint` 输出，并设置 GitHub Secret `CCL_DIAGNOSTICS_ENDPOINT`。
 4. 发布构建会通过 `option_env!` 将 HTTPS endpoint 固化进客户端；客户端不包含任何云端密钥。
 5. 先运行函数目录内的 Node 测试，再用测试包完成一次“手动提交诊断”冒烟测试。
 
 GitHub Actions 使用 `DIAGNOSTICS_ACCESS_KEY_ID`、`DIAGNOSTICS_ACCESS_KEY_SECRET` 管理诊断资源；原有 `OSS_ACCESS_KEY_ID`、`OSS_ACCESS_KEY_SECRET` 仅用于保存 AES-256 加密后的 Terraform state。两组凭据互不替代。
+
+API Gateway 通过阿里云自动创建的服务关联角色 `AliyunServiceRoleForApiGateway` 调用 FC。`AliyunApiGatewayFullAccess` 只允许为 API Gateway 创建该服务关联角色，部署凭据不需要通用 RAM 管理员权限。
 
 默认二级域名适合当前低流量诊断。若后续改用自定义 HTTPS 域名，需要同步更新 `CCL_DIAGNOSTICS_ENDPOINT` 并重新构建客户端。
