@@ -5,7 +5,7 @@ use crate::models::{
 use crate::services::cc_config_checker::{CleanTarget, ConfigScanResult, ProjectInfo};
 use crate::services::*;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 #[tauri::command]
 pub async fn check_nodejs() -> Result<dependency_checker::DependencyStatus, String> {
@@ -217,13 +217,150 @@ pub fn create_project(
     name: String,
     working_directory: String,
     config: ProjectConfig,
+    create_named_directory: bool,
 ) -> Result<Project, String> {
+    let (working_directory, created_directory) =
+        prepare_project_working_directory(&name, &working_directory, create_named_directory)?;
     let input = CreateProjectInput {
         name,
         working_directory,
         config,
     };
-    ConfigStorage::create_project(input)
+    let result = ConfigStorage::create_project(input);
+    if result.is_err() {
+        if let Some(path) = created_directory {
+            if let Err(error) = std::fs::remove_dir(&path) {
+                log::warn!(
+                    "Failed to clean up newly created project directory {}: {}",
+                    path.display(),
+                    error
+                );
+            }
+        }
+    }
+    result
+}
+
+fn prepare_project_working_directory(
+    project_name: &str,
+    selected_directory: &str,
+    create_named_directory: bool,
+) -> Result<(String, Option<PathBuf>), String> {
+    let selected_directory = selected_directory.trim();
+    if !create_named_directory || directory_name_matches(selected_directory, project_name) {
+        return Ok((selected_directory.to_string(), None));
+    }
+
+    let project_name = project_name.trim();
+    let mut components = Path::new(project_name).components();
+    let is_single_normal_component = matches!(components.next(), Some(Component::Normal(_)))
+        && components.next().is_none()
+        && !project_name.contains(['/', '\\']);
+    if !is_single_normal_component {
+        return Err("项目名称不能作为文件夹名，请移除路径分隔符或特殊路径片段".to_string());
+    }
+
+    let parent = PathBuf::from(selected_directory);
+    if !parent.is_dir() {
+        return Err(format!("所选工作目录不存在或不是文件夹: {}", parent.display()));
+    }
+
+    let target = parent.join(project_name);
+    if target.exists() {
+        if target.is_dir() {
+            return Ok((target.to_string_lossy().into_owned(), None));
+        }
+        return Err(format!("无法创建项目文件夹，同名文件已存在: {}", target.display()));
+    }
+
+    std::fs::create_dir(&target)
+        .map_err(|error| format!("创建项目文件夹失败 {}: {}", target.display(), error))?;
+    Ok((target.to_string_lossy().into_owned(), Some(target)))
+}
+
+fn directory_name_matches(directory: &str, project_name: &str) -> bool {
+    Path::new(directory.trim())
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_lowercase() == project_name.trim().to_lowercase())
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod project_directory_tests {
+    use super::prepare_project_working_directory;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_temp_parent() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "cc-launcher-project-directory-test-{}-{}",
+            std::process::id(),
+            unique
+        ));
+        std::fs::create_dir(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn matching_directory_name_does_not_create_a_nested_folder() {
+        let parent = create_temp_parent();
+        let selected = parent.join("DemoProject");
+        std::fs::create_dir(&selected).unwrap();
+
+        let (resolved, created) = prepare_project_working_directory(
+            "demoproject",
+            &selected.to_string_lossy(),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(PathBuf::from(resolved), selected);
+        assert!(created.is_none());
+        assert!(!selected.join("demoproject").exists());
+
+        std::fs::remove_dir(&selected).unwrap();
+        std::fs::remove_dir(&parent).unwrap();
+    }
+
+    #[test]
+    fn checked_option_creates_and_uses_the_named_child_directory() {
+        let parent = create_temp_parent();
+        let expected = parent.join("DemoProject");
+
+        let (resolved, created) = prepare_project_working_directory(
+            "DemoProject",
+            &parent.to_string_lossy(),
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(PathBuf::from(resolved), expected);
+        assert_eq!(created.as_deref(), Some(expected.as_path()));
+        assert!(expected.is_dir());
+
+        std::fs::remove_dir(&expected).unwrap();
+        std::fs::remove_dir(&parent).unwrap();
+    }
+
+    #[test]
+    fn checked_option_rejects_path_traversal_in_the_project_name() {
+        let parent = create_temp_parent();
+        let result = prepare_project_working_directory(
+            "../outside",
+            &parent.to_string_lossy(),
+            true,
+        );
+
+        assert!(result.is_err());
+        assert!(!parent.join("outside").exists());
+
+        std::fs::remove_dir(&parent).unwrap();
+    }
 }
 
 #[tauri::command]
@@ -1417,4 +1554,61 @@ pub async fn download_and_run_installer(url: String, filename: String) -> Result
     .map_err(|e| format!("Task error: {}", e))?;
 
     result
+}
+
+/// Download an installer to a user-selected local path without launching it.
+#[tauri::command]
+pub async fn download_installer(
+    app_handle: tauri::AppHandle,
+    url: String,
+    filename: String,
+) -> Result<Option<String>, String> {
+    use std::io::Write;
+    use tauri_plugin_dialog::DialogExt;
+
+    let selected_path = app_handle
+        .dialog()
+        .file()
+        .set_title("保存安装包")
+        .set_file_name(filename)
+        .blocking_save_file();
+
+    let Some(selected_path) = selected_path else {
+        return Ok(None);
+    };
+    let file_path = selected_path
+        .into_path()
+        .map_err(|e| format!("无法使用所选保存路径: {}", e))?;
+    let saved_path = file_path.to_string_lossy().into_owned();
+
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(300))
+            .build()
+            .map_err(|e| format!("创建下载客户端失败: {}", e))?;
+
+        let mut resp = client
+            .get(&url)
+            .header("User-Agent", "CCLauncher")
+            .send()
+            .map_err(|e| format!("下载安装包失败: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("下载安装包失败，HTTP 状态码: {}", resp.status()));
+        }
+
+        let mut file = std::fs::File::create(&file_path)
+            .map_err(|e| format!("无法创建安装包文件: {}", e))?;
+        resp.copy_to(&mut file)
+            .map_err(|e| format!("写入安装包失败: {}", e))?;
+        file.flush()
+            .map_err(|e| format!("保存安装包失败: {}", e))?;
+
+        log::info!("Downloaded installer package to: {}", file_path.display());
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("下载任务失败: {}", e))??;
+
+    Ok(Some(saved_path))
 }

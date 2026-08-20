@@ -64,10 +64,16 @@ export const ProjectCreatePage: React.FC = () => {
     }
   };
 
-  const handleSubmit = async (name: string, workingDirectory: string, config: ProjectConfig, isPinned: boolean) => {
+  const handleSubmit = async (
+    name: string,
+    workingDirectory: string,
+    config: ProjectConfig,
+    isPinned: boolean,
+    createNamedDirectory: boolean,
+  ) => {
     try {
       setSaving(true);
-      const project = await projectApi.create(name, workingDirectory, config);
+      const project = await projectApi.create(name, workingDirectory, config, createNamedDirectory);
       if (isPinned) {
         await projectApi.togglePinned(project.id, true);
       }
@@ -107,6 +113,7 @@ export const ProjectCreatePage: React.FC = () => {
           onSubmit={handleSubmit}
           onCancel={handleCancel}
           submitLabel={saving ? '创建中…' : '创建项目'}
+          allowCreateNamedDirectory
         />
       </div>
     </div>

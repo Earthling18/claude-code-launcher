@@ -22,6 +22,7 @@ interface GitHubRelease {
 }
 
 type Platform = 'windows' | 'macos' | 'linux' | 'unknown';
+type DownloadAction = { tag: string; kind: 'install' | 'save' };
 
 // In-app version list is served from Aliyun OSS first (reachable in mainland
 // China without a VPN), falling back to the GitHub API. The OSS releases.json
@@ -78,7 +79,8 @@ export const VersionManager: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [hasFetched, setHasFetched] = useState(false);
   const [expandedTag, setExpandedTag] = useState<string | null>(null);
-  const [downloading, setDownloading] = useState<string | null>(null);
+  const [downloadAction, setDownloadAction] = useState<DownloadAction | null>(null);
+  const [downloadNotice, setDownloadNotice] = useState<string | null>(null);
   const [platform, setPlatform] = useState<Platform>('unknown');
 
   const popupRef = useRef<HTMLDivElement>(null);
@@ -194,7 +196,9 @@ export const VersionManager: React.FC = () => {
   };
 
   const handleInstall = async (release: GitHubRelease) => {
-    setDownloading(release.tag_name);
+    setError(null);
+    setDownloadNotice(null);
+    setDownloadAction({ tag: release.tag_name, kind: 'install' });
     try {
       // macOS: when upgrading to a version newer than current AND that version
       // matches the server's latest.json, route through Tauri Updater for a
@@ -225,7 +229,7 @@ export const VersionManager: React.FC = () => {
       const asset = findInstaller(release);
       if (!asset) {
         try { await openUrl(release.html_url); } catch { window.open(release.html_url, '_blank'); }
-        setDownloading(null);
+        setDownloadAction(null);
         return;
       }
       await invoke('download_and_run_installer', {
@@ -236,7 +240,27 @@ export const VersionManager: React.FC = () => {
       await exit(0);
     } catch (e: any) {
       setError(e?.toString() || 'Download failed');
-      setDownloading(null);
+      setDownloadAction(null);
+    }
+  };
+
+  const handleDownloadPackage = async (release: GitHubRelease) => {
+    const asset = findInstaller(release);
+    if (!asset) return;
+
+    setError(null);
+    setDownloadNotice(null);
+    setDownloadAction({ tag: release.tag_name, kind: 'save' });
+    try {
+      const savedPath = await invoke<string | null>('download_installer', {
+        url: asset.browser_download_url,
+        filename: asset.name,
+      });
+      if (savedPath) setDownloadNotice(`安装包已保存到：${savedPath}`);
+    } catch (e: any) {
+      setError(e?.toString() || '下载安装包失败');
+    } finally {
+      setDownloadAction(null);
     }
   };
 
@@ -311,6 +335,11 @@ export const VersionManager: React.FC = () => {
           {/* Content */}
           <div className="flex-1 overflow-y-auto">
             <DiagnosticsPanel />
+            {downloadNotice && (
+              <div className="mx-4 mt-3 px-3 py-2 bg-[#12352c] border border-[#1f6f55] rounded text-[11px] text-[#8ee6c1] break-all">
+                {downloadNotice}
+              </div>
+            )}
             {loading && !hasFetched && (
               <div className="px-4 py-6 text-center text-[13px] text-[#999999]">
                 正在获取版本列表...
@@ -344,7 +373,8 @@ export const VersionManager: React.FC = () => {
                   const hasNotes = !!release.body?.trim();
                   const isExpanded = expandedTag === release.tag_name;
                   const installer = findInstaller(release);
-                  const isDownloading = downloading === release.tag_name;
+                  const isInstalling = downloadAction?.tag === release.tag_name && downloadAction.kind === 'install';
+                  const isSaving = downloadAction?.tag === release.tag_name && downloadAction.kind === 'save';
 
                   return (
                     <div key={release.tag_name} className={isCurrent ? 'bg-[#1a2a3a]' : ''}>
@@ -374,24 +404,37 @@ export const VersionManager: React.FC = () => {
                             </span>
                           )}
                         </div>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleInstall(release); }}
-                          disabled={!!downloading}
-                          className={`px-2.5 py-1 text-[11px] disabled:bg-[#565B5E] disabled:cursor-not-allowed text-white rounded transition-colors shrink-0 ml-2 ${
-                            isCurrent
-                              ? 'bg-[#565B5E] hover:bg-[#7A8488]'
-                              : 'bg-[#10b981] hover:bg-[#059669]'
-                          }`}
-                          title={isCurrent ? '下载并重装当前版本' : undefined}
-                        >
-                          {isDownloading
-                            ? '下载中...'
-                            : installer
-                            // OSS-sourced assets carry no byte size (size 0);
-                            // only append "(size)" when GitHub gave us one.
-                            ? `${isCurrent ? '重装' : '安装'}${installer.size > 0 ? ` (${formatSize(installer.size)})` : ''}`
-                            : '查看'}
-                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                          {installer && (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDownloadPackage(release); }}
+                              disabled={!!downloadAction}
+                              className="px-2.5 py-1 text-[11px] bg-[#3f4650] hover:bg-[#525c69]
+                                         disabled:bg-[#565B5E] disabled:cursor-not-allowed text-white rounded transition-colors"
+                              title="下载安装包到本地，不启动安装"
+                            >
+                              {isSaving ? '下载中...' : '下载包'}
+                            </button>
+                          )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handleInstall(release); }}
+                            disabled={!!downloadAction}
+                            className={`px-2.5 py-1 text-[11px] disabled:bg-[#565B5E] disabled:cursor-not-allowed text-white rounded transition-colors ${
+                              isCurrent
+                                ? 'bg-[#565B5E] hover:bg-[#7A8488]'
+                                : 'bg-[#10b981] hover:bg-[#059669]'
+                            }`}
+                            title={isCurrent ? '下载并重装当前版本' : undefined}
+                          >
+                            {isInstalling
+                              ? '下载中...'
+                              : installer
+                              // OSS-sourced assets carry no byte size (size 0);
+                              // only append "(size)" when GitHub gave us one.
+                              ? `${isCurrent ? '重装' : '安装'}${installer.size > 0 ? ` (${formatSize(installer.size)})` : ''}`
+                              : '查看'}
+                          </button>
+                        </div>
                       </div>
 
                       {/* Expanded release notes */}

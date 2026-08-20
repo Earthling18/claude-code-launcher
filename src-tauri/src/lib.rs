@@ -227,6 +227,7 @@ pub fn run() {
             commands::is_portable_mode,
             commands::get_portable_download_url,
             commands::download_and_run_installer,
+            commands::download_installer,
             // Global presets commands
             commands::get_global_presets,
             commands::create_proxy_preset,

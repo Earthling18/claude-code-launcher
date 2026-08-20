@@ -1,6 +1,6 @@
 [package]
 name = "cc-launcher-tauri"
-version = "1.2.7"
+version = "1.2.8"
 description = "Mobot Launcher，支持桌面、远程启动claudecode、codex等服务，并对接企微、飞书"
 authors = ["Mobot Team"]
 edition = "2021"

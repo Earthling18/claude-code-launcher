@@ -11,12 +11,26 @@ interface ProjectFormProps {
   initialWorkingDirectory?: string;
   initialConfig?: ProjectConfig;
   initialIsPinned?: boolean;
-  onSubmit: (name: string, workingDirectory: string, config: ProjectConfig, isPinned: boolean) => void;
+  onSubmit: (
+    name: string,
+    workingDirectory: string,
+    config: ProjectConfig,
+    isPinned: boolean,
+    createNamedDirectory: boolean,
+  ) => void;
   onCancel: () => void;
   onDelete?: () => void;
   submitLabel?: string;
   isDefault?: boolean;
+  allowCreateNamedDirectory?: boolean;
 }
+
+const normalizedName = (value: string) => value.trim().normalize('NFC').toLocaleLowerCase();
+
+const getDirectoryName = (path: string): string => {
+  const trimmed = path.trim().replace(/[\\/]+$/, '');
+  return trimmed.split(/[\\/]/).pop() ?? '';
+};
 
 const FormRow: React.FC<{
   label: string;
@@ -112,6 +126,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
   onDelete,
   submitLabel = '创建项目',
   isDefault = false,
+  allowCreateNamedDirectory = false,
 }) => {
   const [name, setName] = useState(initialName);
   const [workingDirectory, setWorkingDirectory] = useState(initialWorkingDirectory);
@@ -136,7 +151,16 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       ?? null,
   );
   const [skipPermissions, setSkipPermissions] = useState(initialConfig?.skip_permissions ?? true);
+  const [createNamedDirectory, setCreateNamedDirectory] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  const trimmedName = name.trim();
+  const trimmedWorkingDirectory = workingDirectory.trim();
+  const directoryNameMatches = normalizedName(getDirectoryName(trimmedWorkingDirectory)) === normalizedName(trimmedName);
+  const showCreateNamedDirectory = allowCreateNamedDirectory
+    && !!trimmedName
+    && !!trimmedWorkingDirectory
+    && !directoryNameMatches;
 
   useEffect(() => {
     if (!initialWorkingDirectory) return;
@@ -161,6 +185,10 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
 
   useEffect(() => { setIsPinned(initialIsPinned); }, [initialIsPinned]);
 
+  useEffect(() => {
+    if (!showCreateNamedDirectory) setCreateNamedDirectory(false);
+  }, [showCreateNamedDirectory]);
+
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     const nextErrors: Record<string, string> = {};
@@ -172,7 +200,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
     if (Object.keys(nextErrors).length > 0) return;
 
     const mode: ProjectConfig['mode'] = source === 'custom_api' ? 'custom' : cli;
-    onSubmit(name.trim(), workingDirectory.trim(), {
+    onSubmit(trimmedName, trimmedWorkingDirectory, {
       mode,
       proxy: '',
       model: '',
@@ -187,7 +215,7 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
       model_preset_id: source === 'custom_api' ? selectedModel : null,
       claude_model_preset_id: claudeModelPresetId,
       codex_model_preset_id: codexModelPresetId,
-    }, isPinned);
+    }, isPinned, showCreateNamedDirectory && createNamedDirectory);
   };
 
   const activeProxy = cli === 'codex' ? codexProxyPresetId : claudeProxyPresetId;
@@ -278,6 +306,31 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
         {!isDefault && onDelete && <button type="button" onClick={onDelete} className="btn btn-danger">删除项目</button>}
         <div className="flex-1" />
         <button type="button" onClick={onCancel} className="btn btn-ghost">取消</button>
+        {showCreateNamedDirectory && (
+          <label
+            className="group relative flex h-8 cursor-pointer items-center gap-1.5 rounded-md px-2 text-[10.5px] text-text-secondary transition-colors hover:bg-surface-2 hover:text-text-primary"
+          >
+            <input
+              type="checkbox"
+              checked={createNamedDirectory}
+              onChange={(event) => setCreateNamedDirectory(event.target.checked)}
+              className="h-3.5 w-3.5 accent-accent"
+            />
+            <span>新建文件夹</span>
+            <svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-tertiary">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 11v5" />
+              <path d="M12 8h.01" />
+            </svg>
+            <span
+              role="tooltip"
+              className="pointer-events-none absolute bottom-full right-0 z-30 mb-2 w-64 rounded-md border border-line-strong bg-surface-3 px-3 py-2 text-[10px] font-normal leading-relaxed text-text-secondary opacity-0 shadow-lg transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+            >
+              勾选后，将在所选工作目录下创建“{trimmedName}”文件夹，并将它作为项目工作目录。
+              <span className="absolute -bottom-1 right-4 h-2 w-2 rotate-45 border-b border-r border-line-strong bg-surface-3" />
+            </span>
+          </label>
+        )}
         <button type="submit" className="btn btn-accent min-w-[84px]">{submitLabel}</button>
       </div>
     </form>

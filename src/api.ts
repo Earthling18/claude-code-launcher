@@ -63,8 +63,8 @@ export const api = {
 export const projectApi = {
   getAll: () => invoke<Project[]>('get_projects'),
   get: (id: string) => invoke<Project>('get_project', { id }),
-  create: (name: string, workingDirectory: string, config: ProjectConfig) =>
-    invoke<Project>('create_project', { name, workingDirectory, config }),
+  create: (name: string, workingDirectory: string, config: ProjectConfig, createNamedDirectory = false) =>
+    invoke<Project>('create_project', { name, workingDirectory, config, createNamedDirectory }),
   update: (
     id: string,
     name?: string,
