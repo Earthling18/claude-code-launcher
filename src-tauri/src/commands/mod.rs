@@ -968,6 +968,69 @@ fn protocol_probe_succeeded(status: u16) -> bool {
     (200..=299).contains(&status)
 }
 
+fn model_discovery_url(base_url: &str, api_format: ModelApiFormat) -> String {
+    match api_format {
+        ModelApiFormat::AnthropicMessages => format!("{}/v1/models", base_url),
+        ModelApiFormat::OpenaiResponses => format!("{}/models", base_url),
+    }
+}
+
+fn model_ids_from_response(value: &serde_json::Value) -> Vec<String> {
+    value
+        .get("data")
+        .and_then(|data| data.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| {
+                    item.get("id")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string)
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod model_probe_helper_tests {
+    use super::{model_discovery_url, model_ids_from_response};
+    use crate::models::ModelApiFormat;
+
+    #[test]
+    fn builds_protocol_specific_model_discovery_urls() {
+        assert_eq!(
+            model_discovery_url("https://api.example.com", ModelApiFormat::AnthropicMessages),
+            "https://api.example.com/v1/models"
+        );
+        assert_eq!(
+            model_discovery_url(
+                "https://api.example.com/v1",
+                ModelApiFormat::OpenaiResponses,
+            ),
+            "https://api.example.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn extracts_only_string_model_ids() {
+        let response = serde_json::json!({
+            "data": [
+                { "id": "model-a" },
+                { "id": 42 },
+                { "name": "missing-id" },
+                { "id": "model-b" }
+            ]
+        });
+
+        assert_eq!(
+            model_ids_from_response(&response),
+            vec!["model-a".to_string(), "model-b".to_string()]
+        );
+        assert!(model_ids_from_response(&serde_json::json!({})).is_empty());
+    }
+}
+
 #[tauri::command]
 #[allow(non_snake_case)]
 pub async fn probe_model_endpoint(
@@ -990,12 +1053,87 @@ pub async fn probe_model_endpoint(
     }
     let model = model.trim().to_string();
     if model.is_empty() {
+        let client = match reqwest::Client::builder()
+            .timeout(Duration::from_secs(20))
+            .build()
+        {
+            Ok(client) => client,
+            Err(error) => {
+                return Ok(ModelProbeResult {
+                    ok: false,
+                    status: 0,
+                    latency_ms: 0,
+                    models: vec![],
+                    error: Some(format!("构造 HTTP client 失败: {}", error)),
+                })
+            }
+        };
+        let tok = token.trim();
+        let mut request = client.get(model_discovery_url(&trimmed, apiFormat));
+        if matches!(apiFormat, ModelApiFormat::AnthropicMessages) {
+            request = request.header("anthropic-version", "2023-06-01");
+        }
+        if !tok.is_empty() {
+            request = request.bearer_auth(tok);
+            if matches!(apiFormat, ModelApiFormat::AnthropicMessages) {
+                request = request.header("x-api-key", tok);
+            }
+        }
+
+        let start = Instant::now();
+        let response = match request.send().await {
+            Ok(response) => response,
+            Err(error) => {
+                let latency_ms = start.elapsed().as_millis() as u64;
+                let message = if error.is_timeout() {
+                    "模型列表检测超时（>20s）".to_string()
+                } else if error.is_connect() {
+                    format!("无法连接模型服务: {}", error)
+                } else {
+                    format!("模型列表请求失败: {}", error)
+                };
+                return Ok(ModelProbeResult {
+                    ok: false,
+                    status: 0,
+                    latency_ms,
+                    models: vec![],
+                    error: Some(message),
+                });
+            }
+        };
+        let latency_ms = start.elapsed().as_millis() as u64;
+        let status = response.status().as_u16();
+        if !response.status().is_success() {
+            let body_text = response.text().await.unwrap_or_default();
+            let snippet: String = body_text.chars().take(200).collect();
+            let error = match status {
+                401 | 403 => format!("模型列表鉴权失败（HTTP {}），请检查 API Key", status),
+                404 | 405 => format!(
+                    "已连接到服务，但该地址未提供模型列表接口（HTTP {}）；填写模型名称后可进行真实兼容性检测",
+                    status
+                ),
+                _ => format!("模型列表 HTTP {}: {}", status, snippet),
+            };
+            return Ok(ModelProbeResult {
+                ok: false,
+                status,
+                latency_ms,
+                models: vec![],
+                error: Some(error),
+            });
+        }
+        let models = response
+            .json::<serde_json::Value>()
+            .await
+            .ok()
+            .map(|value| model_ids_from_response(&value))
+            .unwrap_or_default();
         return Ok(ModelProbeResult {
-            ok: false,
-            status: 0,
-            latency_ms: 0,
-            models: vec![],
-            error: Some("请先填写模型名称，再进行真实兼容性检测".to_string()),
+            ok: true,
+            status,
+            latency_ms,
+            models,
+            error: None,
         });
     }
 
@@ -1096,17 +1234,7 @@ pub async fn probe_model_endpoint(
                 .json::<serde_json::Value>()
                 .await
                 .ok()
-                .and_then(|value| value.get("data").and_then(|data| data.as_array()).cloned())
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(|item| {
-                            item.get("id")
-                                .and_then(|value| value.as_str())
-                                .map(str::to_string)
-                        })
-                        .collect()
-                })
+                .map(|value| model_ids_from_response(&value))
                 .unwrap_or_default(),
             _ => vec![],
         };
@@ -1208,17 +1336,7 @@ pub async fn probe_model_endpoint(
             .json::<serde_json::Value>()
             .await
             .ok()
-            .and_then(|value| value.get("data").and_then(|data| data.as_array()).cloned())
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| {
-                        item.get("id")
-                            .and_then(|value| value.as_str())
-                            .map(str::to_string)
-                    })
-                    .collect()
-            })
+            .map(|value| model_ids_from_response(&value))
             .unwrap_or_default(),
         _ => vec![],
     };
@@ -1360,6 +1478,33 @@ mod custom_model_compatibility_tests {
         (format!("http://{}", address), handle)
     }
 
+    fn mock_model_discovery_server(
+        expected_models_path: &'static str,
+    ) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 4096];
+            let length = stream.read(&mut request).unwrap();
+            let request = String::from_utf8_lossy(&request[..length]);
+            assert!(
+                request.starts_with(&format!("GET {} HTTP/", expected_models_path)),
+                "unexpected request: {}",
+                request.lines().next().unwrap_or_default()
+            );
+            let body = r#"{"data":[{"id":"discovered-model"}]}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+        (format!("http://{}", address), handle)
+    }
+
     #[test]
     fn legacy_claude_config_can_keep_an_empty_model() {
         assert!(validate_resolved_custom_fields("claude", "", "https://claude.example").is_ok());
@@ -1431,6 +1576,28 @@ mod custom_model_compatibility_tests {
         .unwrap();
         assert!(codex.ok);
         codex_server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn empty_model_only_discovers_models_without_sending_an_inference_request() {
+        for (path, api_format) in [
+            ("/v1/models", ModelApiFormat::AnthropicMessages),
+            ("/models", ModelApiFormat::OpenaiResponses),
+        ] {
+            let (base_url, server) = mock_model_discovery_server(path);
+            let result = probe_model_endpoint(
+                base_url,
+                String::new(),
+                String::new(),
+                api_format,
+            )
+            .await
+            .unwrap();
+
+            assert!(result.ok);
+            assert_eq!(result.models, vec!["discovered-model".to_string()]);
+            server.join().unwrap();
+        }
     }
 }
 
