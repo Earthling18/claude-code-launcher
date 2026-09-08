@@ -32,4 +32,5 @@ export interface ModelProbeResult {
   latency_ms: number;
   models: string[];
   error: string | null;
+  warning: string | null;
 }
