@@ -2,11 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { presetsApi } from '../api';
 import { toast } from '../lib/toast';
-import type { ModelApiFormat, ModelPreset, ProxyPreset } from '../types/presets';
+import type { ModelApiFormat, ModelPreset, ModelProbeResult, ProxyPreset } from '../types/presets';
 import { ConfirmDialog } from './ConfirmDialog';
-import { ModelEndpointProbe } from './ModelEndpointProbe';
 
 type Kind = 'proxy' | 'model';
+type ProbeState =
+  | { kind: 'idle' }
+  | { kind: 'loading' }
+  | { kind: 'success'; result: ModelProbeResult; compatibilityTested: boolean }
+  | { kind: 'error'; error: string };
+
 interface PresetManagerDialogProps {
   isOpen: boolean;
   kind: Kind;
@@ -57,6 +62,7 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showToken, setShowToken] = useState(false);
+  const [probe, setProbe] = useState<ProbeState>({ kind: 'idle' });
   const [activeEndpoint, setActiveEndpoint] = useState<ModelApiFormat>('anthropic_messages');
   const [pendingDelete, setPendingDelete] = useState<{ id: string; refs: number; name: string } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -83,12 +89,14 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
     setKind(initialKind);
     setDraft(null);
     setError(null);
+    setProbe({ kind: 'idle' });
     loadAll();
   }, [isOpen, initialKind]);
 
   useEffect(() => {
     setDraft(null);
     setError(null);
+    setProbe({ kind: 'idle' });
   }, [kind]);
 
   if (!isOpen) return null;
@@ -97,6 +105,7 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
 
   const startCreate = () => {
     setError(null);
+    setProbe({ kind: 'idle' });
     setShowToken(false);
     if (kind === 'proxy') setDraft({ name: '', url: '' });
     else {
@@ -121,9 +130,28 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
       token: model.token,
     });
     setActiveEndpoint(model.claude_base_url || model.api_format !== 'openai_responses' ? 'anthropic_messages' : 'openai_responses');
+    setProbe({ kind: 'idle' });
     setError(null);
     setShowToken(false);
     revealDraft();
+  };
+
+  const runProbe = async (modelDraft: ModelDraft) => {
+    const baseUrl = endpointFor(modelDraft, activeEndpoint).trim();
+    if (!/^https?:\/\//.test(baseUrl)) {
+      setProbe({ kind: 'error', error: '请先填写有效的 HTTP(S) Base URL' });
+      return;
+    }
+    const model = modelDraft.model.trim();
+    setProbe({ kind: 'loading' });
+    try {
+      const result = await presetsApi.probeModel(baseUrl, modelDraft.token, model, activeEndpoint);
+      setProbe(result.ok
+        ? { kind: 'success', result, compatibilityTested: !!model }
+        : { kind: 'error', error: result.error || `HTTP ${result.status}` });
+    } catch (reason) {
+      setProbe({ kind: 'error', error: String(reason) });
+    }
   };
 
   const save = async () => {
@@ -238,8 +266,9 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
                         value={modelDraft.model}
                         onChange={(event) => {
                           setDraft({ ...modelDraft, model: event.target.value });
+                          setProbe({ kind: 'idle' });
                         }}
-                        placeholder="例如：glm-5.2（也可从下方获取模型列表）"
+                        placeholder="例如：glm-5.2（可留空后检测可用模型）"
                       />
                     </Field>
                     <div>
@@ -252,7 +281,7 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
                               <button
                                 key={format}
                                 type="button"
-                                onClick={() => { setActiveEndpoint(format); setError(null); }}
+                                onClick={() => { setActiveEndpoint(format); setProbe({ kind: 'idle' }); setError(null); }}
                                 className={`flex items-center gap-1.5 rounded border px-2.5 text-[10.5px] transition-colors ${activeEndpoint === format ? 'border-[#454d59] bg-[#343a44] text-text-primary' : 'border-transparent text-text-tertiary hover:bg-surface-2 hover:text-text-secondary'}`}
                               >
                                 <span className={`h-1.5 w-1.5 rounded-full ${configured ? 'bg-ok' : 'border border-text-tertiary/60'}`} />
@@ -268,6 +297,7 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
                         onChange={(event) => {
                           const key = activeEndpoint === 'anthropic_messages' ? 'claude_base_url' : 'codex_base_url';
                           setDraft({ ...modelDraft, [key]: event.target.value });
+                          setProbe({ kind: 'idle' });
                           setError(null);
                         }}
                         placeholder={activeEndpoint === 'openai_responses' ? 'https://api.example.com/v1' : 'https://api.example.com'}
@@ -277,16 +307,20 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
                         : <p className="text-[10.5px] text-text-tertiary mt-1">必须支持 Anthropic Messages API；是否兼容以实际检测结果为准。</p>}
                     </div>
                     <Field label="API Key（共用，可选）">
-                      <div className="flex gap-2"><input type={showToken ? 'text' : 'password'} value={modelDraft.token} onChange={(event) => { setDraft({ ...modelDraft, token: event.target.value }); }} /><button type="button" onClick={() => setShowToken((value) => !value)} className="btn btn-ghost btn-sm">{showToken ? '隐藏' : '显示'}</button></div>
+                      <div className="flex gap-2"><input type={showToken ? 'text' : 'password'} value={modelDraft.token} onChange={(event) => { setDraft({ ...modelDraft, token: event.target.value }); setProbe({ kind: 'idle' }); }} /><button type="button" onClick={() => setShowToken((value) => !value)} className="btn btn-ghost btn-sm">{showToken ? '隐藏' : '显示'}</button></div>
                     </Field>
-                    <ModelEndpointProbe
-                      key={modelDraft.id ?? 'new'}
-                      baseUrl={endpointFor(modelDraft, activeEndpoint)}
-                      token={modelDraft.token}
-                      model={modelDraft.model}
-                      apiFormat={activeEndpoint}
-                      onPick={(model) => setDraft({ ...modelDraft, model })}
-                    />
+                    <div className="flex items-center gap-2">
+                      <button type="button" onClick={() => runProbe(modelDraft)} disabled={probe.kind === 'loading'} className="btn btn-sm border border-line-strong bg-surface-2 text-text-secondary shadow-[0_1px_2px_rgba(0,0,0,0.2)] hover:border-[#454d59] hover:bg-surface-3 hover:text-text-primary">{probe.kind === 'loading' ? '检测中…' : '检测连接'}</button>
+                      <ProbeResult
+                        state={probe}
+                        apiFormat={activeEndpoint}
+                        hasModel={!!modelDraft.model.trim()}
+                        onPick={(model) => {
+                          setDraft({ ...modelDraft, model });
+                          setProbe({ kind: 'idle' });
+                        }}
+                      />
+                    </div>
                   </>
                 )}
                 {error && <p className="text-[11px] text-error">{error}</p>}
@@ -343,3 +377,15 @@ const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, 
 const PresetRow: React.FC<{ title: string; subtitle: string; badge?: string; onEdit: () => void; onDelete: () => void }> = ({ title, subtitle, badge, onEdit, onDelete }) => (
   <div className="list-row"><div className="flex-1 min-w-0"><div className="flex items-center gap-2"><span className="font-mono text-[12px] text-text-primary truncate">{title}</span>{badge && <span className="text-[9.5px] border border-line-strong text-text-tertiary px-1.5 py-0.5 rounded-sm shrink-0">{badge}</span>}</div><div className="font-mono text-[10.5px] text-text-tertiary truncate mt-0.5">{subtitle}</div></div><button type="button" onClick={onEdit} className="btn btn-ghost btn-sm">编辑</button><button type="button" onClick={onDelete} className="btn btn-ghost btn-sm text-error/80">删除</button></div>
 );
+
+const ProbeResult: React.FC<{ state: ProbeState; apiFormat: ModelApiFormat; hasModel: boolean; onPick: (model: string) => void }> = ({ state, apiFormat, hasModel, onPick }) => {
+  if (state.kind === 'idle') return <span className="text-[10.5px] text-text-tertiary">{hasModel ? `发送最小${apiFormat === 'openai_responses' ? ' Responses' : ' Messages'} 实测请求，会消耗极少量 Token` : '检测连接并获取模型列表，不发送推理请求'}</span>;
+  if (state.kind === 'loading') return null;
+  if (state.kind === 'error') return <span className="text-[10.5px] text-error break-all">{state.error}</span>;
+  const status = state.compatibilityTested
+    ? `${apiFormat === 'openai_responses' ? 'Responses' : 'Messages'} 可用`
+    : state.result.models.length > 0
+      ? `连接可用 · 获取到 ${state.result.models.length} 个模型`
+      : '连接可用 · 未返回模型列表';
+  return <div className="flex items-center gap-1.5 flex-wrap"><span className="text-[10.5px] text-ok">{status} · {state.result.latency_ms}ms</span>{state.result.warning && <span className="text-[10.5px] text-amber-400 break-all">{state.result.warning}</span>}{state.result.models.map((model) => <button key={model} type="button" onClick={() => onPick(model)} className="text-[10px] font-mono border border-line px-1.5 py-0.5 rounded hover:border-accent">{model}</button>)}</div>;
+};

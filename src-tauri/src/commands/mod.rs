@@ -1085,12 +1085,13 @@ pub async fn probe_model_endpoint(
             });
         }
 
+        let discovery = model_discovery::discover_models(&trimmed, tok, apiFormat).await;
         return Ok(ModelProbeResult {
             ok: true,
             status,
             latency_ms,
-            models: vec![],
-            warning: None,
+            models: discovery.models,
+            warning: discovery.warning.or(discovery.error),
             error: None,
         });
     }
@@ -1174,12 +1175,13 @@ pub async fn probe_model_endpoint(
         });
     }
 
+    let discovery = model_discovery::discover_models(&trimmed, tok, apiFormat).await;
     Ok(ModelProbeResult {
         ok: true,
         status,
         latency_ms,
-        models: vec![],
-        warning: None,
+        models: discovery.models,
+        warning: discovery.warning.or(discovery.error),
         error: None,
     })
 }
@@ -1274,25 +1276,41 @@ mod custom_model_compatibility_tests {
 
     fn mock_protocol_server(
         expected_probe_path: &'static str,
+        expected_models_path: &'static str,
+        models_response: Option<String>,
     ) -> (String, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         let handle = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0_u8; 4096];
-            let length = stream.read(&mut request).unwrap();
-            let request = String::from_utf8_lossy(&request[..length]);
-            assert!(
-                request.starts_with(&format!("POST {} HTTP/", expected_probe_path)),
-                "unexpected request: {}",
-                request.lines().next().unwrap_or_default()
-            );
-            assert!(request.contains("\"model\":\"probe-model\""));
-            write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}",
-            )
-            .unwrap();
+            let models_status = if models_response.is_some() { 200 } else { 404 };
+            for (method, path, status, body) in [
+                ("POST", expected_probe_path, 200, "{}".to_string()),
+                (
+                    "GET",
+                    expected_models_path,
+                    models_status,
+                    models_response.unwrap_or_else(|| "{}".to_string()),
+                ),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0_u8; 4096];
+                let length = stream.read(&mut request).unwrap();
+                let request = String::from_utf8_lossy(&request[..length]);
+                assert!(
+                    request.starts_with(&format!("{} {} HTTP/", method, path)),
+                    "unexpected request: {}",
+                    request.lines().next().unwrap_or_default()
+                );
+                if method == "POST" {
+                    assert!(request.contains("\"model\":\"probe-model\""));
+                }
+                write!(
+                    stream,
+                    "HTTP/1.1 {} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    status, body.len(), body
+                )
+                .unwrap();
+            }
         });
         (format!("http://{}", address), handle)
     }
@@ -1372,7 +1390,7 @@ mod custom_model_compatibility_tests {
     #[tokio::test]
     async fn protocol_probes_hit_the_real_messages_and_responses_routes() {
         let (claude_url, claude_server) =
-            mock_protocol_server("/v1/messages");
+            mock_protocol_server("/v1/messages", "/v1/models", None);
         let claude = probe_model_endpoint(
             claude_url,
             String::new(),
@@ -1382,9 +1400,10 @@ mod custom_model_compatibility_tests {
         .await
         .unwrap();
         assert!(claude.ok);
+        assert!(claude.warning.as_deref().unwrap().contains("404"));
         claude_server.join().unwrap();
 
-        let (codex_url, codex_server) = mock_protocol_server("/responses");
+        let (codex_url, codex_server) = mock_protocol_server("/responses", "/models", None);
         let codex = probe_model_endpoint(
             codex_url,
             String::new(),
@@ -1394,7 +1413,40 @@ mod custom_model_compatibility_tests {
         .await
         .unwrap();
         assert!(codex.ok);
+        assert!(codex.warning.as_deref().unwrap().contains("404"));
         codex_server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn named_model_probe_also_returns_the_full_model_list() {
+        let models: Vec<String> = (0..20).map(|index| format!("model-{}", index)).collect();
+        let response = serde_json::json!({
+            "data": models.iter().map(|id| serde_json::json!({ "id": id })).collect::<Vec<_>>()
+        })
+        .to_string();
+        for (probe_path, models_path, api_format) in [
+            (
+                "/v1/messages",
+                "/v1/models",
+                ModelApiFormat::AnthropicMessages,
+            ),
+            ("/responses", "/models", ModelApiFormat::OpenaiResponses),
+        ] {
+            let (base_url, server) =
+                mock_protocol_server(probe_path, models_path, Some(response.clone()));
+            let result = probe_model_endpoint(
+                base_url,
+                String::new(),
+                "probe-model".to_string(),
+                api_format,
+            )
+            .await
+            .unwrap();
+            assert!(result.ok);
+            assert_eq!(result.models, models);
+            assert!(result.warning.is_none());
+            server.join().unwrap();
+        }
     }
 
     #[tokio::test]
