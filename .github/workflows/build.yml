@@ -25,6 +25,10 @@ on:
         type: boolean
         default: false
 
+concurrency:
+  group: cc-launcher-oss-retention
+  cancel-in-progress: false
+
 jobs:
   check-version:
     # Build chain runs for tag pushes / manual dispatch only. The `released`

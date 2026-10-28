@@ -1,0 +1,49 @@
+name: OSS release retention
+on:
+  workflow_run:
+    workflows: [Build and Release]
+    types: [completed]
+  schedule:
+    - cron: '35 20 * * *'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Delete obsolete CC Launcher packages after verifying the download feeds
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: cc-launcher-oss-retention
+  cancel-in-progress: false
+jobs:
+  retention:
+    if: github.repository == 'Earthling18/claude-code-launcher'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s scripts -p 'test_oss_retention.py' -v
+      - run: python -m pip install --disable-pip-version-check oss2==2.19.1
+      - name: Audit or enforce five-version retention
+        env:
+          OSS_ACCESS_KEY_ID: ${{ secrets.OSS_ACCESS_KEY_ID }}
+          OSS_ACCESS_KEY_SECRET: ${{ secrets.OSS_ACCESS_KEY_SECRET }}
+          OSS_BUCKET: ${{ secrets.OSS_BUCKET }}
+          OSS_ENDPOINT: ${{ secrets.OSS_ENDPOINT }}
+          APPLY: ${{ github.event_name != 'workflow_dispatch' || inputs.apply }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=()
+          if [ "$APPLY" = true ]; then args+=(--apply); fi
+          python scripts/oss_retention.py "${args[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: oss-retention-report
+          path: oss-retention-report.json
