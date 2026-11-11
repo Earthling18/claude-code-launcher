@@ -615,15 +615,15 @@ impl Launcher {
 
         let shim_missing = !check.status.success() || check.stdout.is_empty();
 
-        // A shim alone proves nothing: Codex can have no native dependency at
-        // all, and Claude can still contain its 500-byte text placeholder.
+        // Keep the missing-native/placeholder protection without running the
+        // entire dependency check on every launch. Install/update/reinstall
+        // already verify real execution; routine launch only inspects files.
         if !shim_missing {
-            let status = if cli_bin == "codex" {
-                super::dependency_checker::DependencyChecker::check_codex()
-            } else {
-                super::dependency_checker::DependencyChecker::check_claude()
-            };
-            if !status.installed || !status.meets_requirement || status.error.is_some() {
+            let paths = String::from_utf8_lossy(&check.stdout);
+            let entry = Path::new(paths.lines().next().unwrap_or_default().trim());
+            if let Some(status) = super::dependency_checker::DependencyChecker::validate_windows_cli_entry(
+                cli_bin, npm_package, entry,
+            ) {
                 let detail = status.error.unwrap_or_else(|| "命令无法运行".to_string());
                 Self::log_line(&format!("{} startup verification failed: {}", cli_bin, detail));
                 return Err(format!("{}启动验证失败：{}。请在依赖面板重装，并等待启动验证成功后再启动项目", cli_label, detail));

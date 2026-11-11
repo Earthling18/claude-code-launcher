@@ -89,6 +89,46 @@ pub struct DependencyStatus {
 
 pub struct DependencyChecker;
 
+#[cfg(all(test, windows))]
+mod launch_integrity_tests {
+    use super::DependencyChecker;
+
+    #[test]
+    fn launch_inspection_never_executes_cli_and_detects_changes_without_cache() {
+        let root = std::env::temp_dir().join(format!("ccl-launch-check-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let package = root.join("node_modules/@anthropic-ai/claude-code");
+        std::fs::create_dir_all(&package).unwrap();
+        let marker = root.join("executed");
+        let js = format!("require('fs').writeFileSync({}, 'unexpected'); process.exit(42);",
+            serde_json::to_string(&marker.to_string_lossy()).unwrap());
+        std::fs::write(package.join("cli.js"), js).unwrap();
+        std::fs::write(package.join("package.json"), r#"{"version":"1.0.0","bin":{"claude":"cli.js"}}"#).unwrap();
+        let entry = root.join("claude.cmd");
+        assert!(DependencyChecker::validate_windows_cli_entry("claude", "@anthropic-ai/claude-code", &entry).is_none());
+        assert!(!marker.exists(), "launch preflight must not execute the CLI");
+        std::fs::remove_file(package.join("cli.js")).unwrap();
+        assert!(DependencyChecker::validate_windows_cli_entry("claude", "@anthropic-ai/claude-code", &entry).is_some());
+        std::fs::write(package.join("package.json"), r#"{"version":"1.0.0","bin":{"claude":"claude.exe"}}"#).unwrap();
+        std::fs::write(package.join("claude.exe"), "placeholder").unwrap();
+        assert!(DependencyChecker::validate_windows_cli_entry("claude", "@anthropic-ai/claude-code", &entry).is_some());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn launch_inspection_rejects_missing_codex_native_component() {
+        let root = std::env::temp_dir().join(format!("ccl-codex-check-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()));
+        let package = root.join("node_modules/@openai/codex");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::write(package.join("package.json"), r#"{"version":"1.0.0","bin":{"codex":"codex.js"}}"#).unwrap();
+        std::fs::write(package.join("codex.js"), "process.exit(0);").unwrap();
+        let result = DependencyChecker::validate_windows_cli_entry("codex", "@openai/codex", &root.join("codex.cmd"));
+        assert!(result.unwrap().error.unwrap().contains("REPAIR_REQUIRED"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+}
+
 impl DependencyChecker {
     #[cfg(windows)]
     fn windows_npm_package_dir(package: &str) -> Option<std::path::PathBuf> {
@@ -217,6 +257,17 @@ impl DependencyChecker {
         if !output.status.success() { return None; }
         let paths = String::from_utf8_lossy(&output.stdout);
         let entry = std::path::PathBuf::from(paths.lines().next()?.trim());
+        Self::validate_windows_cli_entry(cli, package, &entry)
+    }
+
+    /// Launch already resolved PATH. Reuse that entry and inspect files only:
+    /// no second where.exe, npm root -g, or execution of the CLI just to open it.
+    #[cfg(windows)]
+    pub(crate) fn validate_windows_cli_entry(
+        cli: &str,
+        package: &str,
+        entry: &std::path::Path,
+    ) -> Option<DependencyStatus> {
         if entry.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("exe")) {
             return (!Self::is_valid_windows_exe(&entry)).then(||
                 Self::broken_cli_status(cli, &format!("原生程序无效: {}", entry.display())));
@@ -402,8 +453,6 @@ impl DependencyChecker {
             }
         }
 
-        #[cfg(windows)]
-        let package_present = Self::npm_package_present("@anthropic-ai/claude-code");
         // 跨平台检测 claude
         #[cfg(windows)]
         let output = {
@@ -465,7 +514,7 @@ impl DependencyChecker {
             }
             _ => {
                 #[cfg(windows)]
-                if package_present {
+                if Self::npm_package_present("@anthropic-ai/claude-code") {
                     return Self::broken_cli_status(
                         "Claude Code",
                         "命令文件或 npm shim 异常",
@@ -500,8 +549,6 @@ impl DependencyChecker {
             }
         }
 
-        #[cfg(windows)]
-        let package_present = Self::npm_package_present("@openai/codex");
         #[cfg(windows)]
         let output = {
             let mut cmd = Command::new("cmd");
@@ -554,7 +601,7 @@ impl DependencyChecker {
             }
             _ => {
                 #[cfg(windows)]
-                if package_present {
+                if Self::npm_package_present("@openai/codex") {
                     return Self::broken_cli_status(
                         "Codex",
                         "命令文件或 npm shim 异常",
