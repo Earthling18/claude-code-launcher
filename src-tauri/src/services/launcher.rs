@@ -492,6 +492,7 @@ impl Launcher {
     /// can leave e.g. claude-code's ~250MB bin/claude.exe half-written; the
     /// shim still resolves, so `where.exe` alone cannot catch this.
     #[cfg(windows)]
+    #[cfg(test)]
     fn find_corrupted_package_exe(where_stdout: &[u8], npm_package: &str) -> Option<PathBuf> {
         use super::installer::Installer;
         let shim_lines = String::from_utf8_lossy(where_stdout);
@@ -614,26 +615,19 @@ impl Launcher {
 
         let shim_missing = !check.status.success() || check.stdout.is_empty();
 
-        // Even when the shim resolves, an interrupted update can leave the
-        // package's native binary truncated (e.g. claude-code's ~250MB
-        // bin/claude.exe) — Windows then fails it with the misleading
-        // "不支持的 16 位应用程序" dialog. Catch that here too.
-        let corrupted_exe = if shim_missing {
-            None
-        } else {
-            Self::find_corrupted_package_exe(&check.stdout, npm_package)
-        };
-
-        if let Some(ref bad) = corrupted_exe {
-            Self::log_line(&format!(
-                "{} native exe corrupted: {}",
-                cli_bin,
-                bad.display()
-            ));
-            return Err(format!(
-                "{}安装已损坏，请在依赖面板点击“重装”后再启动",
-                cli_label
-            ));
+        // A shim alone proves nothing: Codex can have no native dependency at
+        // all, and Claude can still contain its 500-byte text placeholder.
+        if !shim_missing {
+            let status = if cli_bin == "codex" {
+                super::dependency_checker::DependencyChecker::check_codex()
+            } else {
+                super::dependency_checker::DependencyChecker::check_claude()
+            };
+            if !status.installed || !status.meets_requirement || status.error.is_some() {
+                let detail = status.error.unwrap_or_else(|| "命令无法运行".to_string());
+                Self::log_line(&format!("{} startup verification failed: {}", cli_bin, detail));
+                return Err(format!("{}启动验证失败：{}。请在依赖面板重装，并等待启动验证成功后再启动项目", cli_label, detail));
+            }
         }
 
         if shim_missing {
@@ -656,19 +650,14 @@ impl Launcher {
                 "{} package absent, attempting first install...",
                 cli_bin
             ));
-            let repair = Command::new("cmd.exe")
-                .args(&["/c", "npm", "install", "-g", npm_package])
-                .creation_flags(CREATE_NO_WINDOW)
-                .output();
-
-            match &repair {
-                Ok(out) => Self::log_line(&format!(
-                    "repair exit={:?} stdout={}B stderr={}B",
-                    out.status.code(),
-                    out.stdout.len(),
-                    out.stderr.len()
-                )),
-                Err(e) => Self::log_line(&format!("repair failed to run: {}", e)),
+            let repair = if cli_bin == "codex" {
+                super::installer::Installer::install_codex()
+            } else {
+                super::installer::Installer::install_claude()
+            };
+            if let Err(error) = repair {
+                Self::log_line(&format!("first install failed: {}", error));
+                return Err(error);
             }
 
             // Refresh PATH again after repair

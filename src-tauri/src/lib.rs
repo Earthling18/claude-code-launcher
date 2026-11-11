@@ -230,6 +230,8 @@ pub fn run() {
             commands::download_installer,
             // Global presets commands
             commands::get_global_presets,
+            commands::can_apply_default_model,
+            commands::apply_default_model,
             commands::create_proxy_preset,
             commands::update_proxy_preset,
             commands::delete_proxy_preset,

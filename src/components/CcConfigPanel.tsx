@@ -176,7 +176,8 @@ export const CcConfigPanel: React.FC<CcConfigPanelProps> = ({ projects, platform
     setReinstallingCc(true);
     try {
       await api.reinstallClaude();
-      toast.info('已打开重装窗口，请等待终端执行完毕');
+      if (platform === 'windows') toast.success('Claude Code 重装及启动验证成功');
+      else toast.info('已打开重装窗口，请等待终端执行完毕');
     } catch (err: any) {
       toast.error(`重装失败: ${err}`);
     } finally {

@@ -209,43 +209,41 @@ impl DependencyChecker {
     }
 
     #[cfg(windows)]
-    fn validate_claude_package() -> Option<DependencyStatus> {
-        let package_dir = Self::windows_npm_package_dir("@anthropic-ai/claude-code")?;
-        let exe = package_dir.join("bin").join("claude.exe");
-        if Self::is_valid_windows_exe(&exe) {
-            None
-        } else {
-            Some(Self::broken_cli_status(
-                "Claude Code",
-                "Windows 原生组件缺失或损坏",
-            ))
+    fn validate_windows_cli_package(cli: &str, package: &str) -> Option<DependencyStatus> {
+        // Inspect the installation selected by PATH, not a different npm prefix.
+        let mut locate = Command::new("where.exe");
+        locate.arg(cli);
+        let output = hide_window(&mut locate).output().ok()?;
+        if !output.status.success() { return None; }
+        let paths = String::from_utf8_lossy(&output.stdout);
+        let entry = std::path::PathBuf::from(paths.lines().next()?.trim());
+        if entry.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("exe")) {
+            return (!Self::is_valid_windows_exe(&entry)).then(||
+                Self::broken_cli_status(cli, &format!("原生程序无效: {}", entry.display())));
+        }
+        let package_dir = entry.parent()?.join("node_modules").join(package);
+        if !package_dir.is_dir() { return None; }
+        // Resolve native dependencies just as Node does (nested/hoisted/legacy),
+        // using Node's architecture rather than the launcher's compile target.
+        let script = format!("{}\ntry {{ inspectPackage(process.argv[1], process.argv[2]); }} catch (e) {{ console.error(e.message); process.exitCode = 1; }}",
+            include_str!("windows_cli_probe.cjs"));
+        let mut cmd = Command::new("node");
+        cmd.arg("-e").arg(script).arg(&package_dir).arg(cli);
+        match hide_window(&mut cmd).output() {
+            Ok(out) if out.status.success() => None,
+            Ok(out) => Some(Self::broken_cli_status(cli, &String::from_utf8_lossy(&out.stderr))),
+            Err(e) => Some(Self::broken_cli_status(cli, &format!("无法验证原生组件: {}", e))),
         }
     }
 
     #[cfg(windows)]
+    fn validate_claude_package() -> Option<DependencyStatus> {
+        Self::validate_windows_cli_package("claude", "@anthropic-ai/claude-code")
+    }
+
+    #[cfg(windows)]
     fn validate_codex_package() -> Option<DependencyStatus> {
-        let package_dir = Self::windows_npm_package_dir("@openai/codex")?;
-        let (platform_package, target_triple) = if cfg!(target_arch = "aarch64") {
-            ("codex-win32-arm64", "aarch64-pc-windows-msvc")
-        } else {
-            ("codex-win32-x64", "x86_64-pc-windows-msvc")
-        };
-        let exe = package_dir
-            .join("node_modules")
-            .join("@openai")
-            .join(platform_package)
-            .join("vendor")
-            .join(target_triple)
-            .join("bin")
-            .join("codex.exe");
-        if Self::is_valid_windows_exe(&exe) {
-            None
-        } else {
-            Some(Self::broken_cli_status(
-                "Codex",
-                "Windows 原生组件缺失或损坏",
-            ))
-        }
+        Self::validate_windows_cli_package("codex", "@openai/codex")
     }
 
     pub fn check_nodejs() -> DependencyStatus {

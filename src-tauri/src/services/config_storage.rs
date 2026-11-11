@@ -165,6 +165,7 @@ impl ConfigStorage {
 
     /// Load v2 config, migrating from v1 if necessary
     pub fn load_config_v2() -> Result<AppConfigV2, String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let config_path = Self::get_config_path()?;
 
         if !config_path.exists() {
@@ -244,6 +245,7 @@ impl ConfigStorage {
 
     /// Save v2 config
     pub fn save_config_v2(config: &AppConfigV2) -> Result<(), String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let config_path = Self::get_config_path()?;
 
         // Create a copy with encoded tokens
@@ -255,19 +257,21 @@ impl ConfigStorage {
         let json_string = serde_json::to_string_pretty(&config_to_save)
             .map_err(|e| format!("无法序列化配置: {}", e))?;
 
-        fs::write(&config_path, json_string).map_err(|e| format!("无法写入配置文件: {}", e))?;
+        crate::services::configuration_guard::atomic_write(&config_path,json_string.as_bytes())?;
 
         Ok(())
     }
 
     /// Get all projects
     pub fn get_projects() -> Result<Vec<Project>, String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let config = Self::load_config_v2()?;
         Ok(config.projects)
     }
 
     /// Get a single project by ID
     pub fn get_project(id: &str) -> Result<Project, String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let config = Self::load_config_v2()?;
         config
             .projects
@@ -278,6 +282,7 @@ impl ConfigStorage {
 
     /// Create a new project
     pub fn create_project(input: CreateProjectInput) -> Result<Project, String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut config = Self::load_config_v2()?;
 
         let max_order = config
@@ -304,6 +309,7 @@ impl ConfigStorage {
 
     /// Update an existing project
     pub fn update_project(id: &str, updates: UpdateProjectInput) -> Result<Project, String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut config = Self::load_config_v2()?;
 
         let max_order = config
@@ -358,6 +364,7 @@ impl ConfigStorage {
 
     /// Delete a project (cannot delete default project)
     pub fn delete_project(id: &str) -> Result<(), String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut config = Self::load_config_v2()?;
 
         let project = config
@@ -378,6 +385,7 @@ impl ConfigStorage {
 
     /// Update project's last launched timestamp
     pub fn update_project_launched(id: &str) -> Result<(), String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut config = Self::load_config_v2()?;
 
         if let Some(project) = config.projects.iter_mut().find(|p| p.id == id) {
@@ -397,6 +405,7 @@ impl ConfigStorage {
     /// Default project participates like any other project — only pinned ones are excluded
     /// since they sort by pinned_at instead.
     pub fn update_projects_order(orders: Vec<ProjectOrderItem>) -> Result<(), String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut config = Self::load_config_v2()?;
 
         for order_item in orders {
@@ -413,6 +422,7 @@ impl ConfigStorage {
 
     /// Update pinned_at for pinned projects (batch)
     pub fn update_pinned_order(orders: Vec<PinnedOrderItem>) -> Result<(), String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut config = Self::load_config_v2()?;
 
         for order_item in orders {
@@ -429,6 +439,7 @@ impl ConfigStorage {
 
     /// Toggle project pinned status
     pub fn toggle_project_pinned(id: &str, is_pinned: bool) -> Result<Project, String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let updates = UpdateProjectInput {
             name: None,
             working_directory: None,
@@ -440,12 +451,14 @@ impl ConfigStorage {
 
     /// Get onboarding status
     pub fn get_onboarding_status() -> Result<bool, String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let config = Self::load_config_v2()?;
         Ok(config.has_seen_onboarding)
     }
 
     /// Set onboarding as completed
     pub fn set_onboarding_completed() -> Result<(), String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut config = Self::load_config_v2()?;
         config.has_seen_onboarding = true;
         Self::save_config_v2(&config)
@@ -454,6 +467,7 @@ impl ConfigStorage {
     // ============ Legacy v1 API for backwards compatibility ============
 
     pub fn save_config(config: &AppConfig) -> Result<(), String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut v2_config = Self::load_config_v2().unwrap_or_default();
 
         if let Some(default_project) = v2_config.projects.iter_mut().find(|p| p.is_default) {
@@ -476,6 +490,7 @@ impl ConfigStorage {
     }
 
     pub fn load_config() -> Result<AppConfig, String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let config = Self::load_config_v2()?;
 
         let default_project = config

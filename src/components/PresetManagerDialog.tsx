@@ -17,6 +17,7 @@ interface PresetManagerDialogProps {
   kind: Kind;
   onClose: () => void;
   onChanged?: (newId?: string, supportedFormats?: ModelApiFormat[]) => void;
+  onFirstModelCreated?: (model: ModelPreset, preferredFormat: ModelApiFormat) => void;
   showTabs?: boolean;
   modelApiFormat?: ModelApiFormat;
 }
@@ -53,6 +54,7 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
   kind: initialKind,
   onClose,
   onChanged,
+  onFirstModelCreated,
   showTabs = false,
 }) => {
   const [kind, setKind] = useState<Kind>(initialKind);
@@ -66,6 +68,8 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
   const [activeEndpoint, setActiveEndpoint] = useState<ModelApiFormat>('anthropic_messages');
   const [pendingDelete, setPendingDelete] = useState<{ id: string; refs: number; name: string } | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
 
   const revealDraft = () => {
     requestAnimationFrame(() => contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' }));
@@ -155,10 +159,13 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
   };
 
   const save = async () => {
-    if (!draft) return;
+    if (!draft || savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     try {
       setError(null);
       let newId: string;
+      let firstModel: ModelPreset | undefined;
       if (kind === 'proxy') {
         const value = draft as ProxyDraft;
         if (!value.name.trim() || !/^https?:\/\//.test(value.url.trim())) {
@@ -191,13 +198,18 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
           ? await presetsApi.updateModel(value.id, name, value.model.trim(), claudeBaseUrl, codexBaseUrl, value.token)
           : await presetsApi.createModel(name, value.model.trim(), claudeBaseUrl, codexBaseUrl, value.token);
         newId = saved.id;
+        if (!value.id && models.length === 0) firstModel = saved;
       }
       setDraft(null);
       await loadAll();
       onChanged?.(newId, kind === 'model' ? configuredFormats(draft as ModelDraft) : undefined);
       toast.success(kind === 'proxy' ? '代理配置已保存' : '模型配置已保存');
+      if (firstModel) onFirstModelCreated?.(firstModel, activeEndpoint);
     } catch (reason) {
       setError(String(reason));
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
   };
 
@@ -324,7 +336,7 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
                   </>
                 )}
                 {error && <p className="text-[11px] text-error">{error}</p>}
-                <div className="flex justify-end gap-2 pt-1"><button type="button" onClick={() => setDraft(null)} className="btn btn-ghost btn-sm">取消</button><button type="button" onClick={save} className="btn btn-primary btn-sm">保存</button></div>
+                <div className="flex justify-end gap-2 pt-1"><button type="button" disabled={saving} onClick={() => setDraft(null)} className="btn btn-ghost btn-sm">取消</button><button type="button" disabled={saving} onClick={save} className="btn btn-primary btn-sm">{saving ? '保存中…' : '保存'}</button></div>
               </div>
             )}
 

@@ -111,6 +111,7 @@ impl PresetsStorage {
     }
 
     pub fn save(presets: &GlobalPresets) -> Result<(), String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let path = Self::get_presets_path()?;
         let mut stored = StoredPresets {
             proxies: presets.proxies.clone(),
@@ -125,7 +126,7 @@ impl PresetsStorage {
         }
         let json =
             serde_json::to_string_pretty(&stored).map_err(|e| format!("无法序列化预设: {}", e))?;
-        fs::write(&path, json).map_err(|e| format!("无法写入预设文件: {}", e))?;
+        crate::services::configuration_guard::atomic_write(&path,json.as_bytes())?;
         Ok(())
     }
 
@@ -138,6 +139,7 @@ impl PresetsStorage {
     // ------------- CRUD: ProxyPreset -------------
 
     pub fn create_proxy(name: String, url: String) -> Result<ProxyPreset, String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut presets = Self::load();
         let preset = ProxyPreset {
             id: new_preset_id(),
@@ -150,6 +152,7 @@ impl PresetsStorage {
     }
 
     pub fn update_proxy(id: &str, name: String, url: String) -> Result<ProxyPreset, String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut presets = Self::load();
         let names: Vec<String> = presets
             .proxies
@@ -171,6 +174,7 @@ impl PresetsStorage {
 
     /// Delete proxy preset and clear references on all projects.
     pub fn delete_proxy(id: &str) -> Result<(), String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut presets = Self::load();
         let before = presets.proxies.len();
         presets.proxies.retain(|p| p.id != id);
@@ -191,6 +195,7 @@ impl PresetsStorage {
         codex_base_url: String,
         token: String,
     ) -> Result<ModelPreset, String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut presets = Self::load();
         let preset = ModelPreset {
             id: new_preset_id(),
@@ -215,6 +220,7 @@ impl PresetsStorage {
         codex_base_url: String,
         token: String,
     ) -> Result<ModelPreset, String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut presets = Self::load();
         let names: Vec<String> = presets
             .models
@@ -240,6 +246,7 @@ impl PresetsStorage {
     }
 
     pub fn delete_model(id: &str) -> Result<(), String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut presets = Self::load();
         let before = presets.models.len();
         presets.models.retain(|p| p.id != id);
@@ -258,6 +265,7 @@ impl PresetsStorage {
     }
 
     pub fn set_last_used(config: ProjectConfig) -> Result<(), String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut presets = Self::load();
         presets.last_used_config = Some(config);
         Self::save(&presets)
@@ -535,6 +543,7 @@ pub fn migrate_legacy_to_presets(projects: &mut [Project]) -> Option<GlobalPrese
 /// and Codex URLs. References keep their original IDs. Complementary presets
 /// created by v1.2.7 are merged when their shared model and token are equal.
 pub fn migrate_model_protocols(projects: &mut [Project]) -> Result<bool, String> {
+        let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
     let mut presets = PresetsStorage::load();
     let changed = migrate_model_protocols_in_memory(&mut presets, projects);
     if changed {

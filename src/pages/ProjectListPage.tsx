@@ -27,10 +27,11 @@ import { LocalSetupWizard } from '../components/LocalSetupWizard';
 import { ProjectCard } from '../components/ProjectCard';
 import { SortableProjectCard } from '../components/SortableProjectCard';
 import { PresetManagerDialog } from '../components/PresetManagerDialog';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { OnboardingOverlay, type OnboardingStep } from '../components/OnboardingOverlay';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { Project } from '../types/project';
-import type { GlobalPresets } from '../types/presets';
+import type { GlobalPresets, ModelPreset, ModelApiFormat } from '../types/presets';
 
 // Sort projects:
 //   1. Pinned projects first (sorted by pinned_at desc — newest first)
@@ -55,9 +56,38 @@ export const ProjectListPage: React.FC = () => {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showPresets, setShowPresets] = useState(false);
   const [presets, setPresets] = useState<GlobalPresets | null>(null);
+  const [defaultModelPrompt, setDefaultModelPrompt] = useState<{ model: ModelPreset; cli: 'claude' | 'codex' } | null>(null);
+  const [applyingDefaultModel, setApplyingDefaultModel] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollRestoredRef = useRef(false);
+  const projectWritePending = useRef(false);
+
+  // The dashboard edits the same repository. Refresh without resetting scroll/loading.
+  useEffect(() => {
+    let disposed = false;
+    let reading = false;
+    const refreshSharedProjects = async () => {
+      if (reading || activeId || projectWritePending.current || document.hidden) return;
+      reading = true;
+      try {
+        const data = await projectApi.getAll();
+        if (!disposed && !projectWritePending.current) {
+          setProjects(previous => JSON.stringify(previous) === JSON.stringify(data) ? previous : data);
+        }
+      } catch (_) { /* Keep the last usable list during temporary file contention. */ }
+      finally { reading = false; }
+    };
+    const timer = window.setInterval(refreshSharedProjects, 5000);
+    window.addEventListener('focus', refreshSharedProjects);
+    document.addEventListener('visibilitychange', refreshSharedProjects);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refreshSharedProjects);
+      document.removeEventListener('visibilitychange', refreshSharedProjects);
+    };
+  }, [activeId]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -177,6 +207,35 @@ export const ProjectListPage: React.FC = () => {
 
   const reloadPresets = () => presetsApi.getAll().then(setPresets).catch(() => {});
 
+  const offerDefaultModel = async (model: ModelPreset, preferredFormat: ModelApiFormat) => {
+    try {
+      if (!await presetsApi.canApplyDefaultModel()) return;
+      const cli = model.codex_base_url && (!model.claude_base_url || preferredFormat === 'openai_responses') ? 'codex' : 'claude';
+      setDefaultModelPrompt({ model, cli });
+    } catch (reason) {
+      toast.info(`模型已保存，可打开默认项目配置手动选择。检查默认项目失败：${reason}`);
+    }
+  };
+
+  const applyDefaultModel = async () => {
+    if (!defaultModelPrompt || projectWritePending.current) return;
+    projectWritePending.current = true;
+    setApplyingDefaultModel(true);
+    try {
+      const updated = await presetsApi.applyDefaultModel(defaultModelPrompt.model.id, defaultModelPrompt.cli);
+      setProjects(current => current.map(project => project.id === updated.id ? updated : project));
+      setDefaultModelPrompt(null);
+      setShowPresets(false);
+      toast.success(`已应用到默认项目，启动方式：自定义 ${updated.config.custom_cli === 'codex' ? 'Codex' : 'Claude'}`);
+    } catch (reason) {
+      setDefaultModelPrompt(null);
+      toast.error(String(reason));
+    } finally {
+      projectWritePending.current = false;
+      setApplyingDefaultModel(false);
+    }
+  };
+
   const loadPlatform = async () => {
     try {
       const p = await api.getPlatform();
@@ -281,12 +340,13 @@ export const ProjectListPage: React.FC = () => {
       });
 
       // Persist
+      projectWritePending.current = true;
       try {
         await projectApi.updatePinnedOrder(orders);
       } catch (err) {
         console.error('Failed to update pinned order:', err);
         loadProjects(); // Reload on error
-      }
+      } finally { projectWritePending.current = false; }
     } else {
       // Reorder normal projects
       const oldIndex = normalProjects.findIndex(p => p.id === active.id);
@@ -318,12 +378,13 @@ export const ProjectListPage: React.FC = () => {
       });
 
       // Persist
+      projectWritePending.current = true;
       try {
         await projectApi.updateProjectsOrder(orders);
       } catch (err) {
         console.error('Failed to update project order:', err);
         loadProjects(); // Reload on error
-      }
+      } finally { projectWritePending.current = false; }
     }
   };
 
@@ -383,7 +444,33 @@ export const ProjectListPage: React.FC = () => {
         kind="model"
         showTabs
         onClose={() => { setShowPresets(false); reloadPresets(); }}
+        onChanged={() => { reloadPresets(); }}
+        onFirstModelCreated={offerDefaultModel}
       />
+
+      <ConfirmDialog
+        isOpen={!!defaultModelPrompt}
+        title="应用到默认项目？"
+        message={`模型配置已保存，默认项目还没有配置。是否将“${defaultModelPrompt?.model.name ?? ''}”应用到默认项目，并切换为自定义 ${defaultModelPrompt?.cli === 'codex' ? 'Codex' : 'Claude'}？\n暂不应用也可以，之后可打开默认项目配置自行选择。`}
+        confirmLabel={applyingDefaultModel ? '应用中…' : '应用配置'}
+        cancelLabel="暂不应用"
+        busy={applyingDefaultModel}
+        onConfirm={applyDefaultModel}
+        onCancel={() => setDefaultModelPrompt(null)}
+      >
+        {defaultModelPrompt?.model.claude_base_url && defaultModelPrompt.model.codex_base_url && (
+          <fieldset disabled={applyingDefaultModel} className="mb-5 flex gap-4 text-[12.5px] text-text-secondary">
+            <legend className="mb-2">此配置支持两种启动方式，请选择：</legend>
+            {(['claude', 'codex'] as const).map(cli => (
+              <label key={cli} className="flex items-center gap-2 cursor-pointer">
+                <input type="radio" name="default-model-cli" value={cli} checked={defaultModelPrompt.cli === cli}
+                  onChange={() => setDefaultModelPrompt(current => current ? { ...current, cli } : null)} />
+                {cli === 'claude' ? 'Claude' : 'Codex'}
+              </label>
+            ))}
+          </fieldset>
+        )}
+      </ConfirmDialog>
 
       <OnboardingOverlay
         isOpen={showOnboarding}
@@ -423,6 +510,7 @@ export const ProjectListPage: React.FC = () => {
                     collisionDetection={closestCenter}
                     onDragStart={handleDragStart}
                     onDragEnd={handleDragEnd}
+                    onDragCancel={() => setActiveId(null)}
                   >
                     {/* Pinned section */}
                     {pinnedProjects.length > 0 && (

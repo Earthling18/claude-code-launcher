@@ -10,6 +10,8 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   onCancel: () => void;
   variant?: 'danger' | 'default';
+  children?: React.ReactNode;
+  busy?: boolean;
 }
 
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
@@ -21,6 +23,8 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   onConfirm,
   onCancel,
   variant = 'default',
+  children,
+  busy = false,
 }) => {
   return (
     <AnimatePresence>
@@ -31,7 +35,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.15 }}
-          onClick={onCancel}
+          onClick={busy ? undefined : onCancel}
         >
           <motion.div
             className="modal-panel max-w-md w-full mx-4 p-5"
@@ -54,12 +58,14 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
               <h3 className="text-[14px] font-semibold text-text-primary mt-0.5">{title}</h3>
             </div>
             <p className="text-[12.5px] text-text-secondary mb-5 whitespace-pre-line leading-relaxed">{message}</p>
+            {children}
             <div className="flex justify-end gap-2">
-              <button type="button" onClick={onCancel} className="btn btn-ghost">
+              <button type="button" disabled={busy} onClick={onCancel} className="btn btn-ghost">
                 {cancelLabel}
               </button>
               <button
                 type="button"
+                disabled={busy}
                 onClick={onConfirm}
                 className={variant === 'danger' ? 'btn btn-danger' : 'btn btn-primary'}
                 style={variant === 'danger' ? { background: 'var(--error)', borderColor: 'var(--error)', color: '#1A0606' } : undefined}

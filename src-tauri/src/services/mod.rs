@@ -15,3 +15,6 @@ pub use settings_manager::SettingsManager;
 pub use config_storage::{ConfigStorage, AppConfig};
 pub use presets_storage::PresetsStorage;
 pub use cc_config_checker::CcConfigChecker;
+
+pub mod configuration_guard;
+pub mod default_model;

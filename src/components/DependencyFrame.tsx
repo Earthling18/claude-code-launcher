@@ -35,11 +35,8 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
   const [expanded, setExpanded] = useState(false);
   const [showCcConfig, setShowCcConfig] = useState(false);
   const hasChecked = useRef(false);
-  // One auto-update attempt per dep per session; a failed attempt leaves the
-  // "有更新可用" badge for the user to handle manually.
-  const autoUpdateAttempted = useRef<Set<string>>(new Set());
-  // Repeated checks may refresh status, but only one auto-update queue can run.
-  const autoUpdateInFlight = useRef(false);
+  const manualActionInFlight = useRef(false);
+  const skillAutoUpdateAttempted = useRef(false);
   // Concurrency guards: withTimeout (Promise.race) unblocks the UI at 20s but
   // does NOT cancel the underlying Tauri invoke — the backend keeps running.
   // checkInFlight stops a second round from stacking on top of a running one;
@@ -90,6 +87,8 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
         // Cache from a plain check has no update info — refresh it silently
         if (!c.__withUpdates) {
           checkWithUpdates(true);
+        } else {
+          autoUpdateSkillMarket(c.skill_market);
         }
         return;
       }
@@ -98,6 +97,27 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
     // Fast check first for immediate UI, then silently fetch update info
     runParallelCheck().then(() => checkWithUpdates(true));
   }, []);
+
+  // Only the skill marketplace may update automatically. Never route CLI
+  // checks through the installer, including checks restored from the cache.
+  const autoUpdateSkillMarket = async (status: DependencyStatus | null) => {
+    if (!status?.installed || !status.update_available || skillAutoUpdateAttempted.current || manualActionInFlight.current) return;
+    skillAutoUpdateAttempted.current = true;
+    manualActionInFlight.current = true;
+    setDeps(prev => ({ ...prev, skill_market: { ...prev.skill_market, loading: true } }));
+    try {
+      await api.installSkillMarket();
+      const updated = await withTimeout(api.checkSkillMarket());
+      setDeps(prev => ({ ...prev, skill_market: { status: updated ?? prev.skill_market.status, loading: false } }));
+      if (updated?.installed) toast.success('技能市场已自动更新');
+    } catch (reason) {
+      console.warn('技能市场自动更新失败，可稍后手动重试:', reason);
+      setDeps(prev => ({ ...prev, skill_market: { ...prev.skill_market, loading: false } }));
+    } finally {
+      manualActionInFlight.current = false;
+      sessionStorage.removeItem('dependencyStatus');
+    }
+  };
 
   // Each check updates its own row as soon as it finishes — a slow check
   // (e.g. a slow CLI version probe) must not hide
@@ -122,7 +142,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
         if (checkEpoch.current !== epoch) return; // newer round started — drop stale result
         // null = no result this round; keep any prior status rather than
         // regressing the row back to "checking…".
-        setDeps(prev => ({ ...prev, [key]: { status: status ?? prev[key].status, loading: false } }));
+        setDeps(prev => prev[key].loading ? prev : ({ ...prev, [key]: { status: status ?? prev[key].status, loading: false } }));
       }));
 
       // Auto-expand only if a *required* dep is missing. skill-market is best-effort
@@ -169,14 +189,13 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
         { key: 'codex', fn: api.checkCodexWithUpdate },
         { key: 'skill_market', fn: api.checkSkillMarketWithUpdate },
       ];
-      const results: Record<string, DependencyStatus | null> = {};
       await Promise.all(checks.map(async ({ key, fn }) => {
         const status = await withTimeout(fn()).catch(() => null);
-        results[key] = status;
         if (checkEpoch.current !== epoch) return; // newer round started — drop stale result
         // null = couldn't fetch update info (timeout/offline); keep the prior
         // local status (no badge) — treat as "no new version", never error or stick.
-        setDeps(prev => ({ ...prev, [key]: { status: status ?? prev[key].status, loading: false } }));
+        setDeps(prev => prev[key].loading ? prev : ({ ...prev, [key]: { status: status ?? prev[key].status, loading: false } }));
+        if (key === 'skill_market') autoUpdateSkillMarket(status);
       }));
 
       // Cache the merged snapshot (reading latest state inside the updater)
@@ -192,8 +211,7 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
         return prev;
       });
 
-      // Fire-and-forget: auto-update what we just detected (claude/codex/skill-market)
-      autoUpdateDeps(results);
+      // CLI updates always require an explicit action button.
     } catch (error) {
       console.error('检测失败:', error);
     } finally {
@@ -205,73 +223,13 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
     }
   };
 
-  const updateDepCache = (key: string, status: DependencyStatus) => {
-    try {
-      const cached = sessionStorage.getItem('dependencyStatus');
-      if (!cached) return;
-      const c = JSON.parse(cached);
-      c[key === 'git' ? 'gitbash' : key] = status;
-      sessionStorage.setItem('dependencyStatus', JSON.stringify(c));
-    } catch (_) {}
-  };
-
-  // Auto-update claude/codex/skill-market in the background when a new version
-  // is detected. Node.js/Git stay manual — they run heavyweight system installers.
-  // Success → toast; failure → keep the update badge so the user can do it manually.
-  const autoUpdateDeps = async (results: Record<string, DependencyStatus | null>) => {
-    if (autoUpdateInFlight.current) return;
-
-    const targets: Array<{ key: string; updateFn: () => Promise<unknown> }> = [
-      { key: 'claude', updateFn: api.updateClaudeSilent },
-      { key: 'codex', updateFn: api.updateCodexSilent },
-      { key: 'skill_market', updateFn: api.installSkillMarket },
-    ];
-    const pendingTargets = targets.filter(({ key }) => {
-      const st = results[key];
-      return !!st?.installed
-        && st.update_available
-        && !autoUpdateAttempted.current.has(key);
-    });
-    if (pendingTargets.length === 0) return;
-
-    // Global npm installs share the same prefix and temporary retirement
-    // directories. Run them sequentially to avoid EBUSY/race failures.
-    autoUpdateInFlight.current = true;
-    try {
-      for (const { key, updateFn } of pendingTargets) {
-        const st = results[key]!;
-        autoUpdateAttempted.current.add(key);
-
-        setDeps(prev => ({ ...prev, [key]: { ...prev[key], loading: true } }));
-        try {
-          await updateFn();
-          const fresh = await depConfig[key].checkFn().catch(() => null);
-          // skill-market has no version number; npm deps must actually reach latest
-          const updated = key === 'skill_market'
-            ? !!fresh?.installed
-            : !!(fresh?.version && st.latest_version && fresh.version === st.latest_version);
-          if (updated) {
-            const finalStatus = fresh ?? { ...st, update_available: false };
-            setDeps(prev => ({ ...prev, [key]: { status: finalStatus, loading: false } }));
-            updateDepCache(key, finalStatus);
-            toast.success(
-              key === 'skill_market'
-                ? `${depConfig[key].label} 已自动更新`
-                : `${depConfig[key].label} 已自动更新到 v${st.latest_version}`
-            );
-            continue;
-          }
-        } catch (_) {
-          // fall through: keep the badge, let the user update manually
-        }
-        setDeps(prev => ({ ...prev, [key]: { status: st, loading: false } }));
-      }
-    } finally {
-      autoUpdateInFlight.current = false;
-    }
-  };
-
   const handleAction = async (key: string, action: 'install' | 'update' | 'reinstall') => {
+    if (manualActionInFlight.current) {
+      toast.info('已有安装或更新正在执行，请等待完成后再操作');
+      return;
+    }
+    manualActionInFlight.current = true;
+    sessionStorage.removeItem('dependencyStatus');
     const config = depConfig[key];
     setDeps(prev => ({ ...prev, [key]: { ...prev[key], loading: true } }));
     try {
@@ -283,18 +241,27 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
         if (key === 'claude') await api.reinstallClaude();
         else if (key === 'codex') await api.reinstallCodex();
       }
-      // Re-check after action
-      setTimeout(async () => {
-        try {
-          const result = await config.checkFn();
-          setDeps(prev => ({ ...prev, [key]: { status: result, loading: false } }));
-        } catch {
-          setDeps(prev => ({ ...prev, [key]: { ...prev[key], loading: false } }));
+      // Windows CLI actions now wait for the terminal and actual startup check.
+      // Other platform/system installers still only open a terminal.
+      const verifiedCli = platform === 'windows' && (key === 'claude' || key === 'codex');
+      if (!verifiedCli && key !== 'skill_market') toast.info('已打开安装窗口，完成后请点击重新检测');
+      const result = await withTimeout(config.checkFn());
+      setDeps(prev => ({ ...prev, [key]: { status: result ?? prev[key].status, loading: false } }));
+      if (verifiedCli) {
+        if (result?.installed && result.meets_requirement && !result.error) {
+          toast.success(`${config.label} 安装及启动验证成功`);
+        } else {
+          toast.error(`${config.label} 尚未通过启动验证，请查看安装日志`);
         }
-      }, 2000);
+      } else if (key === 'skill_market' && result?.installed) {
+        toast.success('技能市场已安装或更新');
+      }
     } catch (error: any) {
       toast.error(`操作失败: ${error}`);
       setDeps(prev => ({ ...prev, [key]: { ...prev[key], loading: false } }));
+    } finally {
+      manualActionInFlight.current = false;
+      sessionStorage.removeItem('dependencyStatus');
     }
   };
 

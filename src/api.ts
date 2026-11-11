@@ -126,6 +126,8 @@ export const systemApi = {
 
 // Global presets API (proxy + model)
 export const presetsApi = {
+  canApplyDefaultModel: () => invoke<boolean>('can_apply_default_model'),
+  applyDefaultModel: (presetId: string, cli: 'claude' | 'codex') => invoke<Project>('apply_default_model', { presetId, cli }),
   getAll: () => invoke<GlobalPresets>('get_global_presets'),
 
   createProxy: (name: string, url: string) =>

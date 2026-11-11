@@ -57,12 +57,14 @@ pub async fn update_nodejs() -> Result<(), String> {
 
 #[tauri::command]
 pub async fn install_claude() -> Result<(), String> {
-    Installer::install_claude()
+    tokio::task::spawn_blocking(Installer::install_claude)
+        .await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn update_claude() -> Result<(), String> {
-    Installer::update_claude()
+    tokio::task::spawn_blocking(Installer::update_claude)
+        .await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -87,22 +89,26 @@ pub async fn check_codex_with_update() -> Result<dependency_checker::DependencyS
 
 #[tauri::command]
 pub async fn install_codex() -> Result<(), String> {
-    Installer::install_codex()
+    tokio::task::spawn_blocking(Installer::install_codex)
+        .await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn update_codex() -> Result<(), String> {
-    Installer::update_codex()
+    tokio::task::spawn_blocking(Installer::update_codex)
+        .await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn reinstall_claude() -> Result<(), String> {
-    Installer::reinstall_claude()
+    tokio::task::spawn_blocking(Installer::reinstall_claude)
+        .await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn reinstall_codex() -> Result<(), String> {
-    Installer::reinstall_codex()
+    tokio::task::spawn_blocking(Installer::reinstall_codex)
+        .await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -481,6 +487,7 @@ fn resolve_proxy(project: &Project, presets: &crate::models::GlobalPresets) -> S
             .codex_proxy_preset_id
             .as_ref()
             .or(project.config.proxy_preset_id.as_ref()),
+        "custom" => if project.config.custom_cli=="codex" {project.config.codex_proxy_preset_id.as_ref()}else{project.config.claude_proxy_preset_id.as_ref()}.or(project.config.proxy_preset_id.as_ref()),
         _ => None,
     };
     if let Some(id) = preset_id {
@@ -555,6 +562,7 @@ fn build_config_map(project: &Project) -> HashMap<String, String> {
             }
         }
         "custom" => {
+            let proxy=resolve_proxy(project,&presets);if !proxy.is_empty(){config.insert("HTTP_PROXY".into(),proxy.clone());config.insert("HTTPS_PROXY".into(),proxy);}
             let (model, base_url, token) = resolve_model(project, &presets);
             if project.config.custom_cli == "codex" {
                 let mut args = vec![
@@ -719,6 +727,16 @@ pub fn remove_cc_mcp_servers(file_path: String) -> Result<(), String> {
 // ============ Global Presets Commands ============
 
 #[tauri::command]
+pub fn can_apply_default_model() -> Result<bool, String> {
+    crate::services::default_model::can_apply()
+}
+
+#[tauri::command]
+pub fn apply_default_model(preset_id: String, cli: String) -> Result<Project, String> {
+    crate::services::default_model::apply(&preset_id, &cli)
+}
+
+#[tauri::command]
 pub fn get_global_presets() -> GlobalPresets {
     PresetsStorage::load()
 }
@@ -810,6 +828,11 @@ mod preset_resolution_tests {
         assert_eq!(resolve_proxy(&project, &presets), "http://127.0.0.1:7890");
         project.config.mode = "codex".to_string();
         assert_eq!(resolve_proxy(&project, &presets), "http://127.0.0.1:7891");
+        project.config.mode = "custom".to_string();
+        project.config.custom_cli = "codex".to_string();
+        assert_eq!(resolve_proxy(&project, &presets), "http://127.0.0.1:7891");
+        project.config.custom_cli = "claude".to_string();
+        assert_eq!(resolve_proxy(&project, &presets), "http://127.0.0.1:7890");
     }
 
     #[test]
