@@ -2,7 +2,7 @@
 
 # Python 连接工具（试用）
 
-Windows 与 macOS 使用同一份脚本，要求 Python 3.11+；无需 pip 依赖或独立代理 EXE。
+Windows 与 macOS 使用同一份脚本，要求 Python 3.11+；云节点模式仅用标准库，订阅节点按需安装 Python 支持库，不使用独立代理 EXE。
 支持 TLS HTTP CONNECT 云节点及本地 SS / AnyTLS 订阅。TUN、系统代理和浏览器接管不在本版中。
 
 ## 在启动器中使用

@@ -27,14 +27,12 @@
 
 AnyTLS 空闲上游最多保留 30 秒，关闭本次代理即清理；没有定时测速。节点域名使用加密 DNS 解析，目的域名随加密隧道交给节点。SS HTTP 混淆会暴露混淆 Host，不代表目标网址，但也不保证无法被识别为代理。直连规则对应的请求本来就不经隧道。
 
-## 本轮实测（2026-11-16，Mac）
+## 验证范围
 
-- Nexi SS「Hong Kong 01」：真实 Codex 返回 `LOCAL_SS_CODEX_OK`，17 次代理、0 次直连、0 次失败。
-- 网际 AnyTLS「美国·AWSSG·1倍消耗」：真实 Codex 返回 `LOCAL_ANYTLS_US_OK`，20 次代理、0 次直连、0 次失败。
-- 原云方案：真实 Codex 返回 `CLOUD_REGRESSION_OK`，18 次代理、0 次直连、0 次失败。
-- 测试节点配置绑定 en0，避免被本机 TUN 路由串联；没有切换或关闭用户当前网络。
-- 网际香港 AnyTLS 的 HTTP 401 不代表模型成功：模型请求超时。新加坡 AWSSG 节点遇到证书错误。
-- 当前网际订阅链接实取只返回 2 个 VLESS 节点；旧缓存的 AnyTLS 仍可完成上述模型请求。试用包保留已测试的缓存，不会用这次不兼容的更新覆盖它。节点可用性以当时实测为准。
-- Claude Code 官方账号按用户要求未测。Mac 客户端保留历史的 GUI 模型请求需用户完整退出后手动验收，不能用 CLI 成功替代。
+Mac 已用云节点、本地 SS、AnyTLS 分别完成真实 Codex 模型请求。节点可用性、地区限制、账号认证应以你自己的实际请求为准；网络诊断成功不能代替模型成功。
+
+Windows 的自动化回归覆盖连接认证、TLS、分流、并发端口和配置兼容；实际终端、账号及网络环境仍需用户验收。Claude Code 官方账号模型请求、Codex 客户端完整流量覆盖均不作为本版本已完成的验收声明。
+
+公开包不包含任何订阅、节点密码、公司 DNS 或个人配置。升级已有脚本前备份整个目录，只替换程序文件，保留 `profiles/`。不要将私有目录上传或转发。
 
 协议参考：[SS AEAD](https://shadowsocks.org/doc/aead.html)、[AnyTLS](https://github.com/anytls/anytls-go/blob/main/docs/protocol.md)、[simple-obfs HTTP](https://github.com/shadowsocks/simple-obfs/blob/master/src/obfs_http.c)。
