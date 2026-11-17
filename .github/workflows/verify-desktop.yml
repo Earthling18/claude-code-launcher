@@ -1,12 +1,24 @@
 name: Verify desktop candidate
 on:
   workflow_dispatch:
+    inputs:
+      windows_artifact_run:
+        description: 'Re-test native UI using candidate-Windows from this completed run (no rebuild)'
+        type: string
+        default: ''
   push:
     branches: ['release/1.3.1']
+    paths-ignore:
+      - '**/*.md'
+      - 'scripts/package-python.py'
+      - 'scripts/test_windows_navigation.py'
+      - '.github/workflows/verify-desktop.yml'
 permissions:
   contents: read
+  actions: read
 jobs:
   verify:
+    if: ${{ inputs.windows_artifact_run == '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -56,3 +68,30 @@ jobs:
             qa-artifacts/
             src-tauri/target/release/cc-launcher-tauri.exe
             src-tauri/target/release/bundle/macos/*.app
+  native-windows-recheck:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.windows_artifact_run != '' }}
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-Windows
+          run-id: ${{ inputs.windows_artifact_run }}
+          github-token: ${{ github.token }}
+      - name: Native Windows UI regression
+        shell: pwsh
+        run: |
+          cargo install tauri-driver --locked
+          cargo install --git https://github.com/chippers/msedgedriver-tool
+          & "$env:USERPROFILE/.cargo/bin/msedgedriver-tool.exe"
+          python scripts/test_windows_navigation.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-native-proof
+          path: qa-artifacts/

@@ -53,7 +53,13 @@ try:
     wait(lambda:request('GET','/status'))
     result=request('POST','/session',{'capabilities':{'alwaysMatch':{'browserName':'wry','tauri:options':{'application':str(Path('src-tauri/target/release/cc-launcher-tauri.exe').resolve())}}}})
     session=result['sessionId']
-    js("localStorage.setItem('local_deps_ok','1'); location.reload();")
+    # Isolate navigation from asynchronous dependency detection/auto-expansion.
+    # These statuses are test-only; the app's native project storage stays real.
+    js("""localStorage.setItem('local_deps_ok','1');
+      const ready={installed:true,version:'ui-fixture',update_available:false};
+      sessionStorage.setItem('dependencyStatus',JSON.stringify({
+        nodejs:ready,gitbash:ready,claude:ready,codex:ready,
+        skill_market:ready,__withUpdates:true})); location.reload();""")
     wait(lambda:js("return document.querySelectorAll('[data-project-id]').length===48"))
     results=[]
     for action in ['返回','取消','保存修改','返回','保存修改']:
@@ -91,7 +97,15 @@ try:
     assert next(p for p in stored['projects'] if p['id']=='qa-26')['name']=='UI Test 27 saved'
     image=call('GET','/screenshot');(out/'windows-native-navigation.png').write_bytes(base64.b64decode(image))
     (out/'windows-native-navigation.json').write_text(json.dumps(results,ensure_ascii=False,indent=2),encoding='utf-8')
-    print('WINDOWS_NATIVE_NAVIGATION_OK',json.dumps(results,ensure_ascii=False))
+    print('WINDOWS_NATIVE_NAVIGATION_OK',json.dumps(results,ensure_ascii=True))
+except Exception:
+    if session:
+        try:
+            image=call('GET','/screenshot')
+            (out/'windows-native-failure.png').write_bytes(base64.b64decode(image))
+            (out/'windows-native-failure.html').write_text(call('GET','/source'),encoding='utf-8')
+        except Exception:pass
+    raise
 finally:
     if session:
         try:call('DELETE','')
