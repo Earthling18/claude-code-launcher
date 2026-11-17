@@ -1,5 +1,6 @@
 // Used only by tests/ui/vite.config.ts; never included in production builds.
 import { DEFAULT_PROJECT_CONFIG, type Project } from '../../src/types/project';
+const platform = new URLSearchParams(location.search).get('platform') || 'macos';
 const projects: Project[] = Array.from({ length: 48 }, (_, i) => ({
   id: `qa-${i}`, name: `滚动验收项目 ${String(i + 1).padStart(2, '0')}`,
   working_directory: '/tmp/连接 验收', config: { ...DEFAULT_PROJECT_CONFIG, mode: 'codex', skip_permissions: false },
@@ -19,7 +20,7 @@ export async function invoke(command: string, args: Record<string, any> = {}): P
     if (args.isPinned !== undefined) p.is_pinned = args.isPinned;
     return structuredClone(p);
   }
-  if (command === 'get_platform') return new URLSearchParams(location.search).get('platform') || 'macos';
+  if (command === 'get_platform') return platform;
   if (command === 'get_onboarding_status') return true;
   if (command === 'get_global_presets') return { proxies: [], models: [] };
   if (command.startsWith('check_')) return { installed: true, version: 'test', message: '验收环境' };
