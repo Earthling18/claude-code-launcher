@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       windows_artifact_run:
-        description: 'Re-test native UI using candidate-Windows from this completed run (no rebuild)'
+        description: 'Re-test UI: completed candidate run ID, or release:v1.3.1 (no rebuild)'
         type: string
         default: ''
   push:
@@ -79,10 +79,27 @@ jobs:
         with:
           python-version: '3.12'
       - uses: actions/download-artifact@v4
+        if: ${{ !startsWith(inputs.windows_artifact_run, 'release:') }}
         with:
           name: candidate-Windows
           run-id: ${{ inputs.windows_artifact_run }}
           github-token: ${{ github.token }}
+      - name: Download released Windows package
+        if: ${{ startsWith(inputs.windows_artifact_run, 'release:') }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CCL_RELEASE_SOURCE: ${{ inputs.windows_artifact_run }}
+        run: |
+          $tag = $env:CCL_RELEASE_SOURCE.Substring(8)
+          gh release download $tag --pattern '*_portable.zip' --dir qa-download
+          Expand-Archive (Get-ChildItem qa-download/*_portable.zip).FullName qa-download/unpacked
+          $exe = Get-ChildItem qa-download/unpacked -Recurse -Filter 'CC 启动器.exe' | Select-Object -First 1
+          New-Item -ItemType Directory -Force src-tauri/target/release | Out-Null
+          Copy-Item $exe.FullName src-tauri/target/release/cc-launcher-tauri.exe
+          if (Test-Path (Join-Path $exe.DirectoryName 'resources')) {
+            Copy-Item -Recurse (Join-Path $exe.DirectoryName 'resources') src-tauri/target/release/resources
+          }
       - name: Native Windows UI regression
         shell: pwsh
         run: |
