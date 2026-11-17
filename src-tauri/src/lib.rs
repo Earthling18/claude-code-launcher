@@ -229,6 +229,9 @@ pub fn run() {
             commands::download_and_run_installer,
             commands::download_installer,
             // Global presets commands
+            commands::network::connection_info,
+            commands::network::connection_action,
+            commands::network::select_connection_file,
             commands::get_global_presets,
             commands::can_apply_default_model,
             commands::apply_default_model,

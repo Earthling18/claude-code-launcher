@@ -15,11 +15,23 @@ impl Default for ModelApiFormat {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PythonConnection {
+    #[serde(default)]
+    pub python: String,
+    pub script: String,
+    #[serde(default = "default_connection_profile")]
+    pub profile: String,
+}
+fn default_connection_profile() -> String { "default".into() }
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProxyPreset {
     pub id: String,
     pub name: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub python_connection: Option<PythonConnection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

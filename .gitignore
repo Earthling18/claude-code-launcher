@@ -55,3 +55,11 @@ src-tauri/resources/wt/*
 *.tfstate
 *.tfstate.*
 tfplan
+
+# Private connection data and optional local libraries
+python-connection/profiles/
+python-connection/.deps/
+python-connection/.components-*/
+qa-artifacts/
+# Native Windows UI driver, downloaded on disposable CI runner
+msedgedriver.exe

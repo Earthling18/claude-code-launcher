@@ -1,9 +1,16 @@
 import type { ProjectConfig } from './project';
 
+export interface PythonConnection {
+  python: string;
+  script: string;
+  profile: string;
+}
+
 export interface ProxyPreset {
   id: string;
   name: string;
   url: string;
+  python_connection?: PythonConnection | null;
 }
 
 export interface ModelPreset {
@@ -33,4 +40,13 @@ export interface ModelProbeResult {
   models: string[];
   error: string | null;
   warning: string | null;
+}
+
+export function proxySummary(proxy: ProxyPreset): string {
+  if (proxy.python_connection) return `Python · ${proxy.python_connection.profile}`;
+  try {
+    const url = new URL(proxy.url);
+    if (url.username || url.password) { url.username = '***'; url.password = '***'; }
+    return url.toString();
+  } catch { return '代理地址待检查'; }
 }

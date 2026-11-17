@@ -3,6 +3,8 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { presetsApi } from '../api';
 import { toast } from '../lib/toast';
 import type { ModelApiFormat, ModelPreset, ModelProbeResult, ProxyPreset } from '../types/presets';
+import { PythonConnectionEditor } from './PythonConnectionEditor';
+import { proxySummary, type PythonConnection } from '../types/presets';
 import { ConfirmDialog } from './ConfirmDialog';
 
 type Kind = 'proxy' | 'model';
@@ -22,7 +24,7 @@ interface PresetManagerDialogProps {
   modelApiFormat?: ModelApiFormat;
 }
 
-interface ProxyDraft { id?: string; name: string; url: string }
+interface ProxyDraft { id?: string; name: string; url: string; python_connection?: PythonConnection | null }
 interface ModelDraft { id?: string; model: string; claude_base_url: string; codex_base_url: string; token: string }
 
 const formatLabel: Record<ModelApiFormat, string> = {
@@ -120,7 +122,7 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
   };
 
   const startEditProxy = (proxy: ProxyPreset) => {
-    setDraft({ id: proxy.id, name: proxy.name, url: proxy.url });
+    setDraft({ id: proxy.id, name: proxy.name, url: proxy.url, python_connection: proxy.python_connection });
     setError(null);
     revealDraft();
   };
@@ -168,13 +170,13 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
       let firstModel: ModelPreset | undefined;
       if (kind === 'proxy') {
         const value = draft as ProxyDraft;
-        if (!value.name.trim() || !/^https?:\/\//.test(value.url.trim())) {
+        if (!value.name.trim() || (!value.python_connection && !/^https?:\/\//.test(value.url.trim()))) {
           setError('请填写名称和有效的 HTTP(S) 代理地址');
           return;
         }
         const saved = value.id
-          ? await presetsApi.updateProxy(value.id, value.name.trim(), value.url.trim())
-          : await presetsApi.createProxy(value.name.trim(), value.url.trim());
+          ? await presetsApi.updateProxy(value.id, value.name.trim(), value.python_connection ? '' : value.url.trim(), value.python_connection)
+          : await presetsApi.createProxy(value.name.trim(), value.python_connection ? '' : value.url.trim(), value.python_connection);
         newId = saved.id;
       } else {
         const value = draft as ModelDraft;
@@ -267,8 +269,9 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
               <div className="rounded border border-line bg-surface-1 p-4 mb-4 space-y-3">
                 {kind === 'proxy' ? (
                   <>
-                    <Field label="名称"><input value={(draft as ProxyDraft).name} onChange={(event) => setDraft({ ...(draft as ProxyDraft), name: event.target.value })} placeholder="例如：公司代理" /></Field>
-                    <Field label="代理地址"><input value={(draft as ProxyDraft).url} onChange={(event) => setDraft({ ...(draft as ProxyDraft), url: event.target.value })} placeholder="http://127.0.0.1:7890" /></Field>
+                    <Field label="名称"><input type="text" value={(draft as ProxyDraft).name} onChange={(event) => setDraft({ ...(draft as ProxyDraft), name: event.target.value })} placeholder="例如：公司代理" /></Field>
+                    {!(draft as ProxyDraft).python_connection && <Field label="代理地址"><input type="text" value={(draft as ProxyDraft).url} onChange={(event) => setDraft({ ...(draft as ProxyDraft), url: event.target.value })} placeholder="http://127.0.0.1:7890" /></Field>}
+                    <PythonConnectionEditor key={draft.id ?? 'new'} value={(draft as ProxyDraft).python_connection} onChange={(python_connection) => setDraft({ ...(draft as ProxyDraft), python_connection })} />
                   </>
                 ) : modelDraft && (
                   <>
@@ -345,7 +348,7 @@ export const PresetManagerDialog: React.FC<PresetManagerDialogProps> = ({
             ) : (
               <div className="space-y-1">
                 {kind === 'proxy' ? proxies.map((proxy) => (
-                  <PresetRow key={proxy.id} title={proxy.name} subtitle={proxy.url} onEdit={() => startEditProxy(proxy)} onDelete={() => requestDelete(proxy.id, proxy.name)} />
+                  <PresetRow key={proxy.id} title={proxy.name} subtitle={proxySummary(proxy)} onEdit={() => startEditProxy(proxy)} onDelete={() => requestDelete(proxy.id, proxy.name)} />
                 )) : visibleModels.map((model) => (
                   <PresetRow
                     key={model.id}

@@ -1,9 +1,7 @@
 import { useEffect, useLayoutEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-// Module-level scroll memory: persists across mount/unmount of ProjectListPage
-// (e.g., navigating to /edit and back). Reset only on full page reload.
-let lastScrollTop = 0;
+import { projectListState } from '../lib/projectListState';
 import {
   DndContext,
   closestCenter,
@@ -49,19 +47,25 @@ function sortProjects(projects: Project[]): Project[] {
 export const ProjectListPage: React.FC = () => {
   const navigate = useNavigate();
   const [depsReady, setDepsReady] = useState(() => localStorage.getItem('local_deps_ok') === '1');
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [platform, setPlatform] = useState<string>('windows');
-  const [loading, setLoading] = useState(true);
+  const [projects, setProjects] = useState<Project[]>(() => projectListState.projects ?? []);
+  const [platform, setPlatform] = useState<string>(() => projectListState.platform);
+  const [loading, setLoading] = useState(() => projectListState.projects === null);
   const [error, setError] = useState<string | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showPresets, setShowPresets] = useState(false);
-  const [presets, setPresets] = useState<GlobalPresets | null>(null);
+  const [presets, setPresets] = useState<GlobalPresets | null>(() => projectListState.presets);
   const [defaultModelPrompt, setDefaultModelPrompt] = useState<{ model: ModelPreset; cli: 'claude' | 'codex' } | null>(null);
   const [applyingDefaultModel, setApplyingDefaultModel] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollRestoredRef = useRef(false);
   const projectWritePending = useRef(false);
+
+  useLayoutEffect(() => {
+    if (!loading) projectListState.projects = projects;
+    projectListState.platform = platform;
+    projectListState.presets = presets;
+  }, [projects, platform, presets, loading]);
 
   // The dashboard edits the same repository. Refresh without resetting scroll/loading.
   useEffect(() => {
@@ -136,36 +140,32 @@ export const ProjectListPage: React.FC = () => {
     return () => window.removeEventListener('cc-launcher:show-onboarding', handler);
   }, []);
 
-  // Keep listening from the initial mount, but do not let the empty loading state overwrite
-  // the saved position before the project cards have been rendered.
-  useEffect(() => {
+  // Layout cleanup runs before removal. Never read a detached scroll container:
+  // browsers can report zero once its layout disappears during route navigation.
+  useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const onScroll = () => {
-      if (scrollRestoredRef.current) lastScrollTop = el.scrollTop;
+    const remember = () => {
+      if (scrollRestoredRef.current && el.isConnected) {
+        projectListState.scrollTop = el.scrollTop;
+      }
     };
-    el.addEventListener('scroll', onScroll, { passive: true });
+    el.addEventListener('scroll', remember, { passive: true });
     return () => {
-      if (scrollRestoredRef.current) lastScrollTop = el.scrollTop;
-      el.removeEventListener('scroll', onScroll);
+      remember();
+      el.removeEventListener('scroll', remember);
     };
   }, [depsReady]);
 
-  // Restore only after loading finishes and the cards exist. Assign once synchronously to
-  // avoid a visible jump, then once on the next frame for late layout measurements.
+  // Cached cards already have their height; restore before paint, without a
+  // second animation-frame assignment that could fight the user's next scroll.
   useLayoutEffect(() => {
-    if (!depsReady || loading || error || scrollRestoredRef.current) return;
+    if (!depsReady || loading || scrollRestoredRef.current) return;
     const el = scrollRef.current;
     if (!el) return;
-
-    const target = lastScrollTop;
-    el.scrollTop = target;
-    const frame = requestAnimationFrame(() => {
-      if (scrollRef.current) scrollRef.current.scrollTop = target;
-      scrollRestoredRef.current = true;
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [depsReady, loading, error, sortedProjects.length]);
+    el.scrollTop = projectListState.scrollTop;
+    scrollRestoredRef.current = true;
+  }, [depsReady, loading]);
 
   const handleOnboardingComplete = () => {
     onboardingApi.setCompleted().catch(() => {});
@@ -247,12 +247,13 @@ export const ProjectListPage: React.FC = () => {
 
   const loadProjects = async () => {
     try {
-      setLoading(true);
+      if (projectListState.projects === null) setLoading(true);
       setError(null);
       const data = await projectApi.getAll();
       setProjects(data);
     } catch (err: any) {
-      setError(err?.toString() || '加载项目列表失败');
+      if (projectListState.projects === null) setError(err?.toString() || '加载项目列表失败');
+      else toast.error('刷新项目失败，已保留当前列表');
     } finally {
       setLoading(false);
     }
@@ -278,12 +279,12 @@ export const ProjectListPage: React.FC = () => {
   };
 
   const handleSelect = (id: string) => {
-    if (scrollRef.current) lastScrollTop = scrollRef.current.scrollTop;
+    if (scrollRef.current) projectListState.scrollTop = scrollRef.current.scrollTop;
     navigate(`/local/project/${id}/edit`);
   };
 
   const handleCreate = () => {
-    if (scrollRef.current) lastScrollTop = scrollRef.current.scrollTop;
+    if (scrollRef.current) projectListState.scrollTop = scrollRef.current.scrollTop;
     navigate('/local/project/new');
   };
 
@@ -479,7 +480,7 @@ export const ProjectListPage: React.FC = () => {
         onComplete={handleOnboardingComplete}
       />
 
-      <div ref={scrollRef} className="flex-1 overflow-auto">
+      <div ref={scrollRef} data-testid="project-list-scroll" className="flex-1 overflow-auto">
         <div className="px-5 pt-2 pb-5">
           <div data-onboarding="deps">
             <DependencyFrame projects={projects} platform={platform} />
@@ -497,7 +498,7 @@ export const ProjectListPage: React.FC = () => {
               </div>
             )}
 
-            {!loading && !error && (
+            {!loading && (
               <>
                 {sortedProjects.length === 0 ? (
                   <div className="flex flex-col items-center justify-center py-16">
@@ -524,6 +525,7 @@ export const ProjectListPage: React.FC = () => {
                             {pinnedProjects.map((project) => (
                               <div
                                 key={project.id}
+                                data-project-id={project.id}
                                 {...(project.is_default ? { 'data-onboarding': 'default-card' } : {})}
                               >
                                 <SortableProjectCard
@@ -552,6 +554,7 @@ export const ProjectListPage: React.FC = () => {
                             {normalProjects.map((project) => (
                               <div
                                 key={project.id}
+                                data-project-id={project.id}
                                 {...(project.is_default ? { 'data-onboarding': 'default-card' } : {})}
                               >
                                 <SortableProjectCard

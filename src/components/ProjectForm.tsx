@@ -280,6 +280,9 @@ export const ProjectForm: React.FC<ProjectFormProps> = ({
                 />
               </FormRow>
             )}
+            {source === 'custom_api' && <div className="mt-3"><FormRow label="代理" hint="可选；仅影响这个项目启动的 CLI">
+              <PresetSelect kind="proxy" value={activeProxy} onChange={setActiveProxy} allowEmpty />
+            </FormRow></div>}
           </div>
         </div>
 

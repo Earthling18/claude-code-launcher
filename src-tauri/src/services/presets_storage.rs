@@ -138,20 +138,21 @@ impl PresetsStorage {
 
     // ------------- CRUD: ProxyPreset -------------
 
-    pub fn create_proxy(name: String, url: String) -> Result<ProxyPreset, String> {
+    pub fn create_proxy(name: String, url: String, python_connection: Option<crate::models::PythonConnection>) -> Result<ProxyPreset, String> {
         let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut presets = Self::load();
         let preset = ProxyPreset {
             id: new_preset_id(),
             name: ensure_unique_name(&name, presets.proxies.iter().map(|p| p.name.as_str())),
-            url,
+            url: if python_connection.is_some() { String::new() } else { url },
+            python_connection,
         };
         presets.proxies.push(preset.clone());
         Self::save(&presets)?;
         Ok(preset)
     }
 
-    pub fn update_proxy(id: &str, name: String, url: String) -> Result<ProxyPreset, String> {
+    pub fn update_proxy(id: &str, name: String, url: String, python_connection: Option<crate::models::PythonConnection>) -> Result<ProxyPreset, String> {
         let _shared_guard=crate::services::configuration_guard::ConfigurationGuard::acquire()?;
         let mut presets = Self::load();
         let names: Vec<String> = presets
@@ -166,7 +167,8 @@ impl PresetsStorage {
             .find(|p| p.id == id)
             .ok_or_else(|| format!("代理预设不存在: {}", id))?;
         target.name = ensure_unique_name(&name, names.iter().map(|s| s.as_str()));
-        target.url = url;
+        target.url = if python_connection.is_some() { String::new() } else { url };
+        target.python_connection = python_connection;
         let updated = target.clone();
         Self::save(&presets)?;
         Ok(updated)
@@ -448,6 +450,7 @@ pub fn migrate_legacy_to_presets(projects: &mut [Project]) -> Option<GlobalPrese
             presets.proxies.iter().map(|p| p.name.as_str()),
         );
         presets.proxies.push(ProxyPreset {
+            python_connection: None,
             id: new_preset_id(),
             name,
             url,

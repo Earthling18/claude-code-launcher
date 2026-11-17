@@ -1,4 +1,5 @@
 mod model_discovery;
+pub mod network;
 
 use crate::models::{
     CreateProjectInput, GlobalPresets, ModelApiFormat, ModelPreset, PinnedOrderItem, Project,
@@ -401,7 +402,8 @@ pub async fn launch_project(id: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || -> Result<(), String> {
         let project = ConfigStorage::get_project(&id)?;
         validate_project_configuration(&project)?;
-        let config = build_config_map(&project);
+        let mut config = build_config_map(&project);
+        network::prepare_network(&mut config)?;
 
         // Launch with working directory
         Launcher::launch_with_config_and_dir(config, Some(project.working_directory.clone()))?;
@@ -447,7 +449,8 @@ pub async fn select_directory(app_handle: tauri::AppHandle) -> Result<Option<Str
 #[tauri::command]
 pub fn generate_project_powershell_command(id: String) -> Result<String, String> {
     let project = ConfigStorage::get_project(&id)?;
-    let config = build_config_map(&project);
+    let mut config = build_config_map(&project);
+    network::prepare_network(&mut config)?;
     Ok(Launcher::generate_powershell_command_with_dir(
         &config,
         Some(project.working_directory),
@@ -457,7 +460,8 @@ pub fn generate_project_powershell_command(id: String) -> Result<String, String>
 #[tauri::command]
 pub fn generate_project_cmd_command(id: String) -> Result<String, String> {
     let project = ConfigStorage::get_project(&id)?;
-    let config = build_config_map(&project);
+    let mut config = build_config_map(&project);
+    network::prepare_network(&mut config)?;
     Ok(Launcher::generate_cmd_command_with_dir(
         &config,
         Some(project.working_directory),
@@ -467,16 +471,16 @@ pub fn generate_project_cmd_command(id: String) -> Result<String, String> {
 #[tauri::command]
 pub fn generate_project_bash_command(id: String) -> Result<String, String> {
     let project = ConfigStorage::get_project(&id)?;
-    let config = build_config_map(&project);
+    let mut config = build_config_map(&project);
+    network::prepare_network(&mut config)?;
     Ok(Launcher::generate_bash_command_with_dir(
         &config,
         Some(project.working_directory),
     ))
 }
 
-/// Resolve effective proxy URL: preset wins, legacy field is fallback.
-fn resolve_proxy(project: &Project, presets: &crate::models::GlobalPresets) -> String {
-    let preset_id = match project.config.mode.as_str() {
+fn proxy_preset_id(project: &Project) -> Option<&String> {
+    match project.config.mode.as_str() {
         "claude" => project
             .config
             .claude_proxy_preset_id
@@ -489,10 +493,15 @@ fn resolve_proxy(project: &Project, presets: &crate::models::GlobalPresets) -> S
             .or(project.config.proxy_preset_id.as_ref()),
         "custom" => if project.config.custom_cli=="codex" {project.config.codex_proxy_preset_id.as_ref()}else{project.config.claude_proxy_preset_id.as_ref()}.or(project.config.proxy_preset_id.as_ref()),
         _ => None,
-    };
+    }
+}
+
+/// Resolve effective proxy URL: preset wins, legacy field is fallback.
+fn resolve_proxy(project: &Project, presets: &crate::models::GlobalPresets) -> String {
+    let preset_id = proxy_preset_id(project);
     if let Some(id) = preset_id {
         if let Some(p) = presets.proxies.iter().find(|p| &p.id == id) {
-            return p.url.clone();
+            return if p.python_connection.is_some() { String::new() } else { p.url.clone() };
         }
     }
     match project.config.mode.as_str() {
@@ -612,6 +621,14 @@ fn build_config_map(project: &Project) -> HashMap<String, String> {
             }
         }
         _ => {}
+    }
+
+    if let Some(connection) = proxy_preset_id(project)
+        .and_then(|id| presets.proxies.iter().find(|p| &p.id == id))
+        .and_then(|p| p.python_connection.as_ref()) {
+        config.remove("HTTP_PROXY");
+        config.remove("HTTPS_PROXY");
+        config.insert("PYTHON_CONNECTION".into(), serde_json::to_string(connection).expect("connection serialization"));
     }
 
     if project.config.skip_permissions {
@@ -742,13 +759,15 @@ pub fn get_global_presets() -> GlobalPresets {
 }
 
 #[tauri::command]
-pub fn create_proxy_preset(name: String, url: String) -> Result<ProxyPreset, String> {
-    PresetsStorage::create_proxy(name, url)
+pub fn create_proxy_preset(name: String, url: String, python_connection: Option<crate::models::PythonConnection>) -> Result<ProxyPreset, String> {
+    network::validate_preset(&name, &url, python_connection.as_ref())?;
+    PresetsStorage::create_proxy(name, url, python_connection)
 }
 
 #[tauri::command]
-pub fn update_proxy_preset(id: String, name: String, url: String) -> Result<ProxyPreset, String> {
-    PresetsStorage::update_proxy(&id, name, url)
+pub fn update_proxy_preset(id: String, name: String, url: String, python_connection: Option<crate::models::PythonConnection>) -> Result<ProxyPreset, String> {
+    network::validate_preset(&name, &url, python_connection.as_ref())?;
+    PresetsStorage::update_proxy(&id, name, url, python_connection)
 }
 
 #[tauri::command]
@@ -805,11 +824,13 @@ mod preset_resolution_tests {
         let presets = GlobalPresets {
             proxies: vec![
                 ProxyPreset {
+                    python_connection: None,
                     id: "claude-proxy".to_string(),
                     name: "Claude proxy".to_string(),
                     url: "http://127.0.0.1:7890".to_string(),
                 },
                 ProxyPreset {
+                    python_connection: None,
                     id: "codex-proxy".to_string(),
                     name: "Codex proxy".to_string(),
                     url: "http://127.0.0.1:7891".to_string(),

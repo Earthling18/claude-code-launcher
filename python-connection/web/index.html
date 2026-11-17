@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>连接助手</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body><main>
+<header><div><span class="eyebrow">PYTHON CONNECTION · 试用</span><h1>连接助手</h1><p>选好连接，继续使用熟悉的 Codex。</p></div><button id="quit" class="quiet">退出管理</button></header>
+<div id="notice" role="status" aria-live="polite"></div>
+<section class="card quick-start">
+<div class="section-head"><h2>1. 选择连接</h2><span class="badge">只影响通过这里打开的应用</span></div>
+<div class="source-switch" aria-label="连接来源"><button id="source_cloud" aria-pressed="true">云节点</button><button id="source_subscription" aria-pressed="false">订阅节点</button></div>
+<div id="subscription_panel" hidden>
+<div id="components_panel"><p id="components_hint" class="hint"></p><button id="install_components">安装节点支持组件</button></div>
+<details id="subscription_import"><summary>添加订阅</summary><label>订阅名称<input id="subscription_name" maxlength="80" placeholder="例如：日常订阅"></label><label>HTTPS 订阅地址<input id="subscription_url" type="password" autocomplete="off" placeholder="完整订阅链接，仅保存在本机"></label><details><summary>或粘贴配置内容 / SS 链接</summary><textarea id="subscription_text" rows="5" spellcheck="false" placeholder="Clash YAML / JSON、SS URI 或 Base64 订阅"></textarea></details><button id="import_subscription">导入订阅</button></details>
+<div class="grid"><div><label>我的订阅<select id="subscriptions"></select></label><div class="small-actions"><button id="update_subscription" class="quiet">更新订阅</button><button id="add_subscription" class="quiet">添加另一个</button></div>
+</div><label>筛选节点<input id="node_filter" type="search" placeholder="例如：香港、Japan、1倍"></label></div><label>选择节点<select id="nodes"></select></label><p id="node_hint" class="hint">导入后选择节点。不支持的协议会明确说明。</p>
+<div class="actions"><button id="node_test">检测此节点</button><button id="node_cancel" disabled>取消检测</button></div><p id="node_result" role="status">尚未检测。</p>
+
+</div>
+<div id="cloud_flow">
+<label>使用的云节点<select id="profiles"></select></label><div class="small-actions"><button id="new" class="quiet">添加云节点</button><button id="edit" class="quiet">编辑当前节点</button><button id="reload" class="quiet">重新载入</button></div>
+</div><div class="launch-step"><div class="section-head"><h2>2. 打开 Codex</h2><span id="desktop_state" class="badge">未打开</span></div>
+<p id="history_hint">沿用原来的账号、项目和聊天记录。若 Codex 正在运行，请先从菜单退出，再从这里重新打开。</p>
+<div class="actions"><button id="desktop_open" class="primary" disabled>打开 Codex · 保留记录</button><button id="desktop_close" disabled>退出本次 Codex</button></div>
+<p id="desktop_info" class="hint"></p><p id="desktop_metrics" class="hint"></p>
+</div></section>
+<div id="cloud_advanced"><details class="advanced"><summary>更多设置与排查</summary><details class="card"><summary>订阅支持范围</summary><p>订阅节点在本机连接，无需云服务器或 Clash。支持 SS AEAD（含 HTTP 混淆）和 AnyTLS TCP；其他协议会标注不支持。AnyTLS 使用标准 TLS，空闲连接最多保留 30 秒以便复用。遇到证书错误不会自动关闭校验或改为直连。</p></details>
+<details id="edit_connection" class="card"><summary>编辑当前连接与分流规则</summary>
+
+<p>日常使用不用修改这里。连接、认证和规则变更只影响之后打开的应用。</p>
+<label>方案名称<input id="name" maxlength="80" placeholder="例如：日常开发"></label>
+<details id="endpoint"><summary>连接设置</summary><div class="grid">
+<label>服务器 IP<input id="server_ip" placeholder="IPv4 或 IPv6"></label><label>TLS 端口<input id="server_port" type="number" min="1" max="65535"></label>
+<label>TLS 证书域名<input id="server_name" placeholder="与服务器证书一致"></label><label>出口网卡（可选）<input id="interface" placeholder="留空沿用系统路由"></label>
+<label>用户名<input id="username" autocomplete="off" placeholder="留空保留现有认证"></label><label>密码<input id="password" type="password" autocomplete="new-password" placeholder="留空保留现有认证"></label>
+</div><p class="hint">更换认证时同时填写用户名和密码。不会显示已保存的密码，也不会修改系统路由。</p></details>
+<label>流量处理<select id="routing_mode"><option value="rules">规则分流</option><option value="proxy_all">全部代理（仅接入的应用）</option></select></label><p id="routing_hint" class="hint"></p>
+<details><summary>分流规则</summary><p class="hint">规则模式：阻止 → 强制代理 → 显式直连 → 公司 DNS → 国内规则 → 默认动作。每行一条域名或网段。</p>
+<div class="grid"><label>直连<textarea id="direct" rows="6" placeholder="*.example.cn&#10;192.168.0.0/16"></textarea></label><label>强制代理<textarea id="proxy" rows="6" placeholder="*.openai.com"></textarea></label><label>阻止<textarea id="block" rows="3"></textarea></label><label>未匹配请求<select id="default"><option value="proxy">走代理</option><option value="direct">直连</option><option value="block">阻止</option></select><span class="hint">只处理进入 Python 的请求，不接管整台电脑。</span></label></div>
+<label class="check"><input id="china_enabled" type="checkbox">启用已有国内域名／IP 规则</label><p id="china_hint" class="hint"></p>
+</details>
+<details><summary>公司 DNS</summary><p class="hint">仅对当前方案生效。匹配的公司域名只使用这里的 DNS，失败不会改用公共 DNS。清空两项可关闭。</p><div class="grid"><label>公司域名<textarea id="company_domains" rows="3"></textarea></label><label>公司 DNS IPv4<textarea id="company_servers" rows="3"></textarea></label></div></details>
+<footer><span id="save_hint" class="hint">修改只影响新启动的会话。</span><button id="save" class="primary">保存方案</button></footer>
+</details>
+<details class="card"><summary>客户端启动选项</summary><label>记录与登录<select id="desktop_mode"><option value="existing">沿用原客户端（默认）</option><option value="isolated">独立测试窗口（不显示原记录）</option></select></label>
+<p class="hint">沿用模式不复制、合并或改写原配置文件，只在本次进程中设置代理。程序本身仍正常保存会话。需要完整退出原客户端后再打开，不会强制结束现有窗口。</p>
+<p class="hint">独立测试窗口仅用于排错；它拥有自己的历史和登录。窗口内的真实模型请求仍需验收。</p><details><summary>如果弹出本地代理认证框</summary><p>仅当提示的代理地址是上方专用连接的 127.0.0.1 时，用户名填写 <code>local</code>，密码使用下面的复制按钮。不要粘贴到网站或账号登录框。</p><button id="desktop_password" disabled>复制本次本地代理密码</button><p class="hint">只复制随机本地密码，不显示或复制云节点密码；下次启动会更换。</p></details>
+</details>
+<details class="card"><summary>终端接入与常驻代理</summary><div class="section-head"><div><span class="eyebrow">使用方式</span><h2>按需或常驻</h2></div><span id="state" class="badge">已停止</span></div>
+<p>CLI 继续从 CC 启动器按需启动。常驻模式用于持续提供本地代理入口，启动不等于已经连接远端。</p>
+<div class="metrics"><div><strong id="connections">0</strong><span>活动连接</span></div><div><strong id="upload">0 B</strong><span>上传</span></div><div><strong id="download">0 B</strong><span>下载</span></div><div><strong id="last">—</strong><span>最近传输</span></div></div>
+<p id="resident_details" class="hint">没有常驻代理。</p><p id="last_error" class="error"></p>
+<div class="actions"><button id="start" class="primary">启动常驻</button><button id="stop" disabled>停止常驻</button></div>
+<details><summary>其他应用</summary><p>浏览器专用窗口尚未接入。常驻代理已启用本地认证，不能仅复制端口就直接使用。</p><p class="hint">此试用页不会写系统代理、全局环境变量、登录项或服务。</p></details>
+</details>
+<details class="card"><summary>连接诊断</summary><div class="section-head"><div class="actions"><button id="test">测试已保存方案</button><button id="cancel_test" class="quiet" disabled>取消</button></div></div><p id="diagnostic">尚未检测。仅主动检测时访问网络，不自动周期测速。</p><p class="hint">HTTP 响应仅说明目标返回了响应；401 不算模型验证，403 还需检查访问权限。</p></details>
+</details></div><p class="bottom">其他应用的网络不变。关闭网页不会退出正在使用的 Codex。</p>
+</main></body></html>

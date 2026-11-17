@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { DependencyStatus, AppConfig, DiagnosticsStatus } from './types';
 import type { Project, ProjectConfig, ProjectOrderItem, PinnedOrderItem, ConfigScanResult } from './types/project';
-import type { GlobalPresets, ProxyPreset, ModelPreset, ModelProbeResult, ModelApiFormat } from './types/presets';
+import type { GlobalPresets, ProxyPreset, PythonConnection, ModelPreset, ModelProbeResult, ModelApiFormat } from './types/presets';
 
 export const api = {
   // 依赖检测
@@ -130,10 +130,10 @@ export const presetsApi = {
   applyDefaultModel: (presetId: string, cli: 'claude' | 'codex') => invoke<Project>('apply_default_model', { presetId, cli }),
   getAll: () => invoke<GlobalPresets>('get_global_presets'),
 
-  createProxy: (name: string, url: string) =>
-    invoke<ProxyPreset>('create_proxy_preset', { name, url }),
-  updateProxy: (id: string, name: string, url: string) =>
-    invoke<ProxyPreset>('update_proxy_preset', { id, name, url }),
+  createProxy: (name: string, url: string, pythonConnection?: PythonConnection | null) =>
+    invoke<ProxyPreset>('create_proxy_preset', { name, url, pythonConnection: pythonConnection ?? null }),
+  updateProxy: (id: string, name: string, url: string, pythonConnection?: PythonConnection | null) =>
+    invoke<ProxyPreset>('update_proxy_preset', { id, name, url, pythonConnection: pythonConnection ?? null }),
   deleteProxy: (id: string) => invoke<void>('delete_proxy_preset', { id }),
   countProxyRefs: (id: string) => invoke<number>('count_proxy_preset_refs', { id }),
 
@@ -169,3 +169,9 @@ export const diagnosticsApi = {
   recordFrontendError: (message: string) => invoke<void>('record_frontend_error', { message }),
 };
 
+
+export const connectionApi = {
+  selectFile: (script: boolean) => invoke<string | null>('select_connection_file', { script }),
+  info: (connection: PythonConnection) => invoke<{ python: string; version: string; profiles: string[]; profile_labels?: Record<string, string> }>('connection_info', { connection }),
+  action: (connection: PythonConnection, action: 'menu' | 'doctor') => invoke<void>('connection_action', { connection, action }),
+};

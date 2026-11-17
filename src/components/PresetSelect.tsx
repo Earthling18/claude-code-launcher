@@ -1,3 +1,4 @@
+import { proxySummary } from '../types/presets';
 import { useEffect, useRef, useState } from 'react';
 import { presetsApi } from '../api';
 import type { ModelApiFormat, ModelPreset, ProxyPreset } from '../types/presets';
@@ -78,7 +79,7 @@ export const PresetSelect: React.FC<PresetSelectProps> = ({
     return !!modelEndpoint(model, modelApiFormat);
   });
   const items = kind === 'proxy'
-    ? proxies.map((proxy) => ({ id: proxy.id, label: proxy.name, subLabel: proxy.url }))
+    ? proxies.map((proxy) => ({ id: proxy.id, label: proxy.name, subLabel: proxySummary(proxy) }))
     : compatibleModels.map((model) => ({
         id: model.id,
         label: model.name,

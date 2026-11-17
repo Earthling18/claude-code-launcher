@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { projectApi, systemApi, presetsApi } from '../api';
 import { toast } from '../lib/toast';
+import { rememberProject } from '../lib/projectListState';
 import { ProjectForm } from '../components/ProjectForm';
 import { useDragContext } from '../App';
 import type { ProjectConfig } from '../types/project';
@@ -73,10 +74,11 @@ export const ProjectCreatePage: React.FC = () => {
   ) => {
     try {
       setSaving(true);
-      const project = await projectApi.create(name, workingDirectory, config, createNamedDirectory);
+      let project = await projectApi.create(name, workingDirectory, config, createNamedDirectory);
       if (isPinned) {
-        await projectApi.togglePinned(project.id, true);
+        project = await projectApi.togglePinned(project.id, true);
       }
+      rememberProject(project);
       // Persist as last-used so the next "新建项目" pre-fills with this choice.
       presetsApi.setLastUsed(config).catch((err) => {
         console.error('Failed to save last_used_config:', err);

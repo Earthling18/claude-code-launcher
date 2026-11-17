@@ -11,12 +11,32 @@ pub struct Launcher;
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct LaunchSpec {
     program: String,
+    network_prefix: Vec<String>,
     args: Vec<String>,
     env_keys: Vec<String>,
     custom_codex_provider: bool,
 }
 
 impl Launcher {
+    pub fn launch_connection_tool(args: Vec<String>) -> Result<(), String> {
+        #[cfg(windows)] {
+            use base64::Engine;
+            use std::os::windows::process::CommandExt;
+            let text = format!("& {}", args.iter().map(|v| format!("'{}'", Self::escape_ps_single_quotes(v))).collect::<Vec<_>>().join(" "));
+            let encoded = base64::engine::general_purpose::STANDARD.encode(text.encode_utf16().flat_map(u16::to_le_bytes).collect::<Vec<_>>());
+            Command::new("powershell.exe").args(["-NoProfile", "-NoExit", "-EncodedCommand", &encoded]).creation_flags(0x00000010).spawn().map_err(|_| "无法打开 PowerShell".to_string())?;
+            Ok(())
+        }
+        #[cfg(target_os = "macos")] {
+            let text = args.iter().map(|v| format!("'{}'", Self::escape_bash_single_quotes(v))).collect::<Vec<_>>().join(" ");
+            let script = Self::render_macos_terminal_script(&text, &dirs::home_dir().unwrap_or_default().to_string_lossy(), "连接管理");
+            let result = Command::new("osascript").args(["-e", &script]).output().map_err(|_| "无法打开 Terminal".to_string())?;
+            if !result.status.success() { return Err("macOS 未能打开终端；请检查系统设置 → 隐私与安全性 → 自动化中启动器的终端权限".into()); }
+            Ok(())
+        }
+        #[cfg(all(not(windows), not(target_os = "macos")))] { let _ = args; Err("仅支持 Windows 和 macOS".into()) }
+    }
+
     fn escape_ps_single_quotes(value: &str) -> String {
         value.replace('\'', "''")
     }
@@ -191,6 +211,8 @@ impl Launcher {
         "CLI_PROGRAM",
         "CLI_ARGS_JSON",
         "CODEX_CUSTOM_PROVIDER",
+        "PYTHON_CONNECTION",
+        "NETWORK_PREFIX_JSON",
     ];
 
     /// Sensitive env var keys whose values should be redacted in logs
@@ -198,6 +220,8 @@ impl Launcher {
         "ANTHROPIC_AUTH_TOKEN",
         "OPENAI_API_KEY",
         "CCL_CODEX_API_KEY",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
     ];
 
     fn build_launch_spec(config: &HashMap<String, String>) -> LaunchSpec {
@@ -237,6 +261,7 @@ impl Launcher {
             }
         }
         LaunchSpec {
+            network_prefix: config.get("NETWORK_PREFIX_JSON").and_then(|v| serde_json::from_str(v).ok()).unwrap_or_default(),
             program,
             args,
             env_keys: Self::env_keys_from_config(config),
@@ -247,17 +272,14 @@ impl Launcher {
         }
     }
 
+    fn invocation(spec: &LaunchSpec) -> Vec<&str> {
+        spec.network_prefix.iter().map(String::as_str)
+            .chain(std::iter::once(spec.program.as_str()))
+            .chain(spec.args.iter().map(String::as_str)).collect()
+    }
+
     fn render_powershell_invocation(spec: &LaunchSpec) -> String {
-        let mut parts = vec![format!(
-            "& '{}'",
-            Self::escape_ps_single_quotes(&spec.program)
-        )];
-        parts.extend(
-            spec.args
-                .iter()
-                .map(|arg| format!("'{}'", Self::escape_ps_single_quotes(arg))),
-        );
-        parts.join(" ")
+        format!("& {}", Self::invocation(spec).iter().map(|arg| format!("'{}'", Self::escape_ps_single_quotes(arg))).collect::<Vec<_>>().join(" "))
     }
 
     fn escape_bash_single_quotes(value: &str) -> String {
@@ -265,8 +287,7 @@ impl Launcher {
     }
 
     fn render_bash_invocation(spec: &LaunchSpec) -> String {
-        std::iter::once(spec.program.as_str())
-            .chain(spec.args.iter().map(String::as_str))
+        Self::invocation(spec).into_iter()
             .map(|value| format!("'{}'", Self::escape_bash_single_quotes(value)))
             .collect::<Vec<_>>()
             .join(" ")
@@ -309,6 +330,7 @@ impl Launcher {
     fn codex_capability_probe_spec() -> LaunchSpec {
         LaunchSpec {
             program: "codex".to_string(),
+            network_prefix: vec![],
             args: vec![
                 "debug".to_string(),
                 "models".to_string(),
@@ -332,8 +354,7 @@ impl Launcher {
     }
 
     fn render_cmd_invocation(spec: &LaunchSpec) -> String {
-        std::iter::once(spec.program.as_str())
-            .chain(spec.args.iter().map(String::as_str))
+        Self::invocation(spec).into_iter()
             .map(Self::escape_cmd_arg)
             .collect::<Vec<_>>()
             .join(" ")
@@ -371,24 +392,15 @@ impl Launcher {
         keys
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, test))]
     fn sanitize_command_for_log(command: &str) -> String {
-        // Avoid writing secrets into logs. We only redact known sensitive env vars.
-        // The current command format uses single quotes: $env:KEY='value'.
+        // PowerShell escapes a literal quote as two quotes. Consume the entire
+        // quoted value, including escaped quotes, before replacing credentials.
         let mut out = command.to_string();
         for key in Self::SENSITIVE_KEYS {
-            let needle = format!("$env:{}='", key);
-            let mut search_from = 0usize;
-            while let Some(start) = out[search_from..].find(&needle) {
-                let start = search_from + start + needle.len();
-                if let Some(end_rel) = out[start..].find('\'') {
-                    let end = start + end_rel;
-                    out.replace_range(start..end, "<redacted>");
-                    search_from = start + "<redacted>".len() + 1;
-                } else {
-                    break;
-                }
-            }
+            let pattern = format!(r"(?i)\$env:{}='(?:[^']|'')*'", regex::escape(key));
+            let re = regex::Regex::new(&pattern).expect("constant environment name");
+            out = re.replace_all(&out, |_: &regex::Captures| format!("$env:{}='<redacted>'", key)).into_owned();
         }
         out
     }
@@ -915,10 +927,13 @@ impl Launcher {
         // Terminal.app runs as a login shell by default, so PATH will be correct
         let script = Self::render_macos_terminal_script(command, &target_dir, cli_bin);
 
-        Command::new("osascript")
+        let result = Command::new("osascript")
             .args(&["-e", &script])
-            .spawn()
+            .output()
             .map_err(|e| format!("无法启动Terminal: {}", e))?;
+        if !result.status.success() {
+            return Err("macOS 未能打开终端；请检查系统设置 → 隐私与安全性 → 自动化中启动器的终端权限".into());
+        }
 
         Ok(())
     }
@@ -1164,5 +1179,46 @@ mod launch_spec_tests {
         if available {
             Launcher::ensure_codex_custom_provider_supported().unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod network_tests {
+    use super::*;
+    #[test]
+    fn wrapped_cli_preserves_permissions_arguments_and_quotes() {
+        for cli in ["codex", "claude"] {
+            let config = HashMap::from([
+                ("CLI_PROGRAM".into(), cli.into()),
+                ("SKIP_PERMISSIONS".into(), "true".into()),
+                ("CLI_ARGS_JSON".into(), serde_json::to_string(&vec!["hello & $x ' 中文"]).unwrap()),
+                ("PYTHON_CONNECTION".into(), "internal".into()),
+                ("NETWORK_PREFIX_JSON".into(), serde_json::to_string(&vec!["C:/用户 目录/python.exe", "C:/工具's/ai-connection.py", "--profile", "default", "run", "--"]).unwrap()),
+            ]);
+            let spec = Launcher::build_launch_spec(&config);
+            assert_eq!(spec.program, cli);
+            assert!(spec.env_keys.is_empty());
+            let args = Launcher::invocation(&spec);
+            assert_eq!(args[6], cli);
+            assert_eq!(args[7], "hello & $x ' 中文");
+            assert_eq!(args[8], if cli == "codex" { "--dangerously-bypass-approvals-and-sandbox" } else { "--dangerously-skip-permissions" });
+            let ps = Launcher::generate_powershell_command_with_dir(&config, Some("C:/用户's 项目".into()));
+            assert!(ps.contains("C:/用户''s 项目"));
+            assert!(ps.contains("C:/工具''s/ai-connection.py"));
+            assert!(!ps.contains("$env:NETWORK_"));
+            assert!(Launcher::generate_bash_command(&config).contains("'run' '--'"));
+        }
+    }
+    #[test]
+    fn proxy_passwords_with_escaped_quotes_are_fully_redacted() {
+        let command = "$env:HTTPS_PROXY='http://local:pa''ss@127.0.0.1:1234'; & 'codex'";
+        let safe = Launcher::sanitize_command_for_log(command);
+        assert_eq!(safe, "$env:HTTPS_PROXY='<redacted>'; & 'codex'");
+    }
+    #[test]
+    fn legacy_commands_are_not_wrapped() {
+        let spec = Launcher::build_launch_spec(&HashMap::new());
+        assert_eq!(Launcher::render_powershell_invocation(&spec), "& 'claude'");
+        assert!(spec.network_prefix.is_empty());
     }
 }

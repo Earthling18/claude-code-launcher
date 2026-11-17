@@ -6,6 +6,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { CopyCommandButton } from '../components/CopyCommandButton';
 import { useDragContext } from '../App';
 import { toast } from '../lib/toast';
+import { rememberProject, forgetProject } from '../lib/projectListState';
 import type { Project, ProjectConfig } from '../types/project';
 
 export const ProjectEditPage: React.FC = () => {
@@ -70,13 +71,14 @@ export const ProjectEditPage: React.FC = () => {
 
     try {
       setSaving(true);
-      await projectApi.update(
+      const updated = await projectApi.update(
         project.id,
         project.is_default ? undefined : name,
         project.is_default ? undefined : workingDirectory,
         config,
         isPinned
       );
+      rememberProject(updated);
       // Persist as last-used so the next "新建项目" pre-fills with this choice.
       presetsApi.setLastUsed(config).catch((err) => {
         console.error('Failed to save last_used_config:', err);
@@ -103,6 +105,7 @@ export const ProjectEditPage: React.FC = () => {
 
     try {
       await projectApi.delete(project.id);
+      forgetProject(project.id);
       setShowDeleteConfirm(false);
       navigate('/local');
     } catch (err: any) {
