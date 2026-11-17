@@ -9,6 +9,13 @@ import re
 import shutil
 import tempfile
 import hashlib
+import sys
+
+# Windows pipes otherwise inherit the ANSI locale and cannot emit Chinese JSON.
+if sys.platform == "win32":
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
 
 ROOT = Path(__file__).resolve().parent / "profiles"
 PROFILE_ID = re.compile(r"^[A-Za-z0-9_-]+$")

@@ -136,7 +136,7 @@ class Router:
         cn = config.get("china_routing", {})
         self.enabled = bool(cn.get("enabled", False))
         if self.enabled:
-            for line in (base / cn["domains_file"]).read_text().splitlines():
+            for line in (base / cn["domains_file"]).read_text(encoding="utf-8-sig").splitlines():
                 line = line.strip().lower()
                 if not line or line.startswith("#"):
                     continue
@@ -148,7 +148,7 @@ class Router:
                     self.exact.add(line)
             networks = [
                 ipaddress.ip_network(x.strip(), strict=False)
-                for x in (base / cn["ip_file"]).read_text().splitlines()
+                for x in (base / cn["ip_file"]).read_text(encoding="utf-8-sig").splitlines()
                 if x.strip() and not x.strip().startswith("#")
             ]
             for version in [4, 6]:

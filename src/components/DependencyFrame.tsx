@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useLayoutEffect, useState, useRef } from 'react';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { api } from '../api';
 import { toast } from '../lib/toast';
@@ -11,6 +11,8 @@ const SKILL_MARKET_URL = 'http://uat.aiep.weoa.com/#/assets/plugin?microPath=/as
 // 单项检测最长等待时间。后端虽已加超时，这里再兜一层：任何一项卡住都不会
 // 让整个面板永远停在"检测中"。超时按失败处理（resolve null），不影响其他项。
 const CHECK_TIMEOUT_MS = 20000;
+// Keep the header height stable when returning from a project editor.
+let lastExpanded = false;
 function withTimeout<T>(p: Promise<T>): Promise<T | null> {
   return Promise.race([
     p,
@@ -32,7 +34,8 @@ export const DependencyFrame: React.FC<DependencyFrameProps> = ({ projects = [],
     skill_market: { status: null, loading: false },
   });
   const [checking, setChecking] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(lastExpanded);
+  useLayoutEffect(() => { lastExpanded = expanded; }, [expanded]);
   const [showCcConfig, setShowCcConfig] = useState(false);
   const hasChecked = useRef(false);
   const manualActionInFlight = useRef(false);

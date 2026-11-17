@@ -63,7 +63,9 @@ async def socket_open(ip, port, interface="", tls_host=None):
             )
             s.setsockopt(level, opt, socket.if_nametoindex(interface))
         await asyncio.wait_for(
-            asyncio.get_running_loop().sock_connect(s, (ip, port)), 12
+            asyncio.get_running_loop().sock_connect(
+                s, (ip, port, 0, 0) if addr.version == 6 else (ip, port)
+            ), 12
         )
         kw = {"sock": s}
         if tls_host:

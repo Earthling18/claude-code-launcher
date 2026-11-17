@@ -374,7 +374,7 @@ def main(profile="default", open_browser=True, start_resident=False, port=0):
     except (BlockingIOError, PermissionError):
         # Reopen this installation's existing manager, never start a second one.
         import http.client
-        data = json.loads((profiles.ROOT / ".manager.json").read_text())
+        data = json.loads((profiles.ROOT / ".manager.json").read_text(encoding="utf-8-sig"))
         address = urllib.parse.urlsplit(data["origin"])
         if address.scheme != "http" or address.hostname != "127.0.0.1" or not address.port:
             raise ValueError("管理页地址无效")
@@ -416,7 +416,7 @@ def attach(profile, args):
     import subprocess
     import sys
     import runner
-    data = json.loads((profiles.ROOT / ".manager.json").read_text())
+    data = json.loads((profiles.ROOT / ".manager.json").read_text(encoding="utf-8-sig"))
     address = urllib.parse.urlsplit(data["origin"])
     if address.scheme != "http" or address.hostname != "127.0.0.1" or not address.port:
         raise ValueError("管理页地址无效")

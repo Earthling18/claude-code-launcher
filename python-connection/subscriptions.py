@@ -110,7 +110,7 @@ def store_path():return profiles.ROOT/'.subscriptions.json'
 
 def catalog():
     p=store_path()
-    return json.loads(p.read_text()) if p.exists() else {'version':1,'sources':{}}
+    return json.loads(p.read_text(encoding="utf-8-sig")) if p.exists() else {'version':1,'sources':{}}
 
 def view():
     result=[]

@@ -106,7 +106,7 @@ class DesktopSession:
                 path.chmod(0o700)
             owner = base / "owner.json"
             if owner.exists():
-                previous = json.loads(owner.read_text())
+                previous = json.loads(owner.read_text(encoding="utf-8-sig"))
                 pid = previous.get("pid")
                 if type(pid) is not int or pid <= 0:
                     raise ValueError("DESKTOP_OWNER_INVALID")
@@ -120,7 +120,7 @@ class DesktopSession:
             source = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))) / "auth.json"
             target = home / "auth.json"
             if mode == "isolated" and not target.exists() and source.is_file() and source.stat().st_size <= 1024 * 1024:
-                profiles.atomic_json(target, json.loads(source.read_text()))
+                profiles.atomic_json(target, json.loads(source.read_text(encoding="utf-8-sig")))
             config = home / "config.toml"
             if mode == "isolated" and not config.exists():
                 with config.open("x", encoding="utf-8") as stream:
