@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import time
 import urllib.request
+import urllib.error
 
 if os.name != 'nt' or os.environ.get('GITHUB_ACTIONS') != 'true':
     raise SystemExit('Run only on a disposable Windows GitHub Actions runner')
@@ -28,7 +29,11 @@ session=None
 def request(method,path,data=None):
     raw=json.dumps(data).encode() if data is not None else None
     req=urllib.request.Request('http://127.0.0.1:4444'+path,data=raw,method=method,headers={'Content-Type':'application/json'})
-    with urllib.request.urlopen(req,timeout=90) as response:value=json.load(response)['value']
+    try:
+        with urllib.request.urlopen(req,timeout=90) as response:value=json.load(response)['value']
+    except urllib.error.HTTPError as error:
+        detail=error.read().decode('utf-8',errors='replace')
+        raise RuntimeError(f'WebDriver {method} {path}: {detail}') from error
     if isinstance(value,dict) and 'error' in value:raise RuntimeError(value)
     return value
 
